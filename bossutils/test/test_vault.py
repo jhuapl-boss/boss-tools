@@ -41,3 +41,10 @@ class TestVaultClient(unittest.TestCase):
         v = Vault(self.cfg)
         with self.assertRaises(Exception):
             v.read('secrets', 'super')
+
+    def test_exception_if_key_dosent_exist(self, mockClient):
+        instance = mockClient.return_value
+        instance.read.return_value = { "data": {} }
+        v = Vault(self.cfg)
+        with self.assertRaises(Exception):
+            v.read('secrets', 'super')
