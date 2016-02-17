@@ -31,10 +31,10 @@ def execute(cmd):
     # be executed by this.
     stdout, stderr = proc.communicate()
     if stdout:
-        for line in stdout.split("\n"):
+        for line in stdout.split(b"\n"):
             log.debug("STDOUT: {}".format(line))
     if stderr:
-        for line in stderr.split("\n"):
+        for line in stderr.split(b"\n"):
             log.debug("STDERR: {}".format(line))
 
 def proc_name():
