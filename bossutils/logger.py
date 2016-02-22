@@ -20,7 +20,7 @@ class BossLogger:
         fh1 = logging.FileHandler(LOG_FILE)
 
         # Set the default logger level
-        fh1.setLevel(logging.INFO)
+        fh1.setLevel(logging.DEBUG)
         formatter = BossFormatter(FORMATS)
         fh1.setFormatter(formatter)
         self.logger.addHandler(fh1)
