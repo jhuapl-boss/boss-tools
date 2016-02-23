@@ -37,6 +37,8 @@ def execute(cmd):
         for line in stderr.split(b"\n"):
             log.debug("STDERR: {}".format(line))
 
+    return proc.returncode
+
 def proc_name():
     argv = sys.argv[0]
     real = os.path.realpath(argv)
