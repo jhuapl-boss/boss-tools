@@ -4,3 +4,4 @@ from . import configuration
 from . import utils
 from . import vault
 from . import logger
+from . import credentials
