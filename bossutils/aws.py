@@ -14,8 +14,15 @@ import time
 
 
 class Boto3Session:
-
     def __init__(self, _session, _cred_id):
+        """
+        A class to store a boto3 session and credential_id.  This lets the AWS manager automatically renew sessions
+        with stale credentials
+
+        :param _session: a boto3 session
+        :param _cred_id: an integer indicating the credential version
+        :return:
+        """
         # Properties
         self.session = _session
         self.credential_id = _cred_id
@@ -26,18 +33,18 @@ class AWSManager:
     Class to handle AWS boto3 sessions automagically in a thread-safe manner.
 
     AWSManager gets temporary AWS user credentials from vault when instantiated. On creation it spins up a pool of
-    boto3 sessions. The pool size is set to the number of cores on the current server.  This is to match the number of
-    nginx worker threads, which should match the number of cores.
+    boto3 sessions.
+
+    If ['aws_mngr']['num_sessions'] in boss.config is set to "auto", the pool size is set to the number of cores on the
+    current server.  This is in order to match the number of nginx worker threads, which should match the number of
+    cores. Otherwise, set ['aws_mngr']['num_sessions'] to an integer indicating how many sessions to start.
 
     The AWSManager gets configured from the boss.conf file which is stored in the boss-manage repository and installed
-    by the deployment software.  It is located at /etc/boss/boss.config if you need to manually change anything during dev
+    by the deployment software.  It is located at /etc/boss/boss.config
 
     These sessions are accessible via a globally available generator "get_aws_manager()"
 
-    :ivar __sessions: list of boto3 sessions
-    :ivar __redis_server: location of the redis server (typically localhost)
-    :ivar __redis_port: location of the redis server (typically 6379)
-    :ivar __cred_timeout: time in seconds that vault issued AWS creds are valid
+    :ivar region: the AWS region, currently set to us-east-1
     """
 
     def __init__(self):
@@ -62,11 +69,19 @@ class AWSManager:
         self.__update_timer = None
 
     def __del__(self):
+        """
+        Explicitly cancel the update timer if it is running
+        :return:
+        """
         if self.__update_timer:
             self.__update_timer.cancel()
             print("Cleaned up timer")
 
     def __get_credentials(self):
+        """
+        Private method to query vault for AWS credentials
+        :return: None
+        """
         blog = logger.BossLogger()
         blog.info("AWSManager - Requesting a new set of credentials")
 
@@ -86,7 +101,7 @@ class AWSManager:
 
     def __init_sessions(self):
         """
-
+        Private method to initialize the instance by getting credentials and creating a pool of sessions
         :return:
         """
         # Get new credentials
@@ -98,8 +113,8 @@ class AWSManager:
 
     def __refresh_credentials(self):
         """
-
-        :return:
+        Private method to renew the ASW credentials.  Restarts the credential refresh timer.
+        :return: None
         """
         # Get new credentials
         self.__get_credentials()
@@ -111,9 +126,7 @@ class AWSManager:
     def __create_session(self):
         """
         Method to create a new boto3 session and add it to the pool
-
-        :param session_id: Integer of the session token id
-        :return: the token for the added session
+        :return: None
         """
         temp_session = Boto3Session(boto3.session.Session(aws_access_key_id=self.__credentials["access_key"],
                                                           aws_secret_access_key=self.__credentials["secret_key"],
@@ -125,6 +138,10 @@ class AWSManager:
         self.__sessions.put(temp_session)
 
     def start_credential_refresh(self):
+        """
+        Method to start the background credential refresh thread
+        :return:
+        """
         # Create credential refresh timer
         self.__update_timer = threading.Timer(self.__credential_lifespan, self.__refresh_credentials)
         self.__update_timer.start()
@@ -132,12 +149,26 @@ class AWSManager:
         blog.info("AWSManager - Started AWS credential refresh thread")
 
     def stop_credential_refresh(self):
+        """
+        Method to stop the background credential refresh thread
+        :return:
+        """
         if self.__update_timer:
             self.__update_timer.cancel()
             blog = logger.BossLogger()
             blog.info("AWSManager - Stopped AWS credential refresh thread")
 
     def get_session(self):
+        """
+        Method to get a Boto3Session object.
+
+        If session credentials have expired a new session is created.
+
+        If no sessions are available (if a previous consumer of a session didn't return it for some reason, e.g. an
+        exception occurred), a new session is created
+
+        :return: bossutils.aws.Boto3Session
+        """
         temp_session = None
         while True:
             try:
@@ -168,7 +199,7 @@ def _aws_manager():
     Private function that implements a generator to return the global AWSManager instance.
 
     :returns: Global AWSManager instance
-    :rtype:
+    :rtype: bossutils.aws.AWSManager
     """
     yield None
     aws_mngr = AWSManager()
@@ -185,8 +216,8 @@ def get_aws_manager():
     Generator function to access the global AWSManager instance. The instance will initialize on first access (will take
     ~5-15s to get AWS creds).  After initial load, the instance is readily available.
 
-    :returns: Global AWSManager instance
-    :rtype:
+    :returns: The global AWSManager
+    :rtype: bossutils.aws.AWSManager
     """
     aws_mngr = next(_AWS_MNGR_SDFSDNNFJBASFSGW)
     if aws_mngr:
