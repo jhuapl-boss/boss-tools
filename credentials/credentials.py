@@ -57,7 +57,7 @@ class Credentials:
         self.sock.bind(SOCKET_NAME)
         self.sock.listen(SOCKET_BACKLOG)
 
-        os.chmod(SOCKET_NAME, 0o755) # allow non root users to read from it
+        os.chmod(SOCKET_NAME, 0o777) # allow non root users to read/write from it
 
     def sig_handler(self, signum, frame):
         if signal.SIGALRM == signum:
@@ -150,7 +150,7 @@ class Credentials:
         lease_id = self.creds.get("lease_id")
         if lease_id:
             self.log.debug("Renewing credentials")
-            self.creds = self.vault.renew_secret(lease_id)
+            self.vault.renew_secret(lease_id) # should return data, but doesn't
             # what if the creds are stale and need to be recreated?
         else:
             self.log.debug("Getting new credentials")
