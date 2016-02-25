@@ -45,7 +45,11 @@ class Credentials:
         signal.signal(signal.SIGALRM, self.sig_handler)
         signal.signal(EXIT_SIGNAL, self.sig_handler)
 
-        # create socket
+        dirname = os.path.dirname(SOCKET_NAME)
+        if not os.path.isdir(dirname):
+            os.mkdir(dirname)
+            os.chmod(dirname, 0o755)
+
         if os.path.exists(SOCKET_NAME):
             os.remove(SOCKET_NAME)
 
@@ -53,13 +57,14 @@ class Credentials:
         self.sock.bind(SOCKET_NAME)
         self.sock.listen(SOCKET_BACKLOG)
 
+        os.chmod(SOCKET_NAME, 0o755) # allow non root users to read from it
+
     def sig_handler(self, signum, frame):
         if signal.SIGALRM == signum:
             self.renew_or_request()
         elif EXIT_SIGNAL == signum:
             raise InterruptedError() # interrupt socket.accept()
         else:
-            print("Unhandled signal #" + str(signum))
             self.log.debug("Unhandled signal #" + str(signum))
 
     def daemonize(self):
@@ -68,13 +73,16 @@ class Credentials:
         Programming in the UNIX Environment" for details (ISBN 0201563177)
         http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
         """
+
+        self.log.debug("Daemonizing")
+
         try:
                 pid = os.fork()
                 if pid > 0:
                         # exit first parent
                         sys.exit(0)
         except OSError as e:
-                sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
+                self.log.error("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
                 sys.exit(1)
 
         # decouple from parent environment
@@ -89,7 +97,7 @@ class Credentials:
                         # exit from second parent
                         sys.exit(0)
         except OSError as e:
-                sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
+                self.log.error("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
                 sys.exit(1)
 
         # redirect standard file descriptors
@@ -107,18 +115,23 @@ class Credentials:
 
     def run(self):
         self.daemonize()
+
+        # Place hook after daemonizing, as I am unsure
+        # if it will transfer after the two forks
+        bossutils.utils.set_excepthook() # help with catching errors
         self.renew_or_request() # sets alarm timer
 
         try:
+            self.log.debug("Starting main loop")
             while True:
                 conn, addr = self.sock.accept() # blocks for connections
-                print("Connection from {}".format(addr))
 
+                self.log.debug("Handling request")
                 data = json.dumps(self.creds["data"]).encode('utf-8')
                 conn.sendall(data)
                 conn.close()
         except InterruptedError:
-            pass
+            self.log.info("Caught exit signal, shutting down...")
 
         # delete the socket
         self.sock.close()
@@ -136,16 +149,18 @@ class Credentials:
     def renew_or_request(self):
         lease_id = self.creds.get("lease_id")
         if lease_id:
+            self.log.debug("Renewing credentials")
             self.creds = self.vault.renew_secret(lease_id)
             # what if the creds are stale and need to be recreated?
         else:
+            self.log.debug("Getting new credentials")
             creds = self.vault.read_dict(self.aws_path, raw=True)
             time.sleep(15) # wait for the credentials to become concurrent with AWS services
             self.creds = creds
 
-        timeout = self.creds.get("lease_timeout")
-        timeout = int(int(timeout) * 0.85) # wait for 85% of the lease time
-        print("Setting alarm for {} seconds".format(timeout))
+        timeout = self.creds.get("lease_duration")
+        timeout = int(timeout * 0.85) # wait for 85% of the lease time
+        self.log.debug("Setting alarm for {} seconds".format(timeout))
         signal.alarm(timeout)
 
 def start():
