@@ -1,9 +1,9 @@
 import bossutils
 from bossutils.aws import *
 import unittest
+import boto3
 
 
-# TODO: Clean up/make tests better once cred issuing stuff has been clarified and possibly changed
 class TestAWSManager(unittest.TestCase):
 
     def test_creation(self):
@@ -15,27 +15,33 @@ class TestAWSManager(unittest.TestCase):
         assert isinstance(aws_mngr, bossutils.aws.AWSManager)
         session1 = aws_mngr.get_session()
 
-        assert isinstance(session1, bossutils.aws.Boto3Session)
+        assert isinstance(session1, boto3.session.Session)
         session2 = aws_mngr.get_session()
-        assert isinstance(session2, bossutils.aws.Boto3Session)
+        assert isinstance(session2, boto3.session.Session)
         aws_mngr.put_session(session1)
 
     def test_session_created_properly(self):
         aws_mngr = get_aws_manager()
-        boto3 = aws_mngr.get_session()
+        session = aws_mngr.get_session()
         try:
-            assert boto3.session.profile_name == 'default'
+            assert session.profile_name == 'default'
+
+            services = session.get_available_services()
+            assert ('s3' in services) == True
+            assert ('dynamodb' in services) == True
+
         finally:
-            aws_mngr.put_session(boto3)
+            aws_mngr.put_session(session)
 
     def test_session_dynamo(self):
         aws_mngr = get_aws_manager()
-        boto3 = aws_mngr.get_session()
+        session = aws_mngr.get_session()
         try:
-            table = boto3.session.Table('bossmeta')
+            db = session.resource('dynamodb')
+            table = db.Table('bossmeta')
             assert table.table_name == 'bossmeta'
         finally:
-            aws_mngr.put_session(boto3)
+            aws_mngr.put_session(session)
 
 
 
