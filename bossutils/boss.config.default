@@ -7,7 +7,6 @@ url = http://vault:8200
 token =
 
 [aws_mngr]
-cred_lifespan=3600
 num_sessions=auto
 
 [aws]
