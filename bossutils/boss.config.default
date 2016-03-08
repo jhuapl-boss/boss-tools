@@ -11,9 +11,8 @@ num_sessions=auto
 
 [aws]
 db =
+meta-db =
 cache =
 cache-state =
 
-[meta]
-db =
 
