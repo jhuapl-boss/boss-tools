@@ -13,3 +13,7 @@ num_sessions=auto
 db =
 cache =
 cache-state =
+
+[meta]
+db =
+
