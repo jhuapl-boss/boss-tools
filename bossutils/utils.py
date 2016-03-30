@@ -21,7 +21,7 @@ def read_url(url):
 
 def execute(cmd):
     """Execute the given command on the system."""
-    log = logger.BossLogger()
+    log = logger.BossLogger().logger
     log.info("Executing command: {}".format(cmd))
     proc = subprocess.Popen(shlex.split(cmd),
                             stdout = subprocess.PIPE,
@@ -49,7 +49,7 @@ def stop_firstboot():
     execute("/usr/sbin/update-rc.d -f {} remove".format(proc_name()))
 
 def set_excepthook():
-    log = logger.BossLogger()
+    log = logger.BossLogger().logger
     name = proc_name()
 
     def ex_handler(ex_cls, ex, tb):
