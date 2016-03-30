@@ -10,7 +10,7 @@ LOG_FILE = "/var/log/boss/boss.log"
 
 
 class BossLogger:
-	"""Custom logger for Boss.
+    """Custom logger for Boss.
 
     Attributes:
         logger (Logger): Description of attr1.
