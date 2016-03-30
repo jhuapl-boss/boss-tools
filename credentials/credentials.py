@@ -35,7 +35,7 @@ PID_FILE = "/var/run/credentials/pid"
 
 class Credentials:
     def __init__(self):
-        self.log = bossutils.logger.BossLogger()
+        self.log = bossutils.logger.BossLogger().logger
         self.vault = bossutils.vault.Vault()
 
         self.aws_path = "aws/creds/" + self.vault.config["system"]["type"]

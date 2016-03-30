@@ -10,6 +10,16 @@ LOG_FILE = "/var/log/boss/boss.log"
 
 
 class BossLogger:
+	"""Custom logger for Boss.
+
+    Attributes:
+        logger (Logger): Description of attr1.
+
+    Example usage:
+        log = BossLogger().logger
+        logger.info('my log msg')
+    """
+
     def __init__(self):
 
         config_file = resource_filename('bossutils', 'logger.conf')

@@ -11,13 +11,12 @@ except:
 import unittest
 from unittest.mock import patch, call, create_autospec, Mock
 
-@patch(prefix + 'bossutils.logger.BossLogger', autospec = True)
 @patch(prefix + 'bossutils.vault.Vault', autospec = True)
 @patch(prefix + 'os', autospec = True)
 @patch(prefix + 'socket', autospec = True)
 @patch(prefix + 'signal', autospec = True)
 class TestCredentialsService(unittest.TestCase):
-    def test_instantiation_setup(self, mSig, mSock, mOs, mVault, mLogger):
+    def test_instantiation_setup(self, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -47,7 +46,7 @@ class TestCredentialsService(unittest.TestCase):
         sock.listen.assert_called_once_with(credentials.SOCKET_BACKLOG)
 
     @patch(prefix + 'open', create = True)
-    def test_daemonize(self, mOpen, mSig, mSock, mOs, mVault, mLogger):
+    def test_daemonize(self, mOpen, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -68,7 +67,7 @@ class TestCredentialsService(unittest.TestCase):
         assert(mOpen.mock_calls == expected)
 
     @patch(prefix + 'bossutils.utils.set_excepthook', autospec = True)
-    def test_main_loop_request_and_exit(self, mHook, mSig, mSock, mOs, mVault, mLogger):
+    def test_main_loop_request_and_exit(self, mHook, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -103,7 +102,7 @@ class TestCredentialsService(unittest.TestCase):
         expected = [call(credentials.SOCKET_NAME), call(credentials.PID_FILE)]
         assert(mOs.remove.call_args_list == expected)
 
-    def test_renew_credentials(self, mSig, mSock, mOs, mVault, mLogger):
+    def test_renew_credentials(self, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -115,7 +114,7 @@ class TestCredentialsService(unittest.TestCase):
         iVault.renew_secret.assert_called_once_with(True)
 
     @patch(prefix + 'time.sleep', autospec = True)
-    def test_request_credentials(self, mSleep, mSig, mSock, mOs, mVault, mLogger):
+    def test_request_credentials(self, mSleep, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -127,7 +126,7 @@ class TestCredentialsService(unittest.TestCase):
         iVault.read_dict.assert_called_once_with(creds.aws_path, raw=True)
         mSleep.assert_called_once_with(15)
 
-    def testset_renew_alarm(self, mSig, mSock, mOs, mVault, mLogger):
+    def testset_renew_alarm(self, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -138,7 +137,7 @@ class TestCredentialsService(unittest.TestCase):
 
         mSig.alarm.assert_called_once_with(85)
 
-    def test_sig_handler_alarm(self, mSig, mSock, mOs, mVault, mLogger):
+    def test_sig_handler_alarm(self, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
@@ -151,7 +150,7 @@ class TestCredentialsService(unittest.TestCase):
 
         creds.renew_or_request.assert_called_once_with()
 
-    def test_sig_handler_exit_sig(self, mSig, mSock, mOs, mVault, mLogger):
+    def test_sig_handler_exit_sig(self, mSig, mSock, mOs, mVault):
         iVault = mVault.return_value
         iVault.config = {"system":{"type": "test"}}
 
