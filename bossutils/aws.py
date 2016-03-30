@@ -4,7 +4,8 @@
 # Copyright (C) 2016 Johns Hopkins University Applied Physics Laboratory
 # No License - Closed source
 import boto3
-from bossutils import configuration, logger, credentials
+from bossutils import configuration, credentials
+from bossutils.logger import BossLogger
 import multiprocessing
 import queue
 
@@ -50,7 +51,7 @@ class AWSManager:
         Private method to query the credential service for for AWS credentials
         :return: None
         """
-        blog = logger.BossLogger()
+        blog = BossLogger().logger
         blog.info("AWSManager - Getting credentials from service")
 
         # Get credentials
@@ -59,7 +60,7 @@ class AWSManager:
         # Finish updating the class
         if creds:
             self.__credentials = creds
-            blog = logger.BossLogger()
+            blog = BossLogger().logger
             blog.info("AWSManager - Successfully updated AWS credentials")
         else:
             blog.error("AWSManager - Failed to acquire AWS credentials")
@@ -84,8 +85,8 @@ class AWSManager:
         temp_session = boto3.session.Session(aws_access_key_id=self.__credentials["access_key"],
                                              aws_secret_access_key=self.__credentials["secret_key"],
                                              region_name=self.region)
-
-        blog = logger.BossLogger()
+        
+        blog = BossLogger().logger
         blog.info("AWSManager - Created new boto3 session and added to the pool")
         self.__sessions.put(temp_session)
 
@@ -107,7 +108,7 @@ class AWSManager:
 
             except queue.Empty:
                 # No session was available so generate one
-                blog = logger.BossLogger()
+                blog = BossLogger().logger        
                 blog.info("AWSManager - No session was available while trying to execute get_session.  Dynamically creating a new session.")
                 self.__create_session()
 

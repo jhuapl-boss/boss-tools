@@ -25,46 +25,6 @@ class BossLogger:
         fh1.setFormatter(formatter)
         self.logger.addHandler(fh1)
 
-    def info(self, msg):
-        """
-        Log messages with log level info
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.info(msg)
-
-    def debug(self, msg):
-        """
-        Log messages with log level debug
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.debug(msg)
-
-    def warning(self, msg):
-        """
-        Log messages with log level warning
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.warning(msg)
-
-    def error(self, msg):
-        """
-        Log messages with log level error
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.error(msg)
-
-    def critical(self, msg):
-        """
-        Log messages with log level critical
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.critical(msg)
-
     def setLevel(self, level):
         """
         Set the level of the root logger
