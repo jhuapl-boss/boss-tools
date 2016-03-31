@@ -8,10 +8,19 @@ from .formats import *
 
 
 class BossLogger:
+    """Custom logger for Boss.
+
+    Attributes:
+        logger (Logger): A configured python logging.logger instance
+
+    Example usage:
+        log = BossLogger().logger
+        logger.info('my log msg')
+    """
+
     LOG_FILE = "/var/log/boss/boss.log"
 
     def __init__(self, config_file=None):
-
         if not config_file:
             config_file = resource_filename('bossutils', 'logger.conf')
 
@@ -26,46 +35,6 @@ class BossLogger:
         formatter = BossFormatter(FORMATS)
         fh1.setFormatter(formatter)
         self.logger.addHandler(fh1)
-
-    def info(self, msg):
-        """
-        Log messages with log level info
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.info(msg)
-
-    def debug(self, msg):
-        """
-        Log messages with log level debug
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.debug(msg)
-
-    def warning(self, msg):
-        """
-        Log messages with log level warning
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.warning(msg)
-
-    def error(self, msg):
-        """
-        Log messages with log level error
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.error(msg)
-
-    def critical(self, msg):
-        """
-        Log messages with log level critical
-        :param msg: Log Message
-        :return:
-        """
-        self.logger.critical(msg)
 
     def setLevel(self, level):
         """
