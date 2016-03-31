@@ -6,18 +6,20 @@ from pkg_resources import resource_filename
 
 from .formats import *
 
-LOG_FILE = "/var/log/boss/boss.log"
-
 
 class BossLogger:
-    def __init__(self):
+    LOG_FILE = "/var/log/boss/boss.log"
 
-        config_file = resource_filename('bossutils', 'logger.conf')
+    def __init__(self, config_file=None):
+
+        if not config_file:
+            config_file = resource_filename('bossutils', 'logger.conf')
+
         logging.config.fileConfig(config_file)
         self.logger = logging.getLogger('boss')
 
         # Add a default handler to the logger
-        fh1 = logging.FileHandler(LOG_FILE)
+        fh1 = logging.FileHandler(self.LOG_FILE)
 
         # Set the default logger level
         fh1.setLevel(logging.DEBUG)
