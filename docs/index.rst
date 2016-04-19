@@ -1,4 +1,4 @@
-Welcome to boss-manage's documentation!
+Welcome to boss-tools' documentation!
 =======================================
 
 Note that this only documents the Python code used in boss-manage.  It doesn't
