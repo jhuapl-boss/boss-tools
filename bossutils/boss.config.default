@@ -17,4 +17,5 @@ cache-state =
 cache-db=0
 cache-state-db=0
 
-
+[auth]
+OIDC_VERIFY_SSL =
