@@ -34,6 +34,7 @@ class BossConfig:
     config file from CONFIG_FILE."""
     def __init__(self):
         self.config = configparser.ConfigParser()
+        self.config.optionxform = str  # this line perserves the case of the keys.
         self.config.read(CONFIG_FILE)
         
     def __getitem__(self, key):
