@@ -2,6 +2,9 @@
 fqdn =
 type =
 
+[consul]
+cluster =
+
 [vault]
 url = http://vault:8200
 token =
