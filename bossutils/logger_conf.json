@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "root": {
+    "level": "DEBUG",
+    "handlers": ["consoleHandler"]
+  },
+  "loggers": {
+    "boss": {
+      "level": "DEBUG",
+      "handlers": ["consoleHandler", "fileHandler", "criticalHandler"],
+      "qualname": "boss",
+      "propagate": 0
+    }
+  },
+  "handlers": {
+    "consoleHandler": {
+      "class": "logging.StreamHandler",
+      "level": "ERROR",
+      "formatter": "consoleFormatter",
+      "stream":  "ext://sys.stdout"
+    },
+    "fileHandler": {
+      "class": "logging.FileHandler",
+      "level": "DEBUG",
+      "formatter": "bossFormatter",
+      "filename": "./boss.log"
+    },
+    "criticalHandler": {
+      "class": "logging.FileHandler",
+      "level": "ERROR",
+      "formatter": "bossFormatter",
+      "filename": "./critical.log"
+    }
+  },
+  "formatters": {
+    "consoleFormatter": {
+      "format": "Log_level:%(levelname)s , Message:%(message)s"
+    },
+    "bossFormatter": {
+      "()":  "bossutils.logger.bossFormatterFactory"
+    }
+  }
+}

@@ -16,6 +16,7 @@
 
 
 import logging.config
+import json
 from pkg_resources import resource_filename
 
 from .formats import *
@@ -32,23 +33,24 @@ class BossLogger:
         logger.info('my log msg')
     """
 
-    LOG_FILE = "/var/log/boss/boss.log"
 
-    def __init__(self, config_file=None):
-        if not config_file:
-            config_file = resource_filename('bossutils', 'logger.conf')
+    def __init__(self, json_config_file=None):
+        """Constructor.
 
-        logging.config.fileConfig(config_file)
+        Args:
+            json_config_file (optional[string]): A JSON config file to configure the logger.  Defaults to resource_filename('bossutils', 'logger_conf.json').
+
+        Returns:
+            (BossLogger)
+        """
+        if not json_config_file:
+            json_config_file = resource_filename('bossutils', 'logger_conf.json')
+
+        with open(json_config_file) as f:
+            cfgDict = json.load(f)
+        logging.config.dictConfig(cfgDict)
+
         self.logger = logging.getLogger('boss')
-
-        # Add a default handler to the logger
-        fh1 = logging.FileHandler(self.LOG_FILE)
-
-        # Set the default logger level
-        fh1.setLevel(logging.DEBUG)
-        formatter = BossFormatter(FORMATS)
-        fh1.setFormatter(formatter)
-        self.logger.addHandler(fh1)
 
     def setLevel(self, level):
         """
@@ -66,6 +68,14 @@ class BossLogger:
             self.logger.setLevel(logging.INFO)
         elif level.lower() == "critical":
             self.logger.setLevel(logging.CRITICAL)
+
+
+def bossFormatterFactory():
+    """Create a BossFormatter with formats defined in .formats.
+
+    This factory allows use of BossFormatter from config files.
+    """
+    return BossFormatter(FORMATS)
 
 
 class BossFormatter(logging.Formatter):
