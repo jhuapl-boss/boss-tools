@@ -1,0 +1,31 @@
+{
+  "description": "Log config used for AWS lambda functions.",
+  "description2": "Salt will replace logger_conf.json with this file when",
+  "description3": "building the virtualenv.",
+  "version": 1,
+  "root": {
+    "level": "DEBUG",
+    "handlers": ["consoleHandler"]
+  },
+  "loggers": {
+    "boss": {
+      "level": "DEBUG",
+      "handlers": ["consoleHandler"],
+      "qualname": "boss",
+      "propagate": 0
+    }
+  },
+  "handlers": {
+    "consoleHandler": {
+      "class": "logging.StreamHandler",
+      "level": "ERROR",
+      "formatter": "bossFormatter",
+      "stream":  "ext://sys.stdout"
+    }
+  },
+  "formatters": {
+    "bossFormatter": {
+      "()":  "bossutils.logger.bossFormatterFactory"
+    }
+  }
+}
