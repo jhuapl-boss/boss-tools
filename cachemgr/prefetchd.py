@@ -54,7 +54,7 @@ class CacheManager:
         self.running = False
 
 
-    def daemonize(self):
+    def convert_to_demon(self):
         """
         do the UNIX double-fork magic, see Stevens' "Advanced
         Programming in the UNIX Environment" for details (ISBN 0201563177)
@@ -101,7 +101,7 @@ class CacheManager:
             fh.write("{}\n".format(os.getpid()))
 
     def run(self):
-        self.daemonize()
+        self.convert_to_demon()
 
         # Place hook after daemonizing, as I am unsure
         # if it will transfer after the two forks
