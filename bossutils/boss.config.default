@@ -19,6 +19,12 @@ cache =
 cache-state =
 cache-db=0
 cache-state-db=0
+s3-bucket=
+s3-index-table=
 
 [auth]
 OIDC_VERIFY_SSL =
+
+[lambda]
+page_in_function=
+flush_function=
