@@ -23,13 +23,13 @@
       "class": "logging.FileHandler",
       "level": "DEBUG",
       "formatter": "bossFormatter",
-      "filename": "./boss.log"
+      "filename": "/var/log/boss/boss.log"
     },
     "criticalHandler": {
       "class": "logging.FileHandler",
       "level": "ERROR",
       "formatter": "bossFormatter",
-      "filename": "./critical.log"
+      "filename": "/var/log/boss/critical.log"
     }
   },
   "formatters": {
