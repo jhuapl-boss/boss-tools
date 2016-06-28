@@ -19,8 +19,8 @@ import boto3
 import os
 import sys
 
-from bossutils.deploy_lambdas import S3_BUCKET
-from bossutils.deploy_lambdas import create_session
+from lambdautils import S3_BUCKET
+from lambdautils import create_session
 
 def update_cfg(args):
     """Update the configuration (everything but code) of the lambda function.
@@ -91,12 +91,12 @@ def setup_parser():
         default = None,
         help = 'Lambda function description.'),
     parser.add_argument(
-        'name',
-        help = 'Name of function.')
-    parser.add_argument(
-        'handler',
+        '--handler', '-hnd',
         default = None,
         help = 'Name of lambda handler function.')
+    parser.add_argument(
+        'name',
+        help = 'Name of function.')
 
     return parser
 

@@ -19,8 +19,8 @@ import boto3
 import os
 import sys
 
-from bossutils.deploy_lambdas import S3_BUCKET
-from bossutils.deploy_lambdas import create_session
+from lambdautils import S3_BUCKET
+from lambdautils import create_session
 
 def delete_func(args):
     """Delete the lambda function and all of its versions.

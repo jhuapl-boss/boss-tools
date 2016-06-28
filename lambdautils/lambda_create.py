@@ -19,23 +19,27 @@ import boto3
 import os
 import sys
 
-from bossutils.deploy_lambdas import S3_BUCKET
-from bossutils.deploy_lambdas import create_session
+from lambdautils import S3_BUCKET
+from lambdautils import create_session
 
-def update_code(args):
-    """Point the lambda function at new code.
-    """
+def create(args):
     session = create_session(args.aws_credentials)
     client = session.client('lambda')
-    resp = client.update_function_code(
+    resp = client.create_function(
         FunctionName=args.name,
-        S3Bucket = args.bucket,
-        S3Key = args.key)
+        Runtime='python2.7',
+        Role=args.role,
+        Handler=args.handler,
+        Description=args.desc,
+        Code={'S3Bucket': args.bucket, 'S3Key': args.key},
+        Timeout=args.timeout,
+        MemorySize=args.mem,
+        VpcConfig={'SubnetIds': args.vpcsubnets, 'SecurityGroupIds': args.vpcsecgroups})
     print(resp)
 
 def setup_parser():
     parser = argparse.ArgumentParser(
-        description='Script for updating lambda function code.  To supply arguments from a file, provide the filename prepended with an `@`.',
+        description='Script for configuring lambda functions.  To supply arguments from a file, provide the filename prepended with an `@`.',
         fromfile_prefix_chars = '@')
     parser.add_argument(
         '--aws-credentials', '-a',
@@ -44,15 +48,46 @@ def setup_parser():
         type = argparse.FileType('r'),
         help = 'File with credentials for connecting to AWS (default: AWS_CREDENTIALS)')
     parser.add_argument(
+        '--role', '-r',
+        help = 'Role assigned to lambda function.')
+    parser.add_argument(
+        '--timeout', '-t',
+        default = 3,
+        type = int,
+        help = 'Timeout in seconds.')
+    parser.add_argument(
+        '--mem', '-m',
+        default = 128,
+        type = int,
+        help = 'Amount of memory in MB.  Must be a multiple of 64.')
+    parser.add_argument(
         '--bucket', '-b',
         default = S3_BUCKET,
         help = 'Name of S3 bucket containing lambda function.')
+    parser.add_argument(
+        '--vpcsubnets', '-sn',
+        default = [],
+        help = 'List of subnet IDs in the lambda function\'s VPC.')
+    parser.add_argument(
+        '--vpcsecgroups', '-sg',
+        default = [],
+        help = 'List of security group IDs for the lambda function\'s VPC.')
+    parser.add_argument(
+        '--desc', '-d',
+        metavar = 'DESCRIPTION',
+        default = '',
+        help = 'Lambda function description.'),
     parser.add_argument(
         'name',
         help = 'Name of function.')
     parser.add_argument(
         'key',
+        default = None,
         help = 'S3 key that identifies zip containing lambda function.')
+    parser.add_argument(
+        'handler',
+        default = None,
+        help = 'Name of lambda handler function.')
 
     return parser
 
@@ -66,4 +101,4 @@ if __name__ == '__main__':
         print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined.")
         sys.exit(1)
 
-    update_code(args)
+    create(args)
