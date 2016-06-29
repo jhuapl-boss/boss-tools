@@ -36,7 +36,7 @@ import time
 import bossutils
 
 EXIT_SIGNAL = signal.SIGUSR1
-PID_FILE = "/var/run/prefetchd/pid"
+PID_FILE = "/var/run/boss_delayedwrited/pid"
 
 # Some of the code for making a daemon taken from
 # http://stackoverflow.com/questions/1603109/how-to-make-a-python-script-run-like-a-service-or-daemon-in-linux
@@ -44,7 +44,7 @@ PID_FILE = "/var/run/prefetchd/pid"
 # these both reference
 # Stevens' "Advanced Programming in the UNIX Environment"
 
-class CacheManager:
+class DelayedWriteDaemon:
     def __init__(self):
         self.log = bossutils.logger.BossLogger().logger
         #self.vault = bossutils.vault.Vault()
@@ -116,7 +116,7 @@ class CacheManager:
 
 
 def start():
-    CacheManager().run()
+    DelayedWriteDaemon().run()
 
 def stop():
     os.kill(pid, EXIT_SIGNAL)
