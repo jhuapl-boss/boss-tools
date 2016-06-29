@@ -25,7 +25,11 @@ from lambdautils import create_session
 def update_cfg(args):
     """Update the configuration (everything but code) of the lambda function.
     """
-    session = create_session(args.aws_credentials)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
     client = session.client('lambda')
 
     kwargs = { 'FunctionName': args.name, 'Runtime': 'python2.7' }
@@ -104,11 +108,6 @@ def setup_parser():
 if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
-
-    if args.aws_credentials is None:
-        parser.print_usage()
-        print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined.")
-        sys.exit(1)
 
     if ((args.vpcsecgroups is not None and args.vpcsubnets is None)
         or (args.vpcsecgroups is None and args.vpcsubnets is not None)):

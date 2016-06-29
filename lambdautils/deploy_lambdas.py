@@ -105,7 +105,11 @@ if __name__ == '__main__':
         if not zip(args.source_folder, zip_file_abs_path):
             sys.exit(1)
 
-    session = create_session(args.aws_credentials)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
     upload_to_s3(session, args.zip_file, args.bucket)
 
     print('Done.\n')

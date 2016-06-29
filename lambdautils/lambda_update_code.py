@@ -25,7 +25,11 @@ from lambdautils import create_session
 def update_code(args):
     """Point the lambda function at new code.
     """
-    session = create_session(args.aws_credentials)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
     client = session.client('lambda')
     resp = client.update_function_code(
         FunctionName=args.name,
@@ -60,10 +64,5 @@ def setup_parser():
 if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
-
-    if args.aws_credentials is None:
-        parser.print_usage()
-        print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined.")
-        sys.exit(1)
 
     update_code(args)

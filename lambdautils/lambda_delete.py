@@ -25,7 +25,11 @@ from lambdautils import create_session
 def delete_func(args):
     """Delete the lambda function and all of its versions.
     """
-    session = create_session(args.aws_credentials)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
     client = session.client('lambda')
     resp = client.delete_function(FunctionName=args.name)
     print(resp)
@@ -50,10 +54,5 @@ def setup_parser():
 if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
-
-    if args.aws_credentials is None:
-        parser.print_usage()
-        print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined.")
-        sys.exit(1)
 
     delete_func(args)
