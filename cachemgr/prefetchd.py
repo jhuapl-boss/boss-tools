@@ -36,7 +36,7 @@ import time
 import bossutils
 
 EXIT_SIGNAL = signal.SIGUSR1
-PID_FILE = "/var/run/cachemanager/pid"
+PID_FILE = "/var/run/prefetchd/pid"
 
 # Some of the code for making a daemon taken from
 # http://stackoverflow.com/questions/1603109/how-to-make-a-python-script-run-like-a-service-or-daemon-in-linux
@@ -47,7 +47,7 @@ PID_FILE = "/var/run/cachemanager/pid"
 class CacheManager:
     def __init__(self):
         self.log = bossutils.logger.BossLogger().logger
-        self.vault = bossutils.vault.Vault()
+        #self.vault = bossutils.vault.Vault()
 
         # self.aws_path = "aws/creds/" + self.vault.config["system"]["type"]
         # self.creds = {}
@@ -96,6 +96,7 @@ class CacheManager:
         os.dup2(0, 1)
         os.dup2(0, 2)
 
+
         # write pidfile
         with open(PID_FILE, "w+") as fh:
             fh.write("{}\n".format(os.getpid()))
@@ -108,8 +109,8 @@ class CacheManager:
         bossutils.utils.set_excepthook() # help with catching errors
 
         while True:
-            time.sleep(30);
-            self.log("action occured.")
+            time.sleep(30)
+            self.log.error("action occured.")
 
         os.remove(PID_FILE)
 
