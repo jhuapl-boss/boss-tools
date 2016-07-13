@@ -36,7 +36,9 @@ import time
 import bossutils
 
 EXIT_SIGNAL = signal.SIGUSR1
-PID_FILE = "/var/run/boss-delayedwrited/pid"
+PID_DIR = "/var/run/boss-delayedwrited"
+PID_FILE_NAME = "pid"
+PID_FILE = os.path.join(PID_DIR, PID_FILE_NAME)
 
 # Some of the code for making a daemon taken from
 # http://stackoverflow.com/questions/1603109/how-to-make-a-python-script-run-like-a-service-or-daemon-in-linux
@@ -138,6 +140,10 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         print(usage)
         sys.exit(1)
+
+    if not os.path.exists(PID_DIR):
+        os.mkdir(PID_DIR, 0o775)
+        os.chown(PID_DIR, 0, 0)
 
     if os.path.exists(PID_FILE):
         with open(PID_FILE, "r") as fh:
