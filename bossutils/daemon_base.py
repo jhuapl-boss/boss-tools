@@ -36,13 +36,21 @@ import bossutils
 
 EXIT_SIGNAL = signal.SIGUSR1
 
-# Some of the code for making a daemon taken from
+# Some of the code for making a daemon is based on
 # http://stackoverflow.com/questions/1603109/how-to-make-a-python-script-run-like-a-service-or-daemon-in-linux
 # http://code.activestate.com/recipes/278731/
 # these both reference
 # Stevens' "Advanced Programming in the UNIX Environment"
 
 class DaemonBase:
+    """
+    Base Daemon used to create new daemons by subclassing this class.
+    override run() method to perform daemon work
+    subclass  should also contain
+        if __name__ == '__main__':
+            SubClassName("subclass-daemon.pid").main()
+
+    """
     def __init__(self, pid_file_name, pid_dir="/var/run"):
         self.pid_file = os.path.join(pid_dir, pid_file_name)
         self.log = bossutils.logger.BossLogger().logger
@@ -97,11 +105,21 @@ class DaemonBase:
             fh.write("{}\n".format(os.getpid()))
 
     def run(self):
+        """
+        This method should be overridden by the child class daemon to perform some actions.
+        Returns:
+
+        """
         while True:
             time.sleep(30)
             self.log.info("action occured in DaemonBase - run() method should be overridden.")
 
     def start(self):
+        """
+        method called when daemon is started up
+        Returns:
+
+        """
         self.convert_to_demon()
 
         # Place hook after daemonizing, as I am unsure
@@ -112,10 +130,23 @@ class DaemonBase:
         os.remove(self.pid_file)
 
     def stop(self):
+        """
+        method called  when the daemon is stopped
+        Returns:
+
+        """
         os.kill(self.pid, EXIT_SIGNAL)
 
     # from http://stackoverflow.com/questions/568271/how-to-check-if-there-exists-a-process-with-a-given-pid
     def pid_exists(self, pid):
+        """
+        function to test if a process exists
+        Args:
+            pid:
+
+        Returns:
+
+        """
         if pid < 0: return False #NOTE: pid == 0 returns True
         try:
             os.kill(pid, 0)
