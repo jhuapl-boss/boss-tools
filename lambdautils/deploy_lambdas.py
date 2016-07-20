@@ -91,11 +91,6 @@ if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
 
-    if args.aws_credentials is None:
-        parser.print_usage()
-        print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined")
-        sys.exit(1)
-
     cwd = os.getcwd()
 
     # Build an absolute path to the zip file if one not provided.
