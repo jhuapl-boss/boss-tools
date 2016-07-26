@@ -1,13 +1,9 @@
-import json
-import boto3
+#!/usr/bin/env python3.4
+print("in s3_flush_lambda")
+import spdb
+from spdb.spatialdb import state
+print("finished imports")
 
-
-def handler(event, context):
-    for record in event['Records']:
-        msg = json.loads(record['Sns']['Message'])
-
-        action = msg['Event']
-        if action == "autoscaling:TEST_NOTIFICATION":
-            print("Test test, this is a test")
-            return
-
+my_state = state.CacheStateDB({ "cache_state_host": "cache-state.hiderrt1.boss", "cache_state_db": 0 })
+my_state.add_cache_misses(["6","4","3"])
+print("finished.")
