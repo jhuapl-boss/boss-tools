@@ -265,6 +265,34 @@ class KeyCloakClient:
             print ("Cannot verify user")
             return None
 
+    def remove_role_from_user(self, username, rolename, realm):
+        """Remove a mapped role from a user in a specified realm '.
+        Args:
+            bearer_token (str): the bearer token
+        Returns:
+            requests.Response: userinfo endpoint response
+        """
+        # Get the user id
+
+        id = self.get_user_id(username, realm)
+        role = self.get_role_by_name(rolename, realm)
+        roles = []
+        roles.append(role)
+        roles = json.dumps(roles)
+        if id:
+            url = '{}/admin/realms/{}/users/{}/role-mappings/realm'.format(self.url_base, realm, id)
+            print(url)
+            headers = {
+                'Authorization': 'Bearer ' + self.token['access_token'],
+                'Content-Type': 'application/json'
+            }
+            response = requests.delete(url, data=roles, headers=headers, verify=self.https and self.verify_ssl)
+            response.raise_for_status()
+            return response
+        else:
+            print("Cannot verify user")
+            return None
+
     def create_group(self, group_data, realm):
         """Create a new group if it does not exist '.
             Args:
