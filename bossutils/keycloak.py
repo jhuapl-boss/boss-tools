@@ -127,17 +127,31 @@ class KeyCloakClient:
         if bearer_token is None:
             bearer_token = self.token['access_token']
         url = '{}/admin/realms/{}/users'.format(self.url_base, self.realm)
-        #user_data = json.loads(user_data)
-        #print (type(user_data))
-        #user_data["enabled"]=1
-        #print (user_data)
-
         headers = {
             'Authorization': 'Bearer ' + bearer_token
 ,
             'Content-Type': 'application/json'
         }
         response = requests.post(url, data=user_data, headers=headers, verify=self.https and self.verify_ssl)
+        response.raise_for_status()
+        return response
+
+    def reset_password(self, user_name, credentials):
+        """Reset password for a user.
+        Args:
+           user_name (str): Username of the user
+        Returns:
+            requests.Response: userinfo endpoint response
+        """
+        user_id = self.get_user_id(user_name, self.realm)
+
+        url = '{}/admin/realms/{}/users/{}/reset-password'.format(self.url_base, self.realm, user_id)
+        print(url)
+        headers = {
+            'Authorization': 'Bearer ' + self.token['access_token'],
+            'Content-Type': 'application/json'
+        }
+        response = requests.put(url, json=credentials, headers=headers, verify=self.https and self.verify_ssl)
         response.raise_for_status()
         return response
 
