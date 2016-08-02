@@ -7,11 +7,12 @@ print("in s3_flush_lambda")
 import bossutils
 import spdb
 import sys
+import json
 from spdb.spatialdb import state
 print("finished part1 imports")
 
-event = sys.argv[1]
-context = sys.argv[2]
+json_event = sys.argv[1]
+event = json.loads(json_event)
 
 my_state = state.CacheStateDB({ "cache_state_host": event["cache-state"],
                                 "cache_state_db": event["cache-state-db"] })

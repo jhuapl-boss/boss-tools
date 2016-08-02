@@ -15,7 +15,9 @@ def handler(event, context):
         print("No path found for lambda: " + lambda_name)
         exit(2)
 
-    args = ("bin/python3.4", lambda_path, event, context)
+    json_event = json.dumps(event)
+    print("event: " + json_event)
+    args = ("bin/python3.4", lambda_path, json_event)
     popen = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     popen.wait()
     output = popen.stdout.read()
