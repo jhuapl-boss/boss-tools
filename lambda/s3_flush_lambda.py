@@ -1,7 +1,17 @@
 #!/usr/bin/env python3.4
-# This lambda tests that it can read from user-data, and access the cache_state_db
-# then import spdb and access the compiled c_lib
+# This lambda is for s3_flush for the cache
 #
+# It expects to get from events dictionary
+# {
+#   "lambda-name": "s3_flush",
+#   "cache-state": "cache-state.hiderrt1.boss",
+#   "cache-state-db": "0"
+#   "s3-flush-queue": "https://sqs.us-east-1.amazonaws.com/256215146792/S3flushHiderrt1Boss"
+#   "s3-flush-deadletter-queue": "https://sqs.us-east-1.amazonaws.com/256215146792/DeadletterHiderrt1Boss"
+# }
+#
+
+
 
 print("in s3_flush_lambda")
 import bossutils

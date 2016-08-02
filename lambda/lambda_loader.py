@@ -6,7 +6,7 @@ lambda_dictionary = { "s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
                       "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py" }
 
 def handler(event, context):
-    lambda_name = event["lambda_name"]
+    lambda_name = event["lambda-name"]
     if lambda_name is None:
         print("No lambda_name given")
         exit(1)
