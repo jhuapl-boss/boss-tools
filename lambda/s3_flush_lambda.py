@@ -14,8 +14,9 @@ print("finished part1 imports")
 json_event = sys.argv[1]
 event = json.loads(json_event)
 
+
 my_state = state.CacheStateDB({ "cache_state_host": event["cache-state"],
-                                "cache_state_db": event["cache-state-db"] })
+                                "cache_state_db": int(str(event["cache-state-db"])) })
 my_state.add_cache_misses(["6","4","3"])
 print("finished part1")
 
