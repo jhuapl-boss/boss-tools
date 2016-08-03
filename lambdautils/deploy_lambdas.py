@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright 2016 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,12 +16,12 @@
 
 import argparse
 import boto3
-import json
 import os
 import subprocess
 import sys
 
-S3_BUCKET = 'boss-lambda-env'
+from lambdautils import S3_BUCKET
+from lambdautils import create_session
 
 def zip(src_folder, zip_name):
     """Zip all the files and folders in src_folder.
@@ -34,7 +36,7 @@ def zip(src_folder, zip_name):
     Returns:
         (bool): True on success.
     """
-    args = ('/usr/bin/zip', '-r', '-q', zip_name, '.')
+    args = ('/usr/bin/zip', '--symlinks', '-r', '-q', zip_name, '.')
     popen = subprocess.Popen(args, cwd=src_folder, stdout=subprocess.PIPE)
     exit_code = popen.wait()
     output = popen.stdout.read()
@@ -55,26 +57,6 @@ def upload_to_s3(session, zip_file, bucket):
     s3 = session.client('s3')
     s3.create_bucket(Bucket=bucket)
     s3.put_object(Bucket=bucket, Key=key, Body=open(zip_file, 'rb'))
-
-def create_session(cred_fh):
-    """Read AWS credentials from the given file object and create a Boto3 session.
-
-        Note: Currently is hardcoded to connect to Region US-East-1
-
-    Args:
-        cred_fh (file): File object of a JSON formated data with the following keys "aws_access_key" and "aws_secret_key".
-
-    Returns:
-        (Session): Boto3 session.
-    """
-    credentials = json.load(cred_fh)
-
-    session = boto3.Session(
-        aws_access_key_id = credentials["aws_access_key"],
-        aws_secret_access_key = credentials["aws_secret_key"],
-        region_name = 'us-east-1')
-    return session
-
 
 def setup_parser():
     parser = argparse.ArgumentParser(
@@ -109,11 +91,6 @@ if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
 
-    if args.aws_credentials is None:
-        parser.print_usage()
-        print("Error: AWS credentials not provided and AWS_CREDENTIALS is not defined")
-        sys.exit(1)
-
     cwd = os.getcwd()
 
     # Build an absolute path to the zip file if one not provided.
@@ -123,7 +100,11 @@ if __name__ == '__main__':
         if not zip(args.source_folder, zip_file_abs_path):
             sys.exit(1)
 
-    session = create_session(args.aws_credentials)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
     upload_to_s3(session, args.zip_file, args.bucket)
 
     print('Done.\n')

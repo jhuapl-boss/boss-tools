@@ -14,10 +14,32 @@
 # limitations under the License.
 
 import boto3
-from bossutils import configuration, credentials
+from urllib.error import URLError
+from bossutils import configuration, credentials, utils
 from bossutils.logger import BossLogger
 import multiprocessing
 import queue
+
+
+def get_region():
+    """
+    Return the  aws region based on the machine's meta data
+    Returns: aws region
+
+    """
+    try:
+        region = utils.read_url(utils.METADATA_URL + 'placement/availability-zone')[:-1]
+        return region
+    except URLError:
+        return None
+
+def get_session():
+    """
+    Returns a boto3 session with the region set to be the current region
+    Returns:
+
+    """
+    return boto3.session.Session(region_name=get_region())
 
 
 class AWSManager:
