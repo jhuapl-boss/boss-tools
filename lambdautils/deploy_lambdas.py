@@ -19,6 +19,8 @@ import boto3
 import os
 import subprocess
 import sys
+import tempfile
+
 
 from lambdautils import S3_BUCKET
 from lambdautils import create_session
@@ -36,7 +38,9 @@ def zip(src_folder, zip_name):
     Returns:
         (bool): True on success.
     """
-    args = ('/usr/bin/zip', '--symlinks', '-r', '-q', zip_name, '.')
+
+    #args = ('/usr/bin/zip', '--symlinks', '-r', '-q', zip_name, '.')
+    args = ('/usr/bin/zip', '-r', '-q', zip_name, '.')
     popen = subprocess.Popen(args, cwd=src_folder, stdout=subprocess.PIPE)
     exit_code = popen.wait()
     output = popen.stdout.read()
