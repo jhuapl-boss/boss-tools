@@ -24,14 +24,21 @@ import queue
 def get_region():
     """
     Return the  aws region based on the machine's meta data
+
+    If mocking with moto, metadata is not supported and "us-east-1" is always returned
+
     Returns: aws region
 
     """
     try:
         region = utils.read_url(utils.METADATA_URL + 'placement/availability-zone')[:-1]
         return region
+    except NotImplementedError:
+        # If you get here, you are mocking and metadata is not supported.
+        return "us-east-1"
     except URLError:
         return None
+
 
 def get_session():
     """

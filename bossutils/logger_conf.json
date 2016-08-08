@@ -7,7 +7,7 @@
   "loggers": {
     "boss": {
       "level": "DEBUG",
-      "handlers": ["consoleHandler", "fileHandler", "criticalHandler"],
+      "handlers": ["fileHandler", "criticalHandler"],
       "qualname": "boss",
       "propagate": 0
     }
