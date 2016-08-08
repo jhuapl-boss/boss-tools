@@ -27,7 +27,7 @@ sp = SpatialDB(event['kv_config'],
 object_key = event['object_key']
 page_in_channel = event['page_in_channel']
 
-exist_keys, missing_keys = state.objectio.cuboids_exist([object_key])
+exist_keys, missing_keys = sp.objectio.cuboids_exist([object_key])
 if exist_keys:
     cube_bytes = sp.objectio.get_single_object(exist_keys[0])
     sp.kvio.put_cubes(exist_keys[0], [cube_bytes])
