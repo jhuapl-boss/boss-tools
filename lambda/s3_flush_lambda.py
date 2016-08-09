@@ -24,9 +24,6 @@
 #
 
 import sys
-
-sys.path = [sys.path[0]] + sys.path[2:]
-
 import json
 import time
 import boto3
