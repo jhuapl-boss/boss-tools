@@ -24,6 +24,9 @@
 #
 
 import sys
+
+sys.path = [sys.path[0]] + sys.path[2:]
+
 import json
 import time
 import boto3
@@ -46,30 +49,45 @@ sp = SpatialDB(event["config"]["kv_config"],
 sqs_client = boto3.client('sqs')
 rx_cnt = 0
 flush_msg_data = None
+rx_handle = ''
 while rx_cnt < 6:
-    flush_msg = sqs_client.receive_message(QueueUrl=event["s3-flush-queue"])
+    flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
     if len(flush_msg["Messages"]) > 0:
-        flush_msg_data = json.loads(flush_msg['Messages'][0])
+        # Get Message
+        flush_msg_data = flush_msg['Messages'][0]
         break
     else:
         rx_cnt += 1
+        print("No message found. Try {} of 6".format(rx_cnt))
         time.sleep(.5 * rx_cnt)
 
 if flush_msg_data:
-    # Got a message. Get key you are flushing
+    # Got a message
+
+    # Get Message Receipt Handle
+    rx_handle = flush_msg_data['ReceiptHandle']
+
+    # Load the message body
+    flush_msg_data = json.loads(flush_msg_data['Body'])
+
+    # Get the write-cuboid key to flush
     write_cuboid_key = flush_msg_data['write_cuboid_key']
+    print("Flushing {} to S3".format(write_cuboid_key))
+
+    # Get the resource
+    resource = flush_msg_data['resource']
 else:
     # Nothing to flush. Exit.
-    sys.exit("no flush message available")
+    sys.exit("No flush message available")
 
 # Check if cuboid is in S3
-object_keys = sp.objectio.cached_cuboid_to_object_keys([write_cuboid_key])
+object_keys = sp.objectio.write_cuboid_to_object_keys([write_cuboid_key])
 exist_keys, missing_keys = sp.objectio.cuboids_exist(object_keys)
 
 if exist_keys:  # Cuboid Exists
     # Create resource instance
     resource = BossResourceBasic()
-    resource.from_json(event["resource"])
+    resource.from_dict(flush_msg_data["resource"])
 
     # Get cuboid to flush from write buffer
     new_cube = sp.get_cubes(resource, write_cuboid_key)[0]
@@ -77,31 +95,32 @@ if exist_keys:  # Cuboid Exists
     # Get existing cuboid from S3
     existing_cube = Cube.create_cube(resource)
     existing_cube.morton_id = new_cube.morton_id
-    existing_cube_bytes = sp.objectio.get_single_object(exist_keys[0])
+    existing_cube_bytes = sp.objectio.get_single_object(object_keys[0])
     existing_cube.from_blosc_numpy(existing_cube_bytes, new_cube.time_range)
 
     # Merge cuboids
     existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
     # Write cuboid to S3
-    sp.objectio.put_objects(exist_keys, existing_cube.to_blosc_numpy())
+    cuboid_bytes = existing_cube.to_blosc_numpy()
+    sp.objectio.put_objects(object_keys, cuboid_bytes)
 
     # Add to S3 Index
-    sp.objectio.add_cuboid_to_index(exist_keys[0])
+    sp.objectio.add_cuboid_to_index(object_keys[0])
 
-    cache_key = sp.kvio.write_cuboid_key_to_cache_key(exist_keys[0])
+    cache_key = sp.kvio.write_cuboid_key_to_cache_key(object_keys[0])
 
 else:  # Cuboid Does Not Exist
     # Get cuboid to flush from write buffer
-    cuboid_bytes = sp.kvio.get_cubes(missing_keys)
+    cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
 
     # Write cuboid to S3
-    sp.objectio.put_objects(missing_keys, cuboid_bytes)
+    sp.objectio.put_objects(object_keys, [cuboid_bytes])
 
     # Add to S3 Index
-    sp.objectio.add_cuboid_to_index(missing_keys[0])
+    sp.objectio.add_cuboid_to_index(object_keys[0])
 
-    cache_key = sp.kvio.write_cuboid_key_to_cache_key(missing_keys[0])
+    cache_key = sp.kvio.write_cuboid_key_to_cache_key(object_keys[0])
 
 
 # Check if cuboid already exists in the cache
@@ -117,5 +136,5 @@ sp.kvio.delete_cube(write_cuboid_key)
 sp.cache_state.remove_from_page_out(write_cuboid_key)
 
 # Delete message since it was processed successfully
-sqs_client.delete_message(QueueUrl=event["s3-flush-queue"],
-                          ReceiptHandle=flush_msg_data["ReceiptHandle"])
+sqs_client.delete_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"],
+                          ReceiptHandle=rx_handle)
