@@ -1,11 +1,13 @@
 import json
-import boto3
 import os
 import subprocess
 LAMBDA_PATH_PREFIX = "local/lib/python3.4/site-packages/lambda/"
-lambda_dictionary = { "s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
-                      "page_in_lambda_function": LAMBDA_PATH_PREFIX + "s3_to_cache.py",
-                      "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py" }
+
+# List of supported Lambda functions
+lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
+                     "page_in_lambda_function": LAMBDA_PATH_PREFIX + "s3_to_cache.py",
+                     "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py"}
+
 
 def handler(event, context):
     lambda_name = event["lambda-name"]
