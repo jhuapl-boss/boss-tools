@@ -26,7 +26,9 @@ def handler(event, context):
     # AWS defines a PYTHONPATH that breaks our Python 3.4 code.  We can't
     # import concurrent.futures, specifically.
     env = os.environ
-    del env['PYTHONPATH']
+    if "PYTHONPATH" in env:
+        del env['PYTHONPATH']
+
     popen = subprocess.Popen(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env)

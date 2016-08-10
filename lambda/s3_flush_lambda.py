@@ -31,6 +31,7 @@ import boto3
 from spdb.spatialdb import SpatialDB
 from spdb.spatialdb import Cube
 from spdb.project import BossResourceBasic
+from spdb.c_lib.ndtype import CUBOIDSIZE
 
 
 # Parse input args passed as a JSON string from the lambda loader
@@ -79,18 +80,28 @@ else:
 
 # Check if cuboid is in S3
 object_keys = sp.objectio.write_cuboid_to_object_keys([write_cuboid_key])
-exist_keys, missing_keys = sp.objectio.cuboids_exist(object_keys)
+cache_key = sp.kvio.write_cuboid_key_to_cache_key(write_cuboid_key)
+exist_keys, missing_keys = sp.objectio.cuboids_exist(cache_key)
+
+print("write key: {}".format(write_cuboid_key))
+print("object key: {}".format(object_keys[0]))
+print("cache key: {}".format(cache_key))
 
 if exist_keys:  # Cuboid Exists
     # Create resource instance
     resource = BossResourceBasic()
     resource.from_dict(flush_msg_data["resource"])
+    cube_dim = CUBOIDSIZE[int(write_cuboid_key.split('&')[4])]
+    morton = int(write_cuboid_key.split('&')[6])
 
     # Get cuboid to flush from write buffer
-    new_cube = sp.get_cubes(resource, write_cuboid_key)[0]
+    write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
+    new_cube = Cube.create_cube(resource, cube_dim)
+    new_cube.morton_id = morton
+    new_cube.from_blosc_numpy(write_cuboid_bytes)
 
     # Get existing cuboid from S3
-    existing_cube = Cube.create_cube(resource)
+    existing_cube = Cube.create_cube(resource, cube_dim)
     existing_cube.morton_id = new_cube.morton_id
     existing_cube_bytes = sp.objectio.get_single_object(object_keys[0])
     existing_cube.from_blosc_numpy(existing_cube_bytes, new_cube.time_range)
@@ -100,12 +111,11 @@ if exist_keys:  # Cuboid Exists
 
     # Write cuboid to S3
     cuboid_bytes = existing_cube.to_blosc_numpy()
-    sp.objectio.put_objects(object_keys, cuboid_bytes)
+    print("write shape: {}".format(existing_cube.data.shape))
+    sp.objectio.put_objects(object_keys, [cuboid_bytes])
 
     # Add to S3 Index
-    sp.objectio.add_cuboid_to_index(object_keys[0])
-
-    cache_key = sp.kvio.write_cuboid_key_to_cache_key(object_keys[0])
+    #sp.objectio.add_cuboid_to_index(object_keys[0])
 
 else:  # Cuboid Does Not Exist
     # Get cuboid to flush from write buffer
@@ -117,12 +127,10 @@ else:  # Cuboid Does Not Exist
     # Add to S3 Index
     sp.objectio.add_cuboid_to_index(object_keys[0])
 
-    cache_key = sp.kvio.write_cuboid_key_to_cache_key(object_keys[0])
-
-
 # Check if cuboid already exists in the cache
 if sp.kvio.cube_exists(cache_key):
     # It exists. Update with latest data.
+    print("CUBOID EXISTS AND UPDATING")
     sp.kvio.put_cubes([cache_key], [cuboid_bytes])
 
 
