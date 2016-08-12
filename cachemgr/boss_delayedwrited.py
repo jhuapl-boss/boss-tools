@@ -28,14 +28,33 @@
 import time
 
 from bossutils import daemon_base
+from bossutils import configuration
+
+#from spatialdb import SpatialDB
 
 
 class DelayedWriteDaemon(daemon_base.DaemonBase):
 
     def run(self):
+        # Setup SPDB instance
+        #config = configuration.BossConfig()
+        #kvio_config = {"cache_host": config['aws']['cache'],
+        #               "cache_db": 0,
+        #               "read_timeout": 86400}
+#
+        #sp = SpatialDB(event["config"]["kv_config"],
+        #               event["config"]["state_config"],
+        #               event["config"]["object_store_config"])
+
         while True:
-            time.sleep(30)
-            self.log.info("action occured in boss-delayedwrited.")
+            # Get All delayed writes
+            #delay_write_keys
+
+
+
+
+            time.sleep(10)
+            self.log.info("action occured in boss-delayedwrite.")
 
 if __name__ == '__main__':
     DelayedWriteDaemon("boss-delayedwrited.pid").main()

@@ -109,30 +109,26 @@ if exist_keys:  # Cuboid Exists
     # Merge cuboids
     existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
-    # Write cuboid to S3
+    # Get bytes
     cuboid_bytes = existing_cube.to_blosc_numpy()
-    print("write shape: {}".format(existing_cube.data.shape))
-    sp.objectio.put_objects(object_keys, [cuboid_bytes])
-
-    # Add to S3 Index
-    #sp.objectio.add_cuboid_to_index(object_keys[0])
 
 else:  # Cuboid Does Not Exist
     # Get cuboid to flush from write buffer
     cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
 
-    # Write cuboid to S3
-    sp.objectio.put_objects(object_keys, [cuboid_bytes])
 
-    # Add to S3 Index
+# Write cuboid to S3
+sp.objectio.put_objects(object_keys, [cuboid_bytes])
+
+# Add to S3 Index
+if not exist_keys:
     sp.objectio.add_cuboid_to_index(object_keys[0])
 
 # Check if cuboid already exists in the cache
 if sp.kvio.cube_exists(cache_key):
     # It exists. Update with latest data.
-    print("CUBOID EXISTS AND UPDATING")
+    print("CUBOID EXISTS IN CACHE - UPDATING")
     sp.kvio.put_cubes([cache_key], [cuboid_bytes])
-
 
 # Delete write-cuboid key
 sp.kvio.delete_cube(write_cuboid_key)
