@@ -72,8 +72,9 @@ if flush_msg_data:
     write_cuboid_key = flush_msg_data['write_cuboid_key']
     print("Flushing {} to S3".format(write_cuboid_key))
 
-    # Get the resource
-    resource = flush_msg_data['resource']
+    # Create resource instance
+    resource = BossResourceBasic()
+    resource.from_dict(flush_msg_data["resource"])
 else:
     # Nothing to flush. Exit.
     sys.exit("No flush message available")
@@ -87,13 +88,12 @@ print("write key: {}".format(write_cuboid_key))
 print("object key: {}".format(object_keys[0]))
 print("cache key: {}".format(cache_key))
 
-if exist_keys:  # Cuboid Exists
-    # Create resource instance
-    resource = BossResourceBasic()
-    resource.from_dict(flush_msg_data["resource"])
-    cube_dim = CUBOIDSIZE[int(write_cuboid_key.split('&')[4])]
-    morton = int(write_cuboid_key.split('&')[6])
+cube_dim = CUBOIDSIZE[int(write_cuboid_key.split('&')[4])]
+morton = int(write_cuboid_key.split('&')[6])
+write_cuboid_keys_to_remove = [write_cuboid_key]
 
+
+if exist_keys:  # Cuboid Exists
     # Get cuboid to flush from write buffer
     write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
     new_cube = Cube.create_cube(resource, cube_dim)
@@ -117,10 +117,36 @@ else:  # Cuboid Does Not Exist
     cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
 
 
+# Check for delayed writes for this cuboid
+delayed_writes = sp.cache_state.get_delayed_writes(sp.cache_state.write_cuboid_key_to_delayed_write_key(write_cuboid_key))
+if delayed_writes:
+    print("Processing Delayed Writes")
+    # Create cube for current data
+    existing_cube = Cube.create_cube(resource, cube_dim)
+    existing_cube.morton_id = morton
+    existing_cube.from_blosc_numpy(cuboid_bytes)
+
+    # Collapse all writes into a single op
+    for key in delayed_writes:
+        print("Delayed Write: {}".format(key))
+        # Track what keys have been flushed
+        write_cuboid_keys_to_remove.append(key)
+        # Get the data from the buffer
+        write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(key)
+        new_cube = Cube.create_cube(resource, cube_dim)
+        new_cube.morton_id = morton
+        new_cube.from_blosc_numpy(write_cuboid_bytes)
+
+        # Merge data
+        existing_cube.overwrite(new_cube.data, existing_cube.time_range)
+
+    # Update bytes to send to s3
+    cuboid_bytes = existing_cube.to_blosc_numpy()
+
 # Write cuboid to S3
 sp.objectio.put_objects(object_keys, [cuboid_bytes])
 
-# Add to S3 Index
+# Add to S3 Index if this is a new cube
 if not exist_keys:
     sp.objectio.add_cuboid_to_index(object_keys[0])
 
@@ -131,7 +157,8 @@ if sp.kvio.cube_exists(cache_key):
     sp.kvio.put_cubes([cache_key], [cuboid_bytes])
 
 # Delete write-cuboid key
-sp.kvio.delete_cube(write_cuboid_key)
+for key in write_cuboid_keys_to_remove:
+    sp.kvio.delete_cube(key)
 
 # Remove page-out entry
 sp.cache_state.remove_from_page_out(write_cuboid_key)
