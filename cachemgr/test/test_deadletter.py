@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import bossutils.configuration as configuration
+import json
+import spdb
 import unittest
 from unittest.mock import patch
-import spdb
-import bossutils.configuration as configuration
 
 # Add a reference to parent so that we can import those files.
 import os
@@ -57,9 +58,9 @@ class TestDeadLetterDaemon(unittest.TestCase):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
         receipt_handle = 'blah'
-        msg = [{"Body": {
+        msg = [{"Body": json.dumps({
                     "write_cuboid_key": key
-                },
+                }),
                 "ReceiptHandle": receipt_handle
         }]
 
@@ -89,9 +90,9 @@ class TestDeadLetterDaemon(unittest.TestCase):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
         receipt_handle = 'blah'
-        msg = [{"Body": {
+        msg = [{"Body": json.dumps({
                     "write_cuboid_key": key
-                },
+                }),
                 "ReceiptHandle": receipt_handle
         }]
 

@@ -25,9 +25,11 @@
 #
 ### END INIT INFO
 
+import json
 import time
 
 from bossutils import daemon_base
+from bossutils.aws import get_region
 from bossutils.configuration import BossConfig
 from spdb.spatialdb import SpatialDB
 import boto3
@@ -39,8 +41,8 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
         self.config = BossConfig()
         self.dead_letter_queue = self.config['aws']['s3-flush-deadletter-queue']
         self.sns_write_locked = self.config['aws']['sns-write-locked']
-        self.sqs_client = boto3.client('sqs')
-        self.sns_client = boto3.client('sns')
+        self.sqs_client = boto3.client('sqs', region_name=get_region())
+        self.sns_client = boto3.client('sns', region_name=get_region())
         self._sp = None
 
     def set_spatialdb(self, sp):
@@ -85,7 +87,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
             QueueUrl=self.dead_letter_queue
         )
         if 'Messages' in resp:
-            handle_messages(resp['Messages'])
+            self.handle_messages(resp['Messages'])
             return True
 
         return False
@@ -108,7 +110,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
                 self.log.error('Got message with no body.')
                 continue
 
-            body = msg['Body']
+            body = json.loads(msg['Body'])
             if 'write_cuboid_key' not in body:
                 self.log.error('Message did not have write_cuboid_key set.')
                 continue
@@ -133,7 +135,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
         Args:
             lookup_key (string): Key that was locked.
         """
-        sns_client.publish(
+        self.sns_client.publish(
             TopicArn=self.sns_write_locked,
             Subject='S3 Write-Locked!',
             Message='Error writing to S3.  This lookup key was just locked: {}'.format(lookup_key)
