@@ -29,6 +29,7 @@ import time
 
 from bossutils import daemon_base
 from bossutils.configuration import BossConfig
+from spdb.spatialdb import SpatialDB
 import boto3
 
 
@@ -37,7 +38,9 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
         super().__init__(pid_file_name, pid_dir)
         self.config = BossConfig()
         self.dead_letter_queue = self.config['aws']['s3-flush-deadletter-queue']
+        self.sns_write_locked = self.config['aws']['sns-write-locked']
         self.sqs_client = boto3.client('sqs')
+        self.sns_client = boto3.client('sns')
         self._sp = None
 
     def set_spatialdb(self, sp):
@@ -45,6 +48,17 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
         self._sp = sp
 
     def run(self):
+        """Main loop."""
+        self.configure()
+
+        while True:
+            self.check_queue()
+            time.sleep(30)
+
+    def configure(self):
+        """Configure spdb instance."""
+        config = self.config
+
         kvio_config = {"cache_host": config['aws']['cache'],
                        "cache_db": config['aws']['cache-state-db'],
                        "read_timeout": 86400}
@@ -61,21 +75,35 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
         sp = SpatialDB(kvio_config, state_config, object_store_config)
         self.set_spatialdb(sp)
 
-        while True:
-            resp = self.sqs_client.receive_message(
-                QueueUrl=self.dead_letter_queue
-            )
-            print(resp)
-            if 'Messages' in resp:
-                handle_messages(resp['Messages'])
+    def check_queue(self):
+        """Check SQS queue and process the message, if any.
 
-            time.sleep(30)
+        Returns:
+            (bool): True if a message was processed.
+        """
+        resp = self.sqs_client.receive_message(
+            QueueUrl=self.dead_letter_queue
+        )
+        if 'Messages' in resp:
+            handle_messages(resp['Messages'])
+            return True
+
+        return False
 
     def handle_messages(self, messages):
+        """Handler for receiving messages from the dead letter queue.
+
+        Args:
+            messages (list): List of messages.  The message should be a failed message from the S3 flush queue.
+        """
         if len(messages) < 1:
             return
 
         for msg in messages:
+            if 'ReceiptHandle' in msg:
+                # Dequeue message so it won't be processed again.
+                self.remove_message_from_queue(msg['ReceiptHandle'])
+
             if 'Body' not in msg:
                 self.log.error('Got message with no body.')
                 continue
@@ -93,14 +121,44 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
                 continue
 
             self._sp.cache_state.set_project_lock(lookup_key, True)
+            self.log.info(
+                'Setting write lock for lookup key: {}'.format(lookup_key))
 
             # Send notification that something is wrong!
             self.send_alert(lookup_key)
 
     def send_alert(self, lookup_key):
-        pass
+        """Publish an alert indicating that a lookup key has been write locked.
+
+        Args:
+            lookup_key (string): Key that was locked.
+        """
+        sns_client.publish(
+            TopicArn=self.sns_write_locked,
+            Subject='S3 Write-Locked!',
+            Message='Error writing to S3.  This lookup key was just locked: {}'.format(lookup_key)
+        )
+
+    def remove_message_from_queue(self, receipt_handle):
+        """Dequeue the message received from SQS.
+
+        Args:
+            receipt_handle (string): This comes from the message response and identifies the message to remove.
+        """
+        self.sqs_client.delete_message(
+            QueueUrl=self.dead_letter_queue,
+            ReceiptHandle=receipt_handle
+        )
 
     def extract_lookup_key(self, write_cuboid_key):
+        """Extract the lookup key from the cuboid key.
+
+        Args:
+            write_cuboid_key (string): Key that failed to write.
+
+        Returns:
+            (string)
+        """
         vals = write_cuboid_key.split("&")
         lookup_key = "{}&{}&{}".format(vals[1], vals[2], vals[3])
         return lookup_key

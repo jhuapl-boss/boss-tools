@@ -36,9 +36,14 @@ class TestDeadLetterDaemon(unittest.TestCase):
         self.dead_letter.handle_messages(msg)
 
     def test_message_missing_body(self):
-        """Make sure message without 'Body' key doesn't cause an error."""
-        msg = [{}]
-        self.dead_letter.handle_messages(msg)
+        """Make sure message without 'Body' key doesn't cause an error and is dequeued."""
+        receipt_handle = 'blah'
+        msg = [{"ReceiptHandle": receipt_handle}]
+        with patch.object(self.dead_letter, 'remove_message_from_queue') as dequeue_fake:
+            self.dead_letter.handle_messages(msg)
+
+            # Ensure message dequeued.
+            dequeue_fake.assert_called_with(receipt_handle)
 
     def test_extract_lookup_key(self):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
@@ -51,9 +56,11 @@ class TestDeadLetterDaemon(unittest.TestCase):
     def test_already_write_locked(self, sp, state):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
+        receipt_handle = 'blah'
         msg = [{"Body": {
-                "write_cuboid_key": key
-            }
+                    "write_cuboid_key": key
+                },
+                "ReceiptHandle": receipt_handle
         }]
 
         # Use mock spatialdb.
@@ -63,24 +70,29 @@ class TestDeadLetterDaemon(unittest.TestCase):
         # Make this key appear to be already write locked.
         state.project_locked.return_value = True
 
-        # Method under test.
-        self.dead_letter.handle_messages(msg)
+        with patch.object(self.dead_letter, 'remove_message_from_queue') as dequeue_fake:
+            # Method under test.
+            self.dead_letter.handle_messages(msg)
 
-        # Ensure write lock checked with proper key.
-        state.project_locked.assert_called_with(lookup_key)
+            # Ensure message dequeued.
+            dequeue_fake.assert_called_with(receipt_handle)
 
-        # Lock status should not be altered if already write locked.
-        state.set_project_lock.assert_not_called()
+            # Ensure write lock checked with proper key.
+            state.project_locked.assert_called_with(lookup_key)
 
-    # @patch.object('boss_deadletterd.DeadLetterDaemon', 'send_alert', autospec=True)
+            # Lock status should not be altered if already write locked.
+            state.set_project_lock.assert_not_called()
+
     @patch('spdb.spatialdb.CacheStateDB', autospec=True)
     @patch('spdb.spatialdb.SpatialDB', autospec=True)
     def test_set_write_locked(self, sp, state):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
+        receipt_handle = 'blah'
         msg = [{"Body": {
-                "write_cuboid_key": key
-            }
+                    "write_cuboid_key": key
+                },
+                "ReceiptHandle": receipt_handle
         }]
 
         # Use mock spatialdb.
@@ -90,15 +102,19 @@ class TestDeadLetterDaemon(unittest.TestCase):
         # Make this key appear to be not write locked.
         state.project_locked.return_value = False
 
-        with patch.object(self.dead_letter, 'send_alert') as send_alert_fake:
-            # Method under test.
-            self.dead_letter.handle_messages(msg)
+        with patch.object(self.dead_letter, 'remove_message_from_queue') as dequeue_fake:
+            with patch.object(self.dead_letter, 'send_alert') as send_alert_fake:
+                # Method under test.
+                self.dead_letter.handle_messages(msg)
 
-            # Ensure write lock checked with proper key.
-            state.project_locked.assert_called_with(lookup_key)
+                # Ensure message dequeued.
+                dequeue_fake.assert_called_with(receipt_handle)
 
-            # Write lock should be set.
-            state.set_project_lock.assert_called_with(lookup_key, True)
+                # Ensure write lock checked with proper key.
+                state.project_locked.assert_called_with(lookup_key)
 
-            # Alert should be sent.
-            send_alert_fake.assert_called_with(lookup_key)
+                # Write lock should be set.
+                state.set_project_lock.assert_called_with(lookup_key, True)
+
+                # Alert should be sent.
+                send_alert_fake.assert_called_with(lookup_key)
