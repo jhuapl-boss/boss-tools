@@ -122,23 +122,35 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
                 # Already write-locked, so nothing to do.
                 continue
 
+            info = ''
+            if 'resource' in body:
+                resource = body['resource']
+                coll = resource['collection']
+                exp = resource['experiment']
+                chan_lyr = resource['channel_layer']
+                info = 'collection: {}, experiment: {}, channel/layer: {}'.format(coll, exp, chan_lyr)
+
             self._sp.cache_state.set_project_lock(lookup_key, True)
             self.log.info(
-                'Setting write lock for lookup key: {}'.format(lookup_key))
+                'Setting write lock for lookup key: {} for {}'.format(lookup_key, info))
 
             # Send notification that something is wrong!
-            self.send_alert(lookup_key)
+            self.send_alert(lookup_key, info)
 
-    def send_alert(self, lookup_key):
+    def send_alert(self, lookup_key, info=None):
         """Publish an alert indicating that a lookup key has been write locked.
 
         Args:
             lookup_key (string): Key that was locked.
+            info (optional[string]): Project info (collection, experiment, etc).
         """
+        if info is None:
+            info = ''
+
         self.sns_client.publish(
             TopicArn=self.sns_write_locked,
             Subject='S3 Write-Locked!',
-            Message='Error writing to S3.  This lookup key was just locked: {}'.format(lookup_key)
+            Message='Error writing to S3.  This lookup key was just locked: {}.  Was trying to write cuboid to: {}'.format(lookup_key, info)
         )
 
     def remove_message_from_queue(self, receipt_handle):

@@ -36,6 +36,9 @@ class TestIntegrationDeadLetterDaemon(unittest.TestCase):
     def test_set_write_locked(self):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
+        # Make sure we're starting unlocked.
+        self.dead_letter._sp.cache_state.set_project_lock(lookup_key, False)
+
         msg = { "write_cuboid_key": key }
         self.dead_letter.sqs_client.send_message(
             QueueUrl=self.dead_letter.dead_letter_queue,
@@ -59,7 +62,8 @@ class TestIntegrationDeadLetterDaemon(unittest.TestCase):
                 self.assertTrue(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
                 # Ensure method that publishes to SNS topic called.
-                send_alert_spy.assert_called_with(lookup_key)
+                no_proj_info = ''
+                send_alert_spy.assert_called_with(lookup_key, no_proj_info)
 
         finally:
             # Make sure write lock is unset before terminating.

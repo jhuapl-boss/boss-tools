@@ -18,7 +18,7 @@ import json
 import numpy as np
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, ANY
 import spdb
 from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
@@ -51,14 +51,19 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
     def test_set_write_locked(self):
         lookup_key = self.data['lookup_key']
+        # Make sure this key isn't currently locked.
+        self.dead_letter._sp.cache_state.set_project_lock(lookup_key, False)
+        self.assertFalse(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
         cube1 = Cube.create_cube(self.resource, [128, 128, 16])
         cube1.data = np.random.randint(1, 254, (1, 16, 128, 128))
+
+        # Ensure that the we are not in a page-out state by wiping the entire
+        # cache state.
+        self.dead_letter._sp.cache_state.status_client.flushdb()
         self.dead_letter._sp.write_cuboid(
             self.resource, (0, 0, 0), 0, cube1.data)
 
-        # Shouldn't have a write lock, yet.
-        self.assertFalse(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
         try:
             with patch.object(
@@ -72,7 +77,7 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
                 self.assertTrue(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
                 # Ensure method that publishes to SNS topic called.
-                send_alert_spy.assert_called_with(lookup_key)
+                send_alert_spy.assert_called_with(lookup_key, ANY)
 
         finally:
             # Make sure write lock is unset before terminating.
