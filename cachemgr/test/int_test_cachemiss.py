@@ -179,8 +179,10 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
 
         self.cache_miss.process()
 
-        # Confirm PRE-FETCH has the cache keys for the cube above and below.
+        # Confirm PRE-FETCH has the object keys for the cube above and below.
         fetch_actual1 = self.sp.cache_state.status_client.lindex('PRE-FETCH', 0)
         fetch_actual2 = self.sp.cache_state.status_client.lindex('PRE-FETCH', 1)
-        self.assertEqual(cube_above_cache_key, str(fetch_actual1, 'utf-8'))
-        self.assertEqual(cube_below_cache_key, str(fetch_actual2, 'utf-8'))
+        obj_keys = self.sp.objectio.cached_cuboid_to_object_keys(
+            [cube_above_cache_key, cube_below_cache_key])
+        self.assertEqual(obj_keys[0], str(fetch_actual1, 'utf-8'))
+        self.assertEqual(obj_keys[1], str(fetch_actual2, 'utf-8'))
