@@ -82,10 +82,10 @@ class CacheMissDaemon(daemon_base.DaemonBase):
         cache_keys = self.compute_prefetch_keys(missed_key)
 
         for cache_key in cache_keys:
-            if not in_s3(cache_key):
+            if not self.in_s3(cache_key):
                 continue
 
-            if in_cache(cache_key):
+            if self.in_cache(cache_key):
                 # The cuboid was paged-in since it showed up in cache-miss.
                 continue
 
@@ -98,7 +98,10 @@ class CacheMissDaemon(daemon_base.DaemonBase):
         Returns:
             (string|None): None if the list is empty.
         """
-        return self._sp.cache_state.state_client.lpop('CACHE-MISS')
+        _bytes = self._sp.cache_state.status_client.lpop('CACHE-MISS') 
+        if _bytes is None:
+            return None
+        return str(_bytes, 'utf-8')
 
     def compute_prefetch_keys(self, missed_key):
         """From the missed key, determine what to prefetch.
@@ -166,7 +169,7 @@ class CacheMissDaemon(daemon_base.DaemonBase):
             cache_key (string): Key identifying cuboid.
         """
         obj_key = self._sp.objectio.cached_cuboid_to_object_keys([cache_key])
-        self._sp.cache_state.state_client.rpush('PRE-FETCH', obj_key[0])
+        self._sp.cache_state.status_client.rpush('PRE-FETCH', obj_key[0])
 
 if __name__ == '__main__':
     CacheMissDaemon("boss-cachemissd.pid").main()

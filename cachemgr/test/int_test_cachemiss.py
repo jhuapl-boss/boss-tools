@@ -102,7 +102,9 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
                             "read_timeout": 86400}
 
         # state settings, 1 is the test DB.
-        self.state_config = {"cache_state_host": self.config['aws']['cache-state'], "cache_state_db": 1}
+        self.state_config = {
+            "cache_state_host": self.config['aws']['cache-state'], 
+            "cache_state_db": 1}
 
         # object store settings
         _, domain = self.config['aws']['cuboid_bucket'].split('.', 1)
@@ -141,9 +143,11 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         self.sp.write_cuboid(self.resource, (0, 0, 16), 0, cube.data)
         self.sp.write_cuboid(self.resource, (0, 0, 32), 0, cube_above.data)
 
-        cube.morton_id = ndlib.XYZMorton([0, 0, 16])
+        cube.morton_id = ndlib.XYZMorton([0, 0, 16 // 16])
         cube_below.morton_id = ndlib.XYZMorton([0, 0, 0])
-        cube_above.morton_id = ndlib.XYZMorton([0, 0, 32])
+        cube_above.morton_id = ndlib.XYZMorton([0, 0, 32 // 16])
+        print('mortons: {}, {}, {}'.format(
+            cube_below.morton_id, cube.morton_id, cube_above.morton_id))
 
         cube_below_cache_key, cube_cache_key, cube_above_cache_key = self.sp.kvio.generate_cached_cuboid_keys(
             self.resource, 0, [0],
@@ -160,17 +164,23 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         # Clear cache so we can get a cache miss.
         self.sp.kvio.cache_client.flushdb()
 
+        # Also clear CACHE-MISS before running testing.
+        self.sp.cache_state.status_client.flushdb()
+
         # Get middle cube again.  This should trigger a cache miss.
         cube_act = self.sp.cutout(self.resource, (0, 0, 16), (128, 128, 16), 0)
 
         # Confirm there is a cache miss.
+        misses = self.sp.cache_state.status_client.lrange('CACHE-MISS', 0, 10)
+        print('misses:')
+        print(misses)
         miss_actual = self.sp.cache_state.status_client.lindex('CACHE-MISS', 0)
-        self.assertEqual(cube_cache_key, miss_actual)
+        self.assertEqual(cube_cache_key, str(miss_actual, 'utf-8'))
 
         self.cache_miss.process()
 
         # Confirm PRE-FETCH has the cache keys for the cube above and below.
-        fetch_actual = self.sp.cache_state.status_client.get('PRE-FETCH')
-        self.assertEqual(
-            [cube_above_cache_key, cube_below_cache_key], fetch_actual)
-
+        fetch_actual1 = self.sp.cache_state.status_client.lindex('PRE-FETCH', 0)
+        fetch_actual2 = self.sp.cache_state.status_client.lindex('PRE-FETCH', 1)
+        self.assertEqual(cube_above_cache_key, str(fetch_actual1, 'utf-8'))
+        self.assertEqual(cube_below_cache_key, str(fetch_actual2, 'utf-8'))
