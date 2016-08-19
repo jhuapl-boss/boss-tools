@@ -13,11 +13,15 @@
 # limitations under the License.
 
 import bossutils.configuration as configuration
-import json
+from botocore.exceptions import ClientError
+import numpy as np
+import redis
 import spdb
 from spdb.c_lib import ndlib
+from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.test.setup import SetupTests
+import time
 import unittest
 from unittest.mock import patch
 
@@ -30,10 +34,53 @@ sys.path.append(parent_dir)
 from boss_cachemissd import CacheMissDaemon
 
 class IntegrationTestCacheMissDaemon(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        """ get_some_resource() is slow, to avoid calling it for each test use setUpClass()
+            and store the result as class variable
+        """
+        cls.setUpParams(cls)
+        try:
+            cls.setup_helper.create_s3_index_table(cls.object_store_config["s3_index_table"])
+        except ClientError:
+            cls.setup_helper.delete_s3_index_table(cls.object_store_config["s3_index_table"])
+            cls.setup_helper.create_s3_index_table(cls.object_store_config["s3_index_table"])
+
+        try:
+            cls.setup_helper.create_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
+        except ClientError:
+            cls.setup_helper.delete_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
+            cls.setup_helper.create_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
+
+        try:
+            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
+        except ClientError:
+            try:
+                cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
+            except:
+                pass
+            time.sleep(61)
+            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.setup_helper.delete_s3_index_table(cls.object_store_config["s3_index_table"])
+        except:
+            pass
+
+        try:
+            cls.setup_helper.delete_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
+        except:
+            pass
+
+        try:
+            cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
+        except:
+            pass
+
 
     def setUp(self):
-        self.setUpParams()
-
         self.cache_miss = CacheMissDaemon('foo')
         self.sp = SpatialDB(
             self.kvio_config, self.state_config, self.object_store_config)
@@ -61,7 +108,7 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         _, domain = self.config['aws']['cuboid_bucket'].split('.', 1)
         self.s3_flush_queue_name = "intTest.S3FlushQueue.{}".format(domain).replace('.', '-')
         self.object_store_config = {
-            "s3_flush_queue": "",
+            "s3_flush_queue": '', # This will get updated after the queue is created.
             "cuboid_bucket": "intTest.{}".format(self.config['aws']['cuboid_bucket']),
             "page_in_lambda_function": self.config['lambda']['page_in_function'],
             "page_out_lambda_function": self.config['lambda']['flush_function'],
@@ -104,25 +151,26 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
 
         # Make sure cuboids saved.
         cube_act = self.sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
-        np.testing.assert_array_equal(cube_below, cube_act)
-        cube_act = self.sp.cutout(self.resource, (0, 0, 1), (128, 128, 16), 0)
-        np.testing.assert_array_equal(cube, cube_act)
-        cube_act = self.sp.cutout(self.resource, (0, 0, 2), (128, 128, 16), 0)
-        np.testing.assert_array_equal(cube_above, cube_act)
+        np.testing.assert_array_equal(cube_below.data, cube_act.data)
+        cube_act = self.sp.cutout(self.resource, (0, 0, 16), (128, 128, 16), 0)
+        np.testing.assert_array_equal(cube.data, cube_act.data)
+        cube_act = self.sp.cutout(self.resource, (0, 0, 32), (128, 128, 16), 0)
+        np.testing.assert_array_equal(cube_above.data, cube_act.data)
 
         # Clear cache so we can get a cache miss.
         self.sp.kvio.cache_client.flushdb()
 
         # Get middle cube again.  This should trigger a cache miss.
-        cube_act = self.sp.cutout(self.resource, (0, 0, 1), (128, 128, 16), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, 16), (128, 128, 16), 0)
 
         # Confirm there is a cache miss.
-        miss_actual = self.sp.kvio.cache_client.lindex('CACHE-MISS', 0)
+        miss_actual = self.sp.cache_state.status_client.lindex('CACHE-MISS', 0)
         self.assertEqual(cube_cache_key, miss_actual)
 
         self.cache_miss.process()
 
         # Confirm PRE-FETCH has the cache keys for the cube above and below.
-        fetch_actual = self.sp.kvio.get('PRE-FETCH')
+        fetch_actual = self.sp.cache_state.status_client.get('PRE-FETCH')
         self.assertEqual(
             [cube_above_cache_key, cube_below_cache_key], fetch_actual)
+

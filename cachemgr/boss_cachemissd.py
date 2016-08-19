@@ -98,7 +98,7 @@ class CacheMissDaemon(daemon_base.DaemonBase):
         Returns:
             (string|None): None if the list is empty.
         """
-        return self._sp.kvio.cache_client.lpop('CACHE-MISS')
+        return self._sp.cache_state.state_client.lpop('CACHE-MISS')
 
     def compute_prefetch_keys(self, missed_key):
         """From the missed key, determine what to prefetch.
@@ -166,7 +166,8 @@ class CacheMissDaemon(daemon_base.DaemonBase):
             cache_key (string): Key identifying cuboid.
         """
         obj_key = self._sp.objectio.cached_cuboid_to_object_keys([cache_key])
-        self._sp.kvio.rpush('PRE-FETCH', obj_key[0])
+        self._sp.cache_state.state_client.rpush('PRE-FETCH', obj_key[0])
 
 if __name__ == '__main__':
     CacheMissDaemon("boss-cachemissd.pid").main()
+
