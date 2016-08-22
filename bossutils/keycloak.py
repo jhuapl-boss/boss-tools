@@ -37,6 +37,9 @@ class KeyCloakClient:
     a set of methods to simplify Keycloak configuration.
     """
 
+    # DP TODO: standardize on all inputs / output being json dictionaries, not encoded strings
+    # DP ???: have all function arguments be **kwargs instead of passing in dictionaries?
+
     # DP TODO: pull realm from vault
     # DP TODO: pull login / logout client id from vault
     def __init__(self, realm, url_base=None, https=True, verify_ssl=True):
@@ -87,7 +90,7 @@ class KeyCloakClient:
         else:
             LOG.info("Could not authenticate to KeyCloak Server")
             self.token = None
-            return None
+            return None # DP TODO: should probably throw an exception, as everywhere else it is assumed that this works
 
         return response
 
@@ -127,12 +130,15 @@ class KeyCloakClient:
         else:
             return False # don't supress the exception
 
+    # DP TODO: figure out if always returning the json data (if it exists) works
+    #          for calls like get_user_id that check the response code....
+
     def _get(self, url_suffix = "", params = None, headers = {}):
         url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
         response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+        response.raise_for_status()
 
         return response
 
@@ -142,7 +148,7 @@ class KeyCloakClient:
         headers['Content-Type'] = 'application/json'
 
         response = requests.post(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+        response.raise_for_status()
 
         return response
 
@@ -152,7 +158,7 @@ class KeyCloakClient:
         headers['Content-Type'] = 'application/json'
 
         response = requests.put(url, headers=headers, json=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+        response.raise_for_status()
 
         return response
 
@@ -161,7 +167,7 @@ class KeyCloakClient:
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
         response = requests.delete(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+        response.raise_for_status()
 
         return response
 
@@ -235,22 +241,6 @@ class KeyCloakClient:
             return response.json()[0]['id']
         else:
             return None
-
-    # DP ???: is this used?
-    def get_all_realms(self):
-        """Retrieve all avilable realm roles from keycloak.
-
-        Returns:
-            requests.Response: userinfo endpoint response
-        """
-        url = '{}/admin/realms/'.format(self.url_base)
-        print(url)
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-        }
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response
 
     def get_realm_roles(self, username):
         """Retrieve all assigned realm roles from keycloak.
@@ -340,6 +330,9 @@ class KeyCloakClient:
 
         return _post(url, group_data).json()
 
+    def delete_group(self, group_name):
+        pass
+
     def get_all_groups(self):
         """Create a new group '.
             Args:
@@ -359,37 +352,8 @@ class KeyCloakClient:
                 return True
         return False
 
-    # DP ???: is this used?
-    def create_realm(self, realm):
-        """Create a new realm based on the JSON based configuration.
+    def map_group_to_user(self, username, groupname):
+        pass
 
-            Note: User must be logged into Keycloak first
-
-        Args:
-            realm (dict) : JSON dictory configuration for the new realm
-        """
-        #
-        url = '{}/admin/realms/'.format(self.url_base)
-
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-            'Content-Type': 'application/json'
-        }
-        response = requests.post(url, data=json.dumps(realm), headers=headers,
-                                 verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response
-
-
-if __name__ == '__main__':
-
-    #kc = KeyCloakClient('master', 'https://auth.manavpj1.theboss.io/auth')
-    kc = KeyCloakClient('master')
-    #    token = kc.login('admin-cli','admin','9AeofIfpZfeuqs90').json()
-    token = kc.login('admin-cli',).json()
-    print(token['access_token'])
-    print(kc.get_userinfo().json())
-    kc.logout()
-
-
-
+    def remove_group_from_user(self, username, groupname):
+        pass
