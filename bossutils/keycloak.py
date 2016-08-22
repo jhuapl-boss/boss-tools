@@ -26,6 +26,9 @@ Author:
 import json
 import requests
 from bossutils.vault import Vault
+from bossutils.logger import BossLogger
+
+LOG = BossLogger().logger
 
 class KeyCloakClient:
     """Client for connecting to Keycloak and using the REST API.
@@ -70,7 +73,7 @@ class KeyCloakClient:
             password = vault.read(self.vault_path, 'password')
             client_id = vault.read(self.vault_path, 'client_id')
 
-        url = '{}/realms/master/protocol/openid-connect/token'.format(self.url_base)
+        url = '{}/realms/master/protocol/openid-connect/token'.format(self.url_base) # DP TODO: read realm from vault
         data = {
             'grant_type': 'password',
             'client_id': client_id,
@@ -82,8 +85,9 @@ class KeyCloakClient:
         if response.status_code == 200:
             self.token = response.json()
         else:
-            print("Could not authenticate to KeyCloak Server")
-            return None 
+            LOG.info("Could not authenticate to KeyCloak Server")
+            self.token = None
+            return None
 
         return response
 
@@ -95,7 +99,8 @@ class KeyCloakClient:
         """
         if self.token is None:
             return
-        token_endpoint = '{}/realms/{}/protocol/openid-connect/logout'.format(self.url_base,"master")
+
+        token_endpoint = '{}/realms/{}/protocol/openid-connect/logout'.format(self.url_base,"master") # DP TODO: read realm from vault
         data = {
             "refresh_token": self.token["refresh_token"],
             "client_id": "admin-cli",
@@ -105,10 +110,13 @@ class KeyCloakClient:
         self.token = None
 
     def __enter__(self):
+        """The start of the context manager, which handles login / logout from Keycloak."""
         self.login()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """The end of the context manager. Log any error when trying to logut and
+        propogate any exception that happened while the context was active."""
         try:
             self.logout()
         except:
@@ -119,15 +127,51 @@ class KeyCloakClient:
         else:
             return False # don't supress the exception
 
-    def get_userdata(self, username):
-        userid = self.get_user_id(username, self.realm)
-        url = "{}/admin/realms/{}/users/{}".format(self.url_base, self.realm, userid)
-        headers = {'Authorization':'Bearer ' + self.token['access_token']}
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
+    def _get(self, url_suffix = "", params = None, headers = {}):
+        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
-    def get_userinfo(self, bearer_token=None):
+        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
+        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+
+        return response
+
+    def _post(self, url_suffix = "", data = None, headers = {}):
+        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        headers['Authorization'] = 'Bearer ' + self.token['access_token']
+        headers['Content-Type'] = 'application/json'
+
+        response = requests.post(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
+        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+
+        return response
+
+    def _put(self, url_suffix = "", data = None, headers = {}):
+        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        headers['Authorization'] = 'Bearer ' + self.token['access_token']
+        headers['Content-Type'] = 'application/json'
+
+        response = requests.put(url, headers=headers, json=data, verify=self.https and self.verify_ssl)
+        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+
+        return response
+
+    def _delete(self, url_suffix = "", data = None, headers = {}):
+        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        headers['Authorization'] = 'Bearer ' + self.token['access_token']
+
+        response = requests.delete(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
+        response.raise_for_status() # DP TODO: Figure out a better way to check for errors that will propogate any errors better
+
+        return response
+
+    def get_userdata(self, username):
+        userid = self.get_user_id(username)
+        url = "users/{}".format(userid)
+
+        return _get(url).json()
+
+    def get_userinfo(self):
         """Retrieve user info corresponding to the bearer_token from the 'userinfo endpoint'.
         Args:
             bearer_token (str): the bearer token
@@ -135,33 +179,21 @@ class KeyCloakClient:
             requests.Response: userinfo endpoint response
         """
 
-        if bearer_token is None:
-            bearer_token= self.token['access_token']
-        url = '{}/realms/{}/protocol/openid-connect/userinfo'.format(self.url_base, self.realm)
-        headers = {
-            'Authorization': 'Bearer ' + bearer_token,
-        }
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response
+        url = 'protocol/openid-connect/userinfo'
 
-    def create_user(self, user_data, bearer_token=None):
+        return _get(url).json()
+
+    def create_user(self, user_data):
         """Create a new user in the '.
         Args:
             bearer_token (str): the bearer token
         Returns:
             requests.Response: userinfo endpoint response
         """
-        if bearer_token is None:
-            bearer_token = self.token['access_token']
-        url = '{}/admin/realms/{}/users'.format(self.url_base, self.realm)
-        headers = {
-            'Authorization': 'Bearer ' + bearer_token,
-            'Content-Type': 'application/json'
-        }
-        response = requests.post(url, data=user_data, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
+
+        url = 'users'
+
+        return _post(url, user_data).json()
 
     def reset_password(self, user_name, credentials):
         """Reset password for a user.
@@ -170,16 +202,10 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-        user_id = self.get_user_id(user_name, self.realm)
+        user_id = self.get_user_id(user_name)
+        url = 'users/{}/reset-password'.format(user_id)
 
-        url = '{}/admin/realms/{}/users/{}/reset-password'.format(self.url_base, self.realm, user_id)
-        print(url)
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-            'Content-Type': 'application/json'
-        }
-        response = requests.put(url, json=credentials, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        _put(url, credentials)
 
     def delete_user(self, user_name):
         """Delete a user from keycloak'.
@@ -188,44 +214,35 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-        userid = self.get_user_id(user_name, self.realm)
-        url = '{}/admin/realms/{}/users/{}'.format(self.url_base, self.realm, userid)
+        userid = self.get_user_id(user_name)
+        url = 'users/{}'.format(userid)
 
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-            'Content-Type': 'application/json'
-        }
-        response = requests.delete(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        _delete(url)
 
-    def get_user_id(self, username, realm):
+    def get_user_id(self, username):
         """Retrieve the user id for the given user.
 
         Returns:
         requests.Response: userinfo endpoint response
         """
-        url = '{}/admin/realms/{}/users'.format(self.url_base, realm)
+        url = 'users'
         params = {
             'username': username
         }
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-        }
-        response = requests.get(url, headers=headers, params=params, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
 
+        response = _get(url, params)
         if response.status_code == 200:
-            user = response.json()[0]
-            return user['id']
+            return response.json()[0]['id']
         else:
             return None
 
+    # DP ???: is this used?
     def get_all_realms(self):
         """Retrieve all avilable realm roles from keycloak.
 
-            Returns:
-                requests.Response: userinfo endpoint response
-            """
+        Returns:
+            requests.Response: userinfo endpoint response
+        """
         url = '{}/admin/realms/'.format(self.url_base)
         print(url)
         headers = {
@@ -238,35 +255,23 @@ class KeyCloakClient:
     def get_realm_roles(self, username):
         """Retrieve all assigned realm roles from keycloak.
 
-            Returns:
-                JSON RoleRepresentation array
-            """
-        id = self.get_user_id(username, self.realm)
-        url = '{}/admin/realms/{}/users/{}/role-mappings/realm'.format(self.url_base, self.realm,id)
-        print (url)
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-        }
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
+        Returns:
+            JSON RoleRepresentation array
+        """
+        id = self.get_user_id(username)
+        url = 'users/{}/role-mappings/realm'.format(id)
 
+        return _get(url).json()
 
-
-    def get_role_by_name(self, rolename, realm):
+    def get_role_by_name(self, rolename):
         """Retrieve the user id for the given user.
 
         Returns:
         requests.Response: userinfo endpoint response
         """
-        url = '{}/admin/realms/{}/roles/{}'.format(self.url_base, realm,rolename)
+        url = 'roles/{}'.format(rolename)
 
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-        }
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-
+        response = _get(url)
         if response.status_code == 200:
             return response.json()
         else:
@@ -279,20 +284,15 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-        # Get the user id
 
-        id = self.get_user_id(username,self.realm)
-        role = self.get_role_by_name(rolename,self.realm)
+        # Get the user id
+        id = self.get_user_id(username)
+        role = self.get_role_by_name(rolename)
         if id is not None and role is not None:
-            url = '{}/admin/realms/{}/users/{}/role-mappings/realm'.format(self.url_base, self.realm, id)
-            headers = {
-                'Authorization': 'Bearer ' + self.token['access_token'],
-                'Content-Type': 'application/json'
-            }
+            url = 'users/{}/role-mappings/realm'.format(id)
             roles = json.dumps([role])
-            response = requests.post(url, data=roles, headers=headers,verify=self.https and self.verify_ssl)
-            response.raise_for_status()
-            return response.json()
+
+            return _post(url, roles).json()
         else:
             if id is None:
                 raise Exception("Cannot locate user {}".format(username))
@@ -306,52 +306,41 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-        # Get the user id
 
-        id = self.get_user_id(username, realm)
-        role = self.get_role_by_name(rolename, realm)
+        # Get the user id
+        id = self.get_user_id(username)
+        role = self.get_role_by_name(rolename)
         if id is not None and role is not None:
-            url = '{}/admin/realms/{}/users/{}/role-mappings/realm'.format(self.url_base, realm, id)
-            headers = {
-                'Authorization': 'Bearer ' + self.token['access_token'],
-                'Content-Type': 'application/json'
-            }
+            url = 'users/{}/role-mappings/realm'.format(id)
             roles = json.dumps([role])
-            response = requests.delete(url, data=roles, headers=headers, verify=self.https and self.verify_ssl)
-            response.raise_for_status()
-            return response
+
+            _delete(url, roles)
         else:
             if id is None:
                 raise Exception("Cannot locate user {}".format(username))
             else:
                 raise Exception("Cannot locate role {}".format(rolename))
 
-    def create_group(self, group_data, realm):
+    def create_group(self, group_data):
         """Create a new group if it does not exist '.
-            Args:
-                bearer_token (str): the bearer token
-            Returns:
-                requests.Response: userinfo endpoint response
-            """
+        Args:
+            bearer_token (str): the bearer token
+        Returns:
+            requests.Response: userinfo endpoint response
+        """
 
+        # DP ???: Why check the existence of a group and not the same for a user?
         # Check if the group exists
         group_name = json.loads(group_data)['name']
-        if self.group_exists(realm, group_name):
-            print ("Group Exists")
+        if self.group_exists(group_name):
+            print ("Group Exists") # DP TODO: Log, raise exception, ???
             return None
 
-        url = '{}/admin/realms/{}/groups'.format(self.url_base, realm)
+        url = 'groups'
 
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-            'Content-Type': 'application/json'
-        }
-        response = requests.post(url, data=group_data, headers=headers,
-                                 verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response
+        return _post(url, group_data).json()
 
-    def get_all_groups(self, realm):
+    def get_all_groups(self):
         """Create a new group '.
             Args:
                 bearer_token (str): the bearer token
@@ -359,26 +348,18 @@ class KeyCloakClient:
                 requests.Response: userinfo endpoint response
             """
 
-        url = '{}/admin/realms/{}/groups'.format(self.url_base, realm)
+        url = 'groups'
 
-        headers = {
-            'Authorization': 'Bearer ' + self.token['access_token'],
-            'Content-Type': 'application/json'
-        }
-        response = requests.get(url, headers=headers,verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        return response.json()
+        return _get(url).json()
 
-    def group_exists(self, realm, group_name):
-
-        groups = self.get_all_groups(realm)
-        print (type(groups))
+    def group_exists(self, group_name):
+        groups = self.get_all_groups()
         for group in groups:
-            print (group['name'])
             if group['name'] == group_name:
                 return True
         return False
 
+    # DP ???: is this used?
     def create_realm(self, realm):
         """Create a new realm based on the JSON based configuration.
 
