@@ -331,7 +331,12 @@ class KeyCloakClient:
         self._post(url, group_data)
 
     def delete_group(self, group_name):
-        pass
+        group_id = self.get_group_id(group_name)
+        if group_id is not None:
+            url = "groups/{}".format(group_id)
+            self._delete(url)
+        else:
+            raise Exception("Cannot locate group {}".format(group_name))
 
     def get_all_groups(self):
         """Create a new group '.
@@ -360,7 +365,25 @@ class KeyCloakClient:
         return False
 
     def map_group_to_user(self, username, groupname):
-        pass
+        user_id = self.get_user_id(username)
+        group_id = self.get_group_id(groupname)
+        if user_id is not None and group_id is not None:
+            url = "users/{}/groups/{}".format(user_id, group_id)
+            self._put(url)
+        else:
+            if user_id is None:
+                raise Exception("Cannot locate user {}".format(username))
+            else:
+                raise Exception("Cannot locate group {}".format(groupname))
 
     def remove_group_from_user(self, username, groupname):
-        pass
+        user_id = self.get_user_id(username)
+        group_id = self.get_group_id(groupname)
+        if user_id is not None and group_id is not None:
+            url = "users/{}/groups/{}".format(user_id, group_id)
+            self._delete(url)
+        else:
+            if user_id is None:
+                raise Exception("Cannot locate user {}".format(username))
+            else:
+                raise Exception("Cannot locate group {}".format(groupname))
