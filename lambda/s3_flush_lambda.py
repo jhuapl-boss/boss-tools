@@ -52,14 +52,14 @@ while run_cnt < 2:
     rx_handle = ''
     while rx_cnt < 6:
         flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
-        if len(flush_msg["Messages"]) > 0:
+        if "Messages" in flush_msg:
             # Get Message
             flush_msg_data = flush_msg['Messages'][0]
             break
         else:
             rx_cnt += 1
             print("No message found. Try {} of 6".format(rx_cnt))
-            time.sleep(.25 * rx_cnt)
+            time.sleep(.25)
 
     if flush_msg_data:
         # Got a message
