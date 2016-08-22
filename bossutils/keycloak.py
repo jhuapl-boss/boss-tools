@@ -58,7 +58,7 @@ class KeyCloakClient:
         self.token = None
         self.https = https
         self.verify_ssl = verify_ssl
-        self.vault_path = "secret/keycloak"
+        self.vault_path = "secret/endpoint/auth"
 
     def login(self, client_id=None, username=None, password=None):
         """Log the user in by Retrieve tokens for the user with the specified username and password.
@@ -74,7 +74,7 @@ class KeyCloakClient:
         if username is None:
             username = vault.read(self.vault_path, 'username')
             password = vault.read(self.vault_path, 'password')
-            client_id = vault.read(self.vault_path, 'client_id')
+            client_id = vault.read(self.vault_path, 'admin_id')
 
         url = '{}/realms/master/protocol/openid-connect/token'.format(self.url_base) # DP TODO: read realm from vault
         data = {
@@ -134,16 +134,16 @@ class KeyCloakClient:
     #          for calls like get_user_id that check the response code....
 
     def _get(self, url_suffix = "", params = None, headers = {}):
-        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
-        response = requests.get(url, headers=headers, verify=self.https and self.verify_ssl)
+        response = requests.get(url, headers=headers, params=params, verify=self.https and self.verify_ssl)
         response.raise_for_status()
 
         return response
 
     def _post(self, url_suffix = "", data = None, headers = {}):
-        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
         headers['Content-Type'] = 'application/json'
 
@@ -153,7 +153,7 @@ class KeyCloakClient:
         return response
 
     def _put(self, url_suffix = "", data = None, headers = {}):
-        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
         headers['Content-Type'] = 'application/json'
 
@@ -163,7 +163,7 @@ class KeyCloakClient:
         return response
 
     def _delete(self, url_suffix = "", data = None, headers = {}):
-        url = "{}/admin/realms/{}/".format(self.url_base, self.realm, url_suffix)
+        url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
         response = requests.delete(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
@@ -175,7 +175,7 @@ class KeyCloakClient:
         userid = self.get_user_id(username)
         url = "users/{}".format(userid)
 
-        return _get(url).json()
+        return self._get(url).json()
 
     def get_userinfo(self):
         """Retrieve user info corresponding to the bearer_token from the 'userinfo endpoint'.
@@ -187,7 +187,7 @@ class KeyCloakClient:
 
         url = 'protocol/openid-connect/userinfo'
 
-        return _get(url).json()
+        return self._get(url).json()
 
     def create_user(self, user_data):
         """Create a new user in the '.
@@ -199,7 +199,7 @@ class KeyCloakClient:
 
         url = 'users'
 
-        return _post(url, user_data).json()
+        self._post(url, user_data)
 
     def reset_password(self, user_name, credentials):
         """Reset password for a user.
@@ -211,7 +211,7 @@ class KeyCloakClient:
         user_id = self.get_user_id(user_name)
         url = 'users/{}/reset-password'.format(user_id)
 
-        _put(url, credentials)
+        self._put(url, credentials)
 
     def delete_user(self, user_name):
         """Delete a user from keycloak'.
@@ -223,7 +223,7 @@ class KeyCloakClient:
         userid = self.get_user_id(user_name)
         url = 'users/{}'.format(userid)
 
-        _delete(url)
+        self._delete(url)
 
     def get_user_id(self, username):
         """Retrieve the user id for the given user.
@@ -236,7 +236,7 @@ class KeyCloakClient:
             'username': username
         }
 
-        response = _get(url, params)
+        response = self._get(url, params)
         if response.status_code == 200:
             return response.json()[0]['id']
         else:
@@ -251,7 +251,7 @@ class KeyCloakClient:
         id = self.get_user_id(username)
         url = 'users/{}/role-mappings/realm'.format(id)
 
-        return _get(url).json()
+        return self._get(url).json()
 
     def get_role_by_name(self, rolename):
         """Retrieve the user id for the given user.
@@ -261,7 +261,7 @@ class KeyCloakClient:
         """
         url = 'roles/{}'.format(rolename)
 
-        response = _get(url)
+        response = self._get(url)
         if response.status_code == 200:
             return response.json()
         else:
@@ -282,7 +282,7 @@ class KeyCloakClient:
             url = 'users/{}/role-mappings/realm'.format(id)
             roles = json.dumps([role])
 
-            return _post(url, roles).json()
+            self._post(url, roles)
         else:
             if id is None:
                 raise Exception("Cannot locate user {}".format(username))
@@ -304,7 +304,7 @@ class KeyCloakClient:
             url = 'users/{}/role-mappings/realm'.format(id)
             roles = json.dumps([role])
 
-            _delete(url, roles)
+            self._delete(url, roles)
         else:
             if id is None:
                 raise Exception("Cannot locate user {}".format(username))
@@ -328,7 +328,7 @@ class KeyCloakClient:
 
         url = 'groups'
 
-        return _post(url, group_data).json()
+        self._post(url, group_data)
 
     def delete_group(self, group_name):
         pass
@@ -343,7 +343,14 @@ class KeyCloakClient:
 
         url = 'groups'
 
-        return _get(url).json()
+        return self._get(url).json()
+
+    def get_group_id(self, group_name):
+        groups = self.get_all_groups()
+        for group in groups:
+            if group['name'] == group_name:
+                return group['id']
+        return None
 
     def group_exists(self, group_name):
         groups = self.get_all_groups()
