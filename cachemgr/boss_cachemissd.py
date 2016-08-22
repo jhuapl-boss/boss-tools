@@ -50,7 +50,7 @@ class CacheMissDaemon(daemon_base.DaemonBase):
 
         while True:
             self.process()
-            time.sleep(30)
+            time.sleep(1)
 
     def configure(self):
         """Configure spdb instance."""
@@ -98,7 +98,7 @@ class CacheMissDaemon(daemon_base.DaemonBase):
         Returns:
             (string|None): None if the list is empty.
         """
-        _bytes = self._sp.cache_state.status_client.lpop('CACHE-MISS') 
+        _bytes = self._sp.cache_state.status_client.lpop('CACHE-MISS')
         if _bytes is None:
             return None
         return str(_bytes, 'utf-8')
@@ -173,4 +173,3 @@ class CacheMissDaemon(daemon_base.DaemonBase):
 
 if __name__ == '__main__':
     CacheMissDaemon("boss-cachemissd.pid").main()
-

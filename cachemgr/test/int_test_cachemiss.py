@@ -33,6 +33,11 @@ parent_dir = os.path.normpath(os.path.join(cur_dir, '..'))
 sys.path.append(parent_dir)
 from boss_cachemissd import CacheMissDaemon
 
+"""
+Test that a cache miss is properly serviced by the code of the cache miss
+daemon.  After popping a miss from the Redis CACHE-MISS, it should add the
+cuboids above and below the missed cuboid to Redis PRE-FETCH.
+"""
 class IntegrationTestCacheMissDaemon(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -103,7 +108,7 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
 
         # state settings, 1 is the test DB.
         self.state_config = {
-            "cache_state_host": self.config['aws']['cache-state'], 
+            "cache_state_host": self.config['aws']['cache-state'],
             "cache_state_db": 1}
 
         # object store settings
@@ -126,26 +131,25 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         client.flushdb()
 
     def test_add_to_prefetch(self):
-        """
-        flush cache
-        request middle cuboid
-        check prefetch queue
-        """
-        cube = Cube.create_cube(self.resource, [128, 128, 16])
-        cube.data = np.random.randint(1, 254, (1, 16, 128, 128))
-        cube_above = Cube.create_cube(self.resource, [128, 128, 16])
-        cube_above.data = np.random.randint(1, 254, (1, 16, 128, 128))
-        cube_below = Cube.create_cube(self.resource, [128, 128, 16])
-        cube_below.data = np.random.randint(1, 254, (1, 16, 128, 128))
+        # Cuboid dimensions in x and y.
+        xy_dim = 128
+        # Cuboid dimensions in z.
+        z_dim = 16
+        cube = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
+        cube.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
+        cube_above = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
+        cube_above.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
+        cube_below = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
+        cube_below.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
 
         # Write 3 cuboids that are stacked vertically.
         self.sp.write_cuboid(self.resource, (0, 0, 0), 0, cube_below.data)
-        self.sp.write_cuboid(self.resource, (0, 0, 16), 0, cube.data)
-        self.sp.write_cuboid(self.resource, (0, 0, 32), 0, cube_above.data)
+        self.sp.write_cuboid(self.resource, (0, 0, z_dim), 0, cube.data)
+        self.sp.write_cuboid(self.resource, (0, 0, z_dim * 2), 0, cube_above.data)
 
-        cube.morton_id = ndlib.XYZMorton([0, 0, 16 // 16])
+        cube.morton_id = ndlib.XYZMorton([0, 0, z_dim // z_dim])
         cube_below.morton_id = ndlib.XYZMorton([0, 0, 0])
-        cube_above.morton_id = ndlib.XYZMorton([0, 0, 32 // 16])
+        cube_above.morton_id = ndlib.XYZMorton([0, 0, z_dim * 2 // z_dim])
         print('mortons: {}, {}, {}'.format(
             cube_below.morton_id, cube.morton_id, cube_above.morton_id))
 
@@ -154,11 +158,11 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
             [cube_below.morton_id, cube.morton_id, cube_above.morton_id])
 
         # Make sure cuboids saved.
-        cube_act = self.sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, 0), (xy_dim, xy_dim, z_dim), 0)
         np.testing.assert_array_equal(cube_below.data, cube_act.data)
-        cube_act = self.sp.cutout(self.resource, (0, 0, 16), (128, 128, 16), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (xy_dim, xy_dim, z_dim), 0)
         np.testing.assert_array_equal(cube.data, cube_act.data)
-        cube_act = self.sp.cutout(self.resource, (0, 0, 32), (128, 128, 16), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim * 2), (xy_dim, xy_dim, z_dim), 0)
         np.testing.assert_array_equal(cube_above.data, cube_act.data)
 
         # Clear cache so we can get a cache miss.
@@ -168,7 +172,7 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         self.sp.cache_state.status_client.flushdb()
 
         # Get middle cube again.  This should trigger a cache miss.
-        cube_act = self.sp.cutout(self.resource, (0, 0, 16), (128, 128, 16), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (xy_dim, xy_dim, z_dim), 0)
 
         # Confirm there is a cache miss.
         misses = self.sp.cache_state.status_client.lrange('CACHE-MISS', 0, 10)
@@ -177,6 +181,7 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         miss_actual = self.sp.cache_state.status_client.lindex('CACHE-MISS', 0)
         self.assertEqual(cube_cache_key, str(miss_actual, 'utf-8'))
 
+        # This is the system under test.
         self.cache_miss.process()
 
         # Confirm PRE-FETCH has the object keys for the cube above and below.
