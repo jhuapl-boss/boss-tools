@@ -58,7 +58,7 @@ class KeyCloakClient:
         self.token = None
         self.https = https
         self.verify_ssl = verify_ssl
-        self.vault_path = "secret/endpoint/auth"
+        self.vault_path = "secret/keycloak"
 
     def login(self, client_id=None, username=None, password=None):
         """Log the user in by Retrieve tokens for the user with the specified username and password.
@@ -74,7 +74,7 @@ class KeyCloakClient:
         if username is None:
             username = vault.read(self.vault_path, 'username')
             password = vault.read(self.vault_path, 'password')
-            client_id = vault.read(self.vault_path, 'admin_id')
+            client_id = vault.read(self.vault_path, 'client_id')
 
         url = '{}/realms/master/protocol/openid-connect/token'.format(self.url_base) # DP TODO: read realm from vault
         data = {
