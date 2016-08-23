@@ -387,3 +387,8 @@ class KeyCloakClient:
                 raise Exception("Cannot locate user {}".format(username))
             else:
                 raise Exception("Cannot locate group {}".format(groupname))
+
+    def get_user_groups(self, username):
+        user_id = self.get_user_id(username)
+        url = 'users/{}/groups'.format(user_id)
+        return self._get(url).json()
