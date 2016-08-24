@@ -13,7 +13,11 @@
 # limitations under the License.
 
 
+import base64
+from bossutils.aws import get_region
 import bossutils.configuration as configuration
+import boto3
+from botocore.exceptions import ClientError
 import json
 import numpy as np
 import time
@@ -24,7 +28,9 @@ from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.error import SpdbError, ErrorCodes
 from spdb.spatialdb.test.setup import SetupTests
-import boto3
+import tempfile
+import warnings
+from zipfile import ZipFile, ZipInfo
 
 # Add a reference to parent so that we can import those files.
 import os
@@ -41,22 +47,135 @@ enough failed deliveries to move the message to the dead letter queue.
 """
 class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
-    def setUp(self):
-        self.dead_letter = DeadLetterDaemon('foo')
-        self.dead_letter.configure()
+    @classmethod
+    def setUpClass(cls):
+        """ get_some_resource() is slow, to avoid calling it for each test use setUpClass()
+            and store the result as class variable
+        """
+
+        # Suppress ResourceWarning messages about unclosed connections.
+        warnings.simplefilter('ignore')
+
+        cls.setUpParams(cls)
+
+        lambda_client = boto3.client('lambda', region_name=get_region())
+        cls.test_lambda = 'IntTest-{}'.format(cls.domain).replace('.', '-')
+        lambda_client.delete_function(FunctionName=cls.test_lambda)   
+        resp = lambda_client.get_function(FunctionName=cls.object_store_config['page_out_lambda_function'])
+        lambda_cfg = resp['Configuration']
+        vpc_cfg = lambda_cfg['VpcConfig']
+        # VpcId is not a valid field when creating a lambda fcn.
+        del vpc_cfg['VpcId']
+
+        temp_file = tempfile.NamedTemporaryFile()
+        temp_name = temp_file.name + '.zip'
+        temp_file.close();
+        with ZipFile(temp_name, mode='w') as zip:
+            t = time.localtime()
+            lambda_file = ZipInfo('lambda_function.py', date_time=(
+                t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec))
+            # Set file permissions.
+            lambda_file.external_attr = 0o777 << 16
+            code = 'def handler(event, context):\n    return\n'
+            zip.writestr(lambda_file, code)
+
+        with open(temp_name, 'rb') as zip2:
+            lambda_bytes = zip2.read()
+
+        lambda_client.create_function(
+            FunctionName=cls.test_lambda,
+            VpcConfig=vpc_cfg,
+            Role=lambda_cfg['Role'],
+            Runtime=lambda_cfg['Runtime'],
+            Handler='lambda_function.handler',
+            MemorySize=128,
+            Code={'ZipFile': lambda_bytes }
+         )
+
+        # Set page out function to the test lambda.
+        cls.object_store_config['page_out_lambda_function'] = cls.test_lambda
+
+        print('standby for queue creation (slow ~30s)')
+        try:
+            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
+        except ClientError:
+            try:
+                cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
+            except:
+                pass
+            time.sleep(61)
+            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
+
+        print('done')
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
+        except:
+            pass
+
+        lambda_client = boto3.client('lambda', region_name=get_region())
+        #lambda_client.delete_function(FunctionName=cls.test_lambda)
+
+    def setUpParams(self):
         self.setup_helper = SetupTests()
+        # Don't use mock Amazon resources.
+        self.setup_helper.mock = False
+
         self.data = self.setup_helper.get_image8_dict()
         self.resource = BossResourceBasic(self.data)
 
+        self.config = configuration.BossConfig()
+
+        # kvio settings, 1 is the test DB.
+        self.kvio_config = {"cache_host": self.config['aws']['cache'],
+                            "cache_db": 1,
+                            "read_timeout": 86400}
+
+        # state settings, 1 is the test DB.
+        self.state_config = {
+            "cache_state_host": self.config['aws']['cache-state'],
+            "cache_state_db": 1}
+
+        # object store settings
+        _, self.domain = self.config['aws']['cuboid_bucket'].split('.', 1)
+        self.s3_flush_queue_name = "intTest.S3FlushQueue.{}".format(self.domain).replace('.', '-')
+        self.object_store_config = {
+            "s3_flush_queue": '', # This will get updated after the queue is created.
+            "cuboid_bucket": "intTest.{}".format(self.config['aws']['cuboid_bucket']),
+            "page_in_lambda_function": self.config['lambda']['page_in_function'],
+            "page_out_lambda_function": self.config['lambda']['flush_function'],
+            "s3_index_table": "intTest.{}".format(self.config['aws']['s3-index-table'])}
+
+    def setUp(self):
+        # Suppress ResourceWarning messages about unclosed connections.
+        warnings.simplefilter('ignore')
+
+        self.dead_letter = DeadLetterDaemon('foo')
+        self.dead_letter.set_spatialdb(SpatialDB(
+            self.kvio_config, self.state_config, self.object_store_config))
+        self.setup_helper = SetupTests()
+        self.data = self.setup_helper.get_image8_dict()
+        self.resource = BossResourceBasic(self.data)
+        # Make the daemon look at the flush queue so we don't need to create
+        # a deadletter queue for testing.
+        self.dead_letter.dead_letter_queue = (
+            self.object_store_config['s3_flush_queue'])
+
 
     def test_set_write_locked(self):
+        # Cuboid dimensions.
+        xy_dim = 128
+        z_dim = 16
+
         lookup_key = self.data['lookup_key']
         # Make sure this key isn't currently locked.
         self.dead_letter._sp.cache_state.set_project_lock(lookup_key, False)
         self.assertFalse(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
-        cube1 = Cube.create_cube(self.resource, [128, 128, 16])
-        cube1.data = np.random.randint(1, 254, (1, 16, 128, 128))
+        cube1 = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
+        cube1.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
 
         # Ensure that the we are not in a page-out state by wiping the entire
         # cache state.
@@ -71,8 +190,10 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
                 ) as send_alert_spy:
 
                 # Method under test.  Returns True if it found a message.
-                while not self.dead_letter.check_queue():
+                i = 0
+                while not self.dead_letter.check_queue() and i < 30:
                     time.sleep(1)
+                    i += 1
 
                 self.assertTrue(self.dead_letter._sp.cache_state.project_locked(lookup_key))
 
