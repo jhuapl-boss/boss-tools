@@ -33,11 +33,15 @@ from bossutils import configuration
 from bossutils import daemon_base
 from bossutils.aws import get_region
 
-
+"""
+Daemon to monitor the S3_Flush SQS Queue.  If the ApproximateNumberOfMessages is not zero and is not changing, this
+daemon will invoke new lambdas to return the ApproximateNumberOfMessages back to zero.
+"""
 
 class SqsWatcherDaemon(daemon_base.DaemonBase):
 
-    def initialize(self):
+    def __init__(self, pid_file_name, pid_dir="/var/run"):
+        super().__init__(pid_file_name, pid_dir)
         self.config = configuration.BossConfig()
 
         # kvio settings
@@ -48,9 +52,8 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
         # state settings
         state_config = {"cache_state_host": self.config['aws']['cache-state'],
                         "cache_state_db": self.config['aws']['cache-state-db']}
+
         # object store settings
-        _, domain = self.config['aws']['cuboid_bucket'].split('.', 1)
-        s3_flush_queue_name = "S3FlushQueue.{}".format(domain).replace('.', '-')
         object_store_config = {"s3_flush_queue": self.config["aws"]["s3-flush-queue"],
                                "cuboid_bucket": self.config['aws']['cuboid_bucket'],
                                "page_in_lambda_function": self.config['lambda']['page_in_function'],
@@ -61,15 +64,15 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
                        "state_config": state_config,
                        "object_store_config": object_store_config}
 
-        lambda_data = {"config": config_data,
-                       "lambda-name": "s3_flush"}
+        self.lambda_data = {"config": config_data,
+                            "lambda-name": "s3_flush"}
 
     def run(self):
         self.initialize()
 
         while True:
             time.sleep(15)
-            client = boto3.client('sqs', region_name="us-east-1")
+            client = boto3.client('sqs', region_name=get_region())
             response = client.get_queue_attributes(
                 QueueUrl=self.config["aws"]["s3-flush-queue"],
                 AttributeNames=[
@@ -81,15 +84,16 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
             self.log.info("boss-sqs-watcherd: checking sqs queue current messages: {}  prvious messages: {}".format(
                 message_num, old_message_num))
 
-            if ((message_num != 0) and (message_num == old_message_num)):
-                client = boto3.client('lambda', region_name=get_region())
-                self.log.info("kicking off lambda")
-                response = client.invoke(
-                    FunctionName=self.config["lambda"]["flush_function"],
-                    InvocationType='Event',
-                    Payload=json.dumps(self.lambda_data).encode())
+            #if ((message_num != 0) and (message_num == old_message_num)):
+            client = boto3.client('lambda', region_name=get_region())
+            self.log.info("kicking off lambda")
+            response = client.invoke(
+                FunctionName=self.config["lambda"]["flush_function"],
+                InvocationType='Event',
+                Payload=json.dumps(self.lambda_data).encode())
 
             self.log.info("sqs_watcherd lambda response: " + str(response))
+
 
 if __name__ == '__main__':
     SqsWatcherDaemon("boss-sqs-watcherd.pid").main()
