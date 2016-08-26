@@ -79,7 +79,7 @@ class PrefetchDaemon(daemon_base.DaemonBase):
         if obj_key is None:
             return
 
-        trigger_page_in_lambda(obj_key)
+        self.trigger_page_in_lambda(obj_key)
 
     def get_object_key(self):
         """Get next object-cuboid key in the PRE-FETCH list.
