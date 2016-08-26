@@ -18,6 +18,7 @@ import numpy as np
 import redis
 import spdb
 from spdb.c_lib import ndlib
+from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.test.setup import SetupTests
@@ -131,16 +132,18 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         client.flushdb()
 
     def test_add_to_prefetch(self):
-        # Cuboid dimensions in x and y.
-        xy_dim = 128
-        # Cuboid dimensions in z.
-        z_dim = 16
-        cube = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
-        cube.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
-        cube_above = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
-        cube_above.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
-        cube_below = Cube.create_cube(self.resource, [xy_dim, xy_dim, z_dim])
-        cube_below.data = np.random.randint(1, 254, (1, z_dim, xy_dim, xy_dim))
+        cuboid_dims = CUBOIDSIZE[0]
+        # Cuboid dimensions.
+        x_dim = cuboid_dims[0]
+        y_dim = cuboid_dims[1]
+        z_dim = cuboid_dims[2]
+
+        cube = Cube.create_cube(self.resource, [x_dim, y_dim, z_dim])
+        cube.data = np.random.randint(1, 254, (1, z_dim, y_dim, x_dim))
+        cube_above = Cube.create_cube(self.resource, [x_dim, y_dim, z_dim])
+        cube_above.data = np.random.randint(1, 254, (1, z_dim, y_dim, x_dim))
+        cube_below = Cube.create_cube(self.resource, [x_dim, y_dim, z_dim])
+        cube_below.data = np.random.randint(1, 254, (1, z_dim, y_dim, x_dim))
 
         # Write 3 cuboids that are stacked vertically.
         self.sp.write_cuboid(self.resource, (0, 0, 0), 0, cube_below.data)
@@ -158,11 +161,11 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
             [cube_below.morton_id, cube.morton_id, cube_above.morton_id])
 
         # Make sure cuboids saved.
-        cube_act = self.sp.cutout(self.resource, (0, 0, 0), (xy_dim, xy_dim, z_dim), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, 0), (x_dim, y_dim, z_dim), 0)
         np.testing.assert_array_equal(cube_below.data, cube_act.data)
-        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (xy_dim, xy_dim, z_dim), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (x_dim, y_dim, z_dim), 0)
         np.testing.assert_array_equal(cube.data, cube_act.data)
-        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim * 2), (xy_dim, xy_dim, z_dim), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim * 2), (x_dim, y_dim, z_dim), 0)
         np.testing.assert_array_equal(cube_above.data, cube_act.data)
 
         # Clear cache so we can get a cache miss.
@@ -172,7 +175,7 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
         self.sp.cache_state.status_client.flushdb()
 
         # Get middle cube again.  This should trigger a cache miss.
-        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (xy_dim, xy_dim, z_dim), 0)
+        cube_act = self.sp.cutout(self.resource, (0, 0, z_dim), (x_dim, y_dim, z_dim), 0)
 
         # Confirm there is a cache miss.
         misses = self.sp.cache_state.status_client.lrange('CACHE-MISS', 0, 10)
