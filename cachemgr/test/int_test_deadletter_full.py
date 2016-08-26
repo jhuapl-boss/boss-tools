@@ -41,9 +41,14 @@ sys.path.append(parent_dir)
 from boss_deadletterd import DeadLetterDaemon
 
 """
-Perform end-to-end test.  Requires the s3 flush lambda to be modified to
-fail.  May need to poll the SQS s3 flush queue via the AWS console to get
-enough failed deliveries to move the message to the dead letter queue.
+Perform end-to-end test of the dead letter daemon.  To simulate getting 
+messages in the dead letter queue, it replaces the s3 flush lambda with an 
+empty lambda function, so messages never leave the flush queue.
+
+To run faster, the test points the dead letter daemon at the flush queue
+INSTEAD of the dead letter queue.  Thus it tests that the message format is
+as expected, but it does not ensure that the flush queue is configured to
+move messages to the dead letter queue after x attempts.
 """
 class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
@@ -158,6 +163,7 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
         self.setup_helper = SetupTests()
         self.data = self.setup_helper.get_image8_dict()
         self.resource = BossResourceBasic(self.data)
+
         # Make the daemon look at the flush queue so we don't need to create
         # a deadletter queue for testing.
         self.dead_letter.dead_letter_queue = (
