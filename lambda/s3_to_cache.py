@@ -30,4 +30,5 @@ page_in_channel = event['page_in_channel']
 cube_bytes = sp.objectio.get_single_object(object_key)
 cache_keys = sp.objectio.object_to_cached_cuboid_keys([object_key])
 sp.kvio.put_cubes(cache_keys[0], [cube_bytes])
-sp.cache_state.notify_page_in_complete(page_in_channel, object_key)
+if page_in_channel is not None:
+    sp.cache_state.notify_page_in_complete(page_in_channel, object_key)
