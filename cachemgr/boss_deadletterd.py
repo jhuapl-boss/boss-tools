@@ -55,7 +55,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
 
         while True:
             self.check_queue()
-            time.sleep(30)
+            time.sleep(5)
 
     def configure(self):
         """Configure spdb instance."""
