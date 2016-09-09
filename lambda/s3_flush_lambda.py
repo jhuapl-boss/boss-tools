@@ -6,8 +6,8 @@
 #   "lambda-name": "s3_flush",
 #   "cache-state": "cache-state.hiderrt1.boss",
 #   "cache-state-db": "0"
-#   "s3-flush-queue": "https://sqs.us-east-1.amazonaws.com/256215146792/S3flushHiderrt1Boss"
-#   "s3-flush-deadletter-queue": "https://sqs.us-east-1.amazonaws.com/256215146792/DeadletterHiderrt1Boss"
+#   "s3-flush-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/S3flushHiderrt1Boss"
+#   "s3-flush-deadletter-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/DeadletterHiderrt1Boss"
 #   "cuboid-bucket": "cuboids.hiderrt1.boss"
 #   "s3-index-table": "s3Index.hiderrt1.boss"
 # }
