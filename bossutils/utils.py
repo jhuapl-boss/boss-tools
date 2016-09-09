@@ -28,6 +28,7 @@ from . import logger
 
 USERDATA_URL = "http://169.254.169.254/latest/user-data"
 METADATA_URL = "http://169.254.169.254/latest/meta-data/"
+DYNAMIC_URL = "http://169.254.169.254/latest/dynamic/"
 
 def read_url(url):
     """Read the data from the given url and return it as a utf-8 string."""

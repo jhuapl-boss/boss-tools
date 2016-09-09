@@ -21,6 +21,7 @@ VAULT_TOKEN_KEY is the config key for the Vault access token
 
 import hvac
 from . import configuration
+from . import utils
 
 VAULT_SECTION = "vault"
 VAULT_URL_KEY = "url"
@@ -43,10 +44,13 @@ class Vault:
         url = self.config[VAULT_SECTION][VAULT_URL_KEY]
         token = self.config[VAULT_SECTION][VAULT_TOKEN_KEY]
 
-        self.client = hvac.Client(url=url, token=token)
-
-        if not self.client.is_authenticated():
-            raise Exception("Could not authenticate to Vault server")
+        self.client = hvac.Client(url=url)
+        if token == "":
+            self.login()
+        else:
+            self.client.token = token
+            if not self.client.is_authenticated():
+                raise Exception("Could not authenticate to Vault server")
 
     def logout(self):
         """Logout and clear the internal state.
@@ -54,6 +58,22 @@ class Vault:
         The object will no longer work after this call."""
         self.client.logout()
         self.client = None
+
+    def login(self):
+        pkcs7 = utils.read_url(utils.DYNAMIC_URL + 'instance-identity/pkcs7').replace('\n', '')
+        role = self.config['system']['type']
+
+        # DP NOTE: Current version of hvac client (0.2.15) does not contain the auth_ec2 method
+        #response = self.client.auth_ec2(pkcs7, role = role)
+        data = {'pkcs7': pkcs7, 'role': role, 'nonce': 'BOSS Vault Client'}
+        response = self.client.auth('/v1/auth/aws-ec2/login', json = data)
+
+        if not self.client.is_authenticated():
+            raise Exception("Could not authenticate with ec2 Vault token")
+
+        self.config[VAULT_SECTION][VAULT_TOKEN_KEY] = response['auth']['client_token']
+        with open(configuration.CONFIG_FILE, "w") as fh:
+            self.config.config.write(fh)
 
     def rotate_token(self):
         """Read a new token from the current cubbyhold and override the token
