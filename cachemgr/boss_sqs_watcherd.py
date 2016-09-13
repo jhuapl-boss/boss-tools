@@ -46,17 +46,15 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
     def __init__(self, pid_file_name, pid_dir="/var/run"):
         super().__init__(pid_file_name, pid_dir)
         self.log = logger.BossLogger().logger
-        self.config = configuration.BossConfig()
 
+        self.config = configuration.BossConfig()
         # kvio settings
         kvio_config = {"cache_host": self.config['aws']['cache'],
                        "cache_db": self.config['aws']['cache-db'],
                        "read_timeout": 86400}
-
         # state settings
         state_config = {"cache_state_host": self.config['aws']['cache-state'],
                         "cache_state_db": self.config['aws']['cache-state-db']}
-
         # object store settings
         object_store_config = {"s3_flush_queue": self.config["aws"]["s3-flush-queue"],
                                "cuboid_bucket": self.config['aws']['cuboid_bucket'],
@@ -67,45 +65,66 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
         config_data = {"kv_config": kvio_config,
                        "state_config": state_config,
                        "object_store_config": object_store_config}
-
         self.lambda_data = {"config": config_data,
                             "lambda-name": "s3_flush"}
 
+        self.sqs_watcher = SqsWatcher(self.lambda_data)
+
     def run(self):
-        old_message_num = 0
-        message_num = 0
+        self.sqs_watcher.loop()
 
 
+class SqsWatcher:
+    def __init__(self, labmda_data):
+        self.labmda_data = labmda_data
+        self.log = logger.BossLogger().logger
+        self.old_message_num = 0
+        self.message_num = 0
+
+    def check_queue_count(self, client):
+        response = client.get_queue_attributes(
+            QueueUrl=self.config["aws"]["s3-flush-queue"],
+            AttributeNames=[
+                'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'
+            ]
+        )
+        https_status_code = response['ResponseMetadata']['HTTPStatusCode']
+        if https_status_code != 200:
+            queue_count = int(response['Attributes']['ApproximateNumberOfMessages'])
+        else:
+            queue_count = None
+        return https_status_code, queue_count
+
+    def verify_queue(self):
+        client = boto3.client('sqs', region_name=get_region())
+        https_status_code, new_message_num = self.check_queue_count(client)
+
+        if new_message_num is None:
+            self.log.error("sqs_watcherd get_queue_attributes failed. Response HTTPSStatusCode: " + str(
+                https_status_code))
+            return
+
+        self.old_message_num = self.message_num
+        self.message_num = new_message_num
+        self.log.debug("boss-sqs-watcherd: checking sqs queue current messages: {}  previous messages: {}".format(
+            self.message_num, self.old_message_num))
+
+        if ((self.message_num != 0) and (self.message_num == self.old_message_num)):
+            client = boto3.client('lambda', region_name=get_region())
+            self.log.info("kicking off lambda")
+            lambdas_to_invoke = min(self.message_num, MAX_LAMBDAS_TO_INVOKE)
+            for i in range(lambdas_to_invoke):
+                response = client.invoke(
+                    FunctionName=self.config["lambda"]["flush_function"],
+                    InvocationType='Event',
+                    Payload=json.dumps(self.lambda_data).encode())
+                if response['ResponseMetadata']['HTTPStatusCode'] != 202:
+                    self.log.error("sqs_watcherd invoke_lambda failed. Response HTTPSStatusCode: " + str(
+                        response['ResponseMetadata']['HTTPStatusCode']))
+
+    def loop(self):
         while True:
-            client = boto3.client('sqs', region_name=get_region())
-            response = client.get_queue_attributes(
-                QueueUrl=self.config["aws"]["s3-flush-queue"],
-                AttributeNames=[
-                    'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'
-                ]
-            )
-            if response['ResponseMetadata']['HTTPStatusCode'] != 200:
-                self.log.error("sqs_watcherd get_queue_attributes failed. Response HTTPSStatusCode: " + str(
-                    response['ResponseMetadata']['HTTPStatusCode']))
-                time.sleep(15)
-                continue
-
-            old_message_num = message_num
-            message_num = int(response['Attributes']['ApproximateNumberOfMessages'])
-            self.log.debug("boss-sqs-watcherd: checking sqs queue current messages: {}  previous messages: {}".format(
-                message_num, old_message_num))
-
-            if ((message_num != 0) and (message_num == old_message_num)):
-                client = boto3.client('lambda', region_name=get_region())
-                self.log.info("kicking off lambda")
-                lambdas_to_invoke = min(message_num, MAX_LAMBDAS_TO_INVOKE)
-                for i in range(lambdas_to_invoke):
-                    response = client.invoke(
-                        FunctionName=self.config["lambda"]["flush_function"],
-                        InvocationType='Event',
-                        Payload=json.dumps(self.lambda_data).encode())
-                    if response['ResponseMetadata']['HTTPStatusCode'] != 202:
-                        self.log.error("sqs_watcherd invoke_lambda failed. Response HTTPSStatusCode: " + str(response['ResponseMetadata']['HTTPStatusCode']))
+            self.verify_queue()
             time.sleep(15)
 
 
