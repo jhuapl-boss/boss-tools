@@ -28,6 +28,7 @@
 import boto3
 import time
 import json
+import pprint
 
 from bossutils import configuration
 from bossutils import daemon_base
@@ -75,21 +76,23 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
 
 
 class SqsWatcher:
-    def __init__(self, labmda_data):
-        self.labmda_data = labmda_data
+    def __init__(self, lambda_data):
+        self.lambda_data = lambda_data
+        pprint.pprint(self.lambda_data)
         self.log = logger.BossLogger().logger
         self.old_message_num = 0
         self.message_num = 0
 
     def check_queue_count(self, client):
+        pprint.pprint(self.lambda_data)
         response = client.get_queue_attributes(
-            QueueUrl=self.config["aws"]["s3-flush-queue"],
+            QueueUrl=self.lambda_data["config"]["object_store_config"]["s3_flush_queue"],
             AttributeNames=[
                 'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'
             ]
         )
         https_status_code = response['ResponseMetadata']['HTTPStatusCode']
-        if https_status_code != 200:
+        if https_status_code == 200:
             queue_count = int(response['Attributes']['ApproximateNumberOfMessages'])
         else:
             queue_count = None
@@ -115,7 +118,7 @@ class SqsWatcher:
             lambdas_to_invoke = min(self.message_num, MAX_LAMBDAS_TO_INVOKE)
             for i in range(lambdas_to_invoke):
                 response = client.invoke(
-                    FunctionName=self.config["lambda"]["flush_function"],
+                    FunctionName=self.lambda_data["config"]["object_store_config"]["page_out_lambda_function"],
                     InvocationType='Event',
                     Payload=json.dumps(self.lambda_data).encode())
                 if response['ResponseMetadata']['HTTPStatusCode'] != 202:

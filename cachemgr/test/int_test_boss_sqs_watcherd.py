@@ -19,14 +19,20 @@ from spdb.project import BossResourceBasic
 #from spdb.spatialdb.test.test_spatialdb import SpatialDBImageDataTestMixin
 from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.test.setup import SetupTests
+from spdb.spatialdb.rediskvio import RedisKVIO
 from cachemgr.boss_sqs_watcherd import SqsWatcher
 import redis
 import time
 from botocore.exceptions import ClientError
+import boto3
+from moto import mock_lambda
 
 from bossutils import configuration
+from bossutils.aws import get_region
+from spdb.c_lib import ndlib
+import json
 
-
+#@patch('redis.StrictRedis', mock_strict_redis_client)
 class SqsWatcherIntegrationTestMixin(object):
 
     def test_sqs_watcher_send_message(self):
@@ -37,17 +43,52 @@ class SqsWatcherIntegrationTestMixin(object):
         cube1.morton_id = 0
 
         sp = SpatialDB(self.kvio_config, self.state_config, self.object_store_config)
+        self.kvio = RedisKVIO(self.kvio_config)
 
-        sp.write_cuboid(self.resource, (0, 0, 0), 0, cube1.data)
+        # Get keys ready
+        base_write_cuboid_key = "WRITE-CUBOID&{}&{}".format(self.resource.get_lookup_key(), 0)
+
+        morton_idx = ndlib.XYZMorton([0, 0, 0])
+        t = 0
+        write_cuboid_key = self.kvio.insert_cube_in_write_buffer(base_write_cuboid_key, t, morton_idx,
+                                                                 cube1.get_blosc_numpy_by_time_index(t))
+
+        #sp.write_cuboid(self.resource, (0, 0, 0), 0, cube1.data)
 
         # cube2 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
         # np.testing.assert_array_equal(cube1.data, cube2.data)
         # cube2 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
         # np.testing.assert_array_equal(cube1.data, cube2.data)
+
+        # Put page out job on the queue
+        sqs = boto3.client('sqs', region_name=get_region())
+
+        msg_data = {"config": self.config_data,
+                    "write_cuboid_key": write_cuboid_key,
+                    "lambda-name": "s3_flush",
+                    "resource": self.resource.to_dict()}
+
+        response = sqs.send_message(QueueUrl=self.object_store_config["s3_flush_queue"],
+                                    MessageBody=json.dumps(msg_data))
+        print('response: ' + str(response))
+        assert response['ResponseMetadata']['HTTPStatusCode'] == 200
 
         watcher = SqsWatcher(self.lambda_data)
         watcher.verify_queue()
-        assert True
+        time.sleep(60)
+        lambda_client = boto3.client('sqs', region_name=get_region())
+        client = boto3.client('sqs', region_name=get_region())
+        response = client.get_queue_attributes(
+            QueueUrl=self.object_store_config["s3_flush_queue"],
+            AttributeNames=[
+                'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'
+            ]
+        )
+        print(str(response))
+        https_status_code = response['ResponseMetadata']['HTTPStatusCode']
+        queue_count = int(response['Attributes']['ApproximateNumberOfMessages'])
+        assert queue_count == 0
+
 
 
 class TestIntegrationSqsWatcher(SqsWatcherIntegrationTestMixin, unittest.TestCase):
@@ -89,12 +130,6 @@ class TestIntegrationSqsWatcher(SqsWatcherIntegrationTestMixin, unittest.TestCas
                                     "page_out_lambda_function": self.config['lambda']['flush_function'],
                                     "s3_index_table": "intTest.{}".format(self.config['aws']['s3-index-table'])}
 
-        self.config_data = {"kv_config": self.kvio_config,
-                       "state_config": self.state_config,
-                       "object_store_config": self.object_store_config}
-
-        self.lambda_data = {"config": self.config_data,
-                            "lambda-name": "s3_flush"}
 
     @classmethod
     def setUpClass(cls):
@@ -125,6 +160,15 @@ class TestIntegrationSqsWatcher(SqsWatcherIntegrationTestMixin, unittest.TestCas
             time.sleep(61)
             cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
 
+        # write out data for lambda now that we have updated s3_flush_queue
+        cls.config_data = {"kv_config": cls.kvio_config,
+                       "state_config": cls.state_config,
+                       "object_store_config": cls.object_store_config}
+
+        cls.lambda_data = {"config": cls.config_data,
+                            "lambda-name": "s3_flush"}
+
+
     @classmethod
     def tearDownClass(cls):
         #super(TestIntegrationSpatialDBImage8Data, cls).tearDownClass()
@@ -148,3 +192,4 @@ class TestIntegrationSqsWatcher(SqsWatcherIntegrationTestMixin, unittest.TestCas
 
     def get_num_status_keys(self, spdb):
         return len(self.status_client.keys("*"))
+
