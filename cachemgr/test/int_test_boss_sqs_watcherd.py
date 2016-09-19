@@ -16,7 +16,6 @@ import unittest
 import numpy as np
 
 from spdb.project import BossResourceBasic
-#from spdb.spatialdb.test.test_spatialdb import SpatialDBImageDataTestMixin
 from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.test.setup import SetupTests
 from spdb.spatialdb.rediskvio import RedisKVIO
@@ -36,7 +35,7 @@ import json
 class SqsWatcherIntegrationTestMixin(object):
 
     def test_sqs_watcher_send_message(self):
-        """Inject message"""
+        """Inject message into queue and test that SqsWatcher kicks off a lambda and writes cuboid to s3."""
         # Generate random data
         cube1 = Cube.create_cube(self.resource, [128, 128, 16])
         cube1.data = np.random.randint(1, 254, (1, 16, 128, 128))
@@ -45,20 +44,11 @@ class SqsWatcherIntegrationTestMixin(object):
         sp = SpatialDB(self.kvio_config, self.state_config, self.object_store_config)
         self.kvio = RedisKVIO(self.kvio_config)
 
-        # Get keys ready
         base_write_cuboid_key = "WRITE-CUBOID&{}&{}".format(self.resource.get_lookup_key(), 0)
-
         morton_idx = ndlib.XYZMorton([0, 0, 0])
         t = 0
         write_cuboid_key = self.kvio.insert_cube_in_write_buffer(base_write_cuboid_key, t, morton_idx,
                                                                  cube1.get_blosc_numpy_by_time_index(t))
-
-        #sp.write_cuboid(self.resource, (0, 0, 0), 0, cube1.data)
-
-        # cube2 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
-        # np.testing.assert_array_equal(cube1.data, cube2.data)
-        # cube2 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
-        # np.testing.assert_array_equal(cube1.data, cube2.data)
 
         # Put page out job on the queue
         sqs = boto3.client('sqs', region_name=get_region())
@@ -70,12 +60,19 @@ class SqsWatcherIntegrationTestMixin(object):
 
         response = sqs.send_message(QueueUrl=self.object_store_config["s3_flush_queue"],
                                     MessageBody=json.dumps(msg_data))
-        print('response: ' + str(response))
         assert response['ResponseMetadata']['HTTPStatusCode'] == 200
 
         watcher = SqsWatcher(self.lambda_data)
+        #  verify_queue() needs the be run multiple times to verify that the queue is not changing
+        #  only then does it send off a lambda message.
+        time.sleep(5)
         watcher.verify_queue()
-        time.sleep(60)
+        time.sleep(5)
+        lambdas_invoked = watcher.verify_queue()
+        if lambdas_invoked < 1:
+            time.sleep(5)
+            watcher.verify_queue()
+        time.sleep(15)
         lambda_client = boto3.client('sqs', region_name=get_region())
         client = boto3.client('sqs', region_name=get_region())
         response = client.get_queue_attributes(
@@ -84,10 +81,17 @@ class SqsWatcherIntegrationTestMixin(object):
                 'ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'
             ]
         )
-        print(str(response))
         https_status_code = response['ResponseMetadata']['HTTPStatusCode']
         queue_count = int(response['Attributes']['ApproximateNumberOfMessages'])
+        # test that the queue count is now 0
         assert queue_count == 0
+
+        s3 = boto3.client('s3', region_name=get_region())
+        objects_list = s3.list_objects(Bucket=self.object_store_config['cuboid_bucket'])
+        # tests that bucket has some Contents.
+        assert "Contents" in objects_list.keys()
+
+
 
 
 
