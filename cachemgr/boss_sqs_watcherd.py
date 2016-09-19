@@ -107,13 +107,11 @@ class SqsWatcher:
 
         self.old_message_num = self.message_num
         self.message_num = new_message_num
-        self.log.debug("boss-sqs-watcherd: checking sqs queue current messages: {}  previous messages: {}".format(
-            self.message_num, self.old_message_num))
 
         if ((self.message_num != 0) and (self.message_num == self.old_message_num)):
             client = boto3.client('lambda', region_name=get_region())
-            self.log.info("kicking off lambda")
             lambdas_to_invoke = min(self.message_num, MAX_LAMBDAS_TO_INVOKE)
+            self.log.info("kicking off {} lambdas".format(lambdas_to_invoke))
             for i in range(lambdas_to_invoke):
                 response = client.invoke(
                     FunctionName=self.lambda_data["config"]["object_store_config"]["page_out_lambda_function"],
