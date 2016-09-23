@@ -180,6 +180,7 @@ class KeyCloakClient:
     def _delete(self, url_suffix = "", data = None, headers = {}):
         url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
+        headers['Content-Type'] = 'application/json'
 
         response = requests.delete(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
         KeyCloakError.raise_for_status(response)
