@@ -12,13 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Library for common methods that are used by the different configs scripts.
-
-Library currently appends the boss-manage.git/vault/ directory to the system path
-so that it can import vault/bastion.py and vault/vault.py.
-
-Library contains a set of AWS lookup methods for locating AWS data and other related
-helper functions and classes.
+"""Client and general exception for working with Keycloak Users / Roles
 
 Author:
     Derek Pryor <Derek.Pryor@jhuapl.edu>
@@ -30,6 +24,28 @@ from bossutils.logger import BossLogger
 
 LOG = BossLogger().logger
 
+class KeyCloakError(Exception):
+    def __init__(self, status, data):
+        super(KeyCloakError, self).__init__(data)
+        self.status = status
+        self.data = data
+
+    @staticmethod
+    def _get_message(res):
+        try: # Assume json formatted data
+            return json.dumps(res.json())
+        except:
+            try: # Try just raw response
+                return res.text
+            except:
+                return None
+
+    @classmethod
+    def raise_for_status(cls, res):
+        if 400 <= res.status_code <= 600: # handle both Client and Server errors
+            msg = cls._get_message(res)
+            raise cls(res.status_code, msg)
+
 class KeyCloakClient:
     """Client for connecting to Keycloak and using the REST API.
 
@@ -40,8 +56,6 @@ class KeyCloakClient:
     # DP TODO: standardize on all inputs / output being json dictionaries, not encoded strings
     # DP ???: have all function arguments be **kwargs instead of passing in dictionaries?
 
-    # DP TODO: pull realm from vault
-    # DP TODO: pull login / logout client id from vault
     def __init__(self, realm, url_base=None, https=True, verify_ssl=True):
         """KeyCloakClient constructor
 
@@ -60,37 +74,39 @@ class KeyCloakClient:
         self.verify_ssl = verify_ssl
         self.vault_path = "secret/keycloak"
 
-    def login(self, client_id=None, username=None, password=None):
+    def login(self, username=None, password=None, client_id=None, login_realm=None):
         """Log the user in by Retrieve tokens for the user with the specified username and password.
         Args:
-            client_id (str): client identifier
             username (str): login username
             password (str): login password
+            client_id (str): OIDC client_id for logging into server
+            login_realm (str): Keycloak realm of the login user
+
         Returns:
             requests.Response: token endpoint response
+
+        Note: Login realm can be different from the realm that the client is used to manage
         """
         # Get the password from vault
         vault = Vault()
         if username is None:
             username = vault.read(self.vault_path, 'username')
             password = vault.read(self.vault_path, 'password')
-            client_id = vault.read(self.vault_path, 'client_id')
 
-        url = '{}/realms/master/protocol/openid-connect/token'.format(self.url_base) # DP TODO: read realm from vault
+        # Save the client_id and login realm for logging out
+        self.client_id = client_id or vault.read(self.vault_path, 'client_id')
+        self.login_realm = login_realm or vault.read(self.vault_path, 'realm')
+
+        url = '{}/realms/{}/protocol/openid-connect/token'.format(self.url_base, self.login_realm)
         data = {
             'grant_type': 'password',
-            'client_id': client_id,
+            'client_id': self.client_id,
             'username': username,
             'password': password,
         }
         response = requests.post(url, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
-        if response.status_code == 200:
-            self.token = response.json()
-        else:
-            LOG.info("Could not authenticate to KeyCloak Server")
-            self.token = None
-            return None # DP TODO: should probably throw an exception, as everywhere else it is assumed that this works
+        KeyCloakError.raise_for_status(response)
+        self.token = response.json()
 
         return response
 
@@ -103,14 +119,16 @@ class KeyCloakClient:
         if self.token is None:
             return
 
-        token_endpoint = '{}/realms/{}/protocol/openid-connect/logout'.format(self.url_base,"master") # DP TODO: read realm from vault
+        token_endpoint = '{}/realms/{}/protocol/openid-connect/logout'.format(self.url_base, self.login_realm)
         data = {
             "refresh_token": self.token["refresh_token"],
-            "client_id": "admin-cli",
+            "client_id": self.client_id,
         }
         response = requests.post(token_endpoint, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        KeyCloakError.raise_for_status(response)
         self.token = None
+        self.client_id = None
+        self.login_realm = None
 
     def __enter__(self):
         """The start of the context manager, which handles login / logout from Keycloak."""
@@ -130,15 +148,12 @@ class KeyCloakClient:
         else:
             return False # don't supress the exception
 
-    # DP TODO: figure out if always returning the json data (if it exists) works
-    #          for calls like get_user_id that check the response code....
-
     def _get(self, url_suffix = "", params = None, headers = {}):
         url = "{}/admin/realms/{}/{}".format(self.url_base, self.realm, url_suffix)
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
         response = requests.get(url, headers=headers, params=params, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        KeyCloakError.raise_for_status(response)
 
         return response
 
@@ -148,7 +163,7 @@ class KeyCloakClient:
         headers['Content-Type'] = 'application/json'
 
         response = requests.post(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        KeyCloakError.raise_for_status(response)
 
         return response
 
@@ -158,7 +173,7 @@ class KeyCloakClient:
         headers['Content-Type'] = 'application/json'
 
         response = requests.put(url, headers=headers, json=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        KeyCloakError.raise_for_status(response)
 
         return response
 
@@ -167,7 +182,7 @@ class KeyCloakClient:
         headers['Authorization'] = 'Bearer ' + self.token['access_token']
 
         response = requests.delete(url, headers=headers, data=data, verify=self.https and self.verify_ssl)
-        response.raise_for_status()
+        KeyCloakError.raise_for_status(response)
 
         return response
 
@@ -184,7 +199,6 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-
         url = 'protocol/openid-connect/userinfo'
 
         return self._get(url).json()
@@ -196,7 +210,6 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-
         url = 'users'
 
         self._post(url, user_data)
@@ -237,10 +250,11 @@ class KeyCloakClient:
         }
 
         response = self._get(url, params)
-        if response.status_code == 200:
+        data = response.json()
+        if len(data) > 0:
             return response.json()[0]['id']
         else:
-            return None
+            raise KeyCloakError(404, {"error": "User not found"})
 
     def get_realm_roles(self, username):
         """Retrieve all assigned realm roles from keycloak.
@@ -265,7 +279,7 @@ class KeyCloakClient:
         if response.status_code == 200:
             return response.json()
         else:
-            return None
+            raise KeyCloakError(404, {"error": "Role not found"})
 
     def map_role_to_user(self, username, rolename):
         """Map a role to user in a specified realm '.
@@ -274,20 +288,12 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-
-        # Get the user id
         id = self.get_user_id(username)
         role = self.get_role_by_name(rolename)
-        if id is not None and role is not None:
-            url = 'users/{}/role-mappings/realm'.format(id)
-            roles = json.dumps([role])
+        url = 'users/{}/role-mappings/realm'.format(id)
+        roles = json.dumps([role])
 
-            self._post(url, roles)
-        else:
-            if id is None:
-                raise Exception("Cannot locate user {}".format(username))
-            else:
-                raise Exception("Cannot locate role {}".format(rolename))
+        self._post(url, roles)
 
     def remove_role_from_user(self, username, rolename):
         """Remove a mapped role from a user in a specified realm '.
@@ -296,99 +302,9 @@ class KeyCloakClient:
         Returns:
             requests.Response: userinfo endpoint response
         """
-
-        # Get the user id
         id = self.get_user_id(username)
         role = self.get_role_by_name(rolename)
-        if id is not None and role is not None:
-            url = 'users/{}/role-mappings/realm'.format(id)
-            roles = json.dumps([role])
+        url = 'users/{}/role-mappings/realm'.format(id)
+        roles = json.dumps([role])
 
-            self._delete(url, roles)
-        else:
-            if id is None:
-                raise Exception("Cannot locate user {}".format(username))
-            else:
-                raise Exception("Cannot locate role {}".format(rolename))
-
-    def create_group(self, group_data):
-        """Create a new group if it does not exist '.
-        Args:
-            bearer_token (str): the bearer token
-        Returns:
-            requests.Response: userinfo endpoint response
-        """
-
-        # DP ???: Why check the existence of a group and not the same for a user?
-        # Check if the group exists
-        group_name = json.loads(group_data)['name']
-        if self.group_exists(group_name):
-            print ("Group Exists") # DP TODO: Log, raise exception, ???
-            return None
-
-        url = 'groups'
-
-        self._post(url, group_data)
-
-    def delete_group(self, group_name):
-        group_id = self.get_group_id(group_name)
-        if group_id is not None:
-            url = "groups/{}".format(group_id)
-            self._delete(url)
-        else:
-            raise Exception("Cannot locate group {}".format(group_name))
-
-    def get_all_groups(self):
-        """Create a new group '.
-            Args:
-                bearer_token (str): the bearer token
-            Returns:
-                requests.Response: userinfo endpoint response
-            """
-
-        url = 'groups'
-
-        return self._get(url).json()
-
-    def get_group_id(self, group_name):
-        groups = self.get_all_groups()
-        for group in groups:
-            if group['name'] == group_name:
-                return group['id']
-        return None
-
-    def group_exists(self, group_name):
-        groups = self.get_all_groups()
-        for group in groups:
-            if group['name'] == group_name:
-                return True
-        return False
-
-    def map_group_to_user(self, username, groupname):
-        user_id = self.get_user_id(username)
-        group_id = self.get_group_id(groupname)
-        if user_id is not None and group_id is not None:
-            url = "users/{}/groups/{}".format(user_id, group_id)
-            self._put(url)
-        else:
-            if user_id is None:
-                raise Exception("Cannot locate user {}".format(username))
-            else:
-                raise Exception("Cannot locate group {}".format(groupname))
-
-    def remove_group_from_user(self, username, groupname):
-        user_id = self.get_user_id(username)
-        group_id = self.get_group_id(groupname)
-        if user_id is not None and group_id is not None:
-            url = "users/{}/groups/{}".format(user_id, group_id)
-            self._delete(url)
-        else:
-            if user_id is None:
-                raise Exception("Cannot locate user {}".format(username))
-            else:
-                raise Exception("Cannot locate group {}".format(groupname))
-
-    def get_user_groups(self, username):
-        user_id = self.get_user_id(username)
-        url = 'users/{}/groups'.format(user_id)
-        return self._get(url).json()
+        self._delete(url, roles)
