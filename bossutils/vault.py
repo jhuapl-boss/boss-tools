@@ -129,6 +129,14 @@ class Vault:
         """Revoke the given Vault secret."""
         self.client.revoke_secret(lease_id)
 
+    def revoke_secret_prefix(self, prefix):
+        """Revoke Vault secret(s) starting with the given prefix.
+
+        Args:
+            prefix (string): Prefix that the vault secret begins with.
+        """
+        self.client.revoke_secret_prefix(prefix)
+
     def renew_secret(self, lease_id):
         """Renew the given Vault secret."""
         return self.client.renew_secret(lease_id)
