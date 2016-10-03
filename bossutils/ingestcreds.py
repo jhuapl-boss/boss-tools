@@ -17,6 +17,7 @@ from bossutils.vault import Vault
 import boto3
 import botocore
 from . import configuration
+import json
 
 # Constants used to generate names of AWS resources.
 INGEST_ROLE_NAME = 'aws/roles/ingest{}'     # Uses job id.
@@ -61,7 +62,7 @@ class IngestCredentials:
         self.vault = Vault(config)
         # Get the domain the endpoint lives in.
         self.domain = self.config['system']['fqdn'].split('.', 1)[1]
-        self.iam = boto3.Resource('iam', region_name=region_name,
+        self.iam = boto3.resource('iam', region_name=region_name,
             aws_access_key_id='AKIAJFH5RRFJKEOJIGXA', 
             aws_secret_access_key='jJsiD1Atk/oEvfxtdWtVcb9+AyTOFMcZUmq0VqF2')
 
@@ -79,12 +80,12 @@ class IngestCredentials:
         sanitized_domain = self.domain.replace('.', '-')
         path=IAM_PATH.format(sanitized_domain)
 
-        resp = self.iam.create_policy(
-            PolicyName=IAM_POLICY_NAME.format(job_id),
-            PolicyDocument=json.dumps(policy),
+        policy = self.iam.create_policy(
+            PolicyName=IAM_POLICY_NAME.format(sanitized_domain, job_id),
+            PolicyDocument=json.dumps(policy_document),
             Path=path,
             Description=description)
-        return resp['Policy']['Arn']
+        return policy.arn
 
     def delete_policy(self, job_id):
         """Delete the IAM policy associated with an ingest job.
@@ -97,10 +98,10 @@ class IngestCredentials:
         """
         sanitized_domain = self.domain.replace('.', '-')
         path=IAM_PATH.format(sanitized_domain)
-        name = IAM_POLICY_NAME.format(job_id)
-        for policy in iam.policies.filter(Scope='Local', PathPrefix=path):
-            if policy.attributes['policy_name'] == name:
-                self.iam.delete_policy(PolicyArn=policy.arn)
+        name = IAM_POLICY_NAME.format(sanitized_domain, job_id)
+        for policy in self.iam.policies.filter(Scope='Local', PathPrefix=path):
+            if policy.policy_name == name:
+                policy.delete()
                 return True
 
         return False
@@ -114,17 +115,18 @@ class IngestCredentials:
             job_id (int): Id of ingest job used for name of Vault role.
             iam_policy_arn (string): Policy associated with credentials.
         Returns:
-            (dict): Contains AWS key and secret key.
+            (dict): Contains keys: access_key and secret_key.
         """
 
         # Create Vault role and associate with an IAM policy.
         sanitized_domain = self.domain.replace('.', '-')
         role_path = INGEST_ROLE_NAME.format(sanitized_domain, job_id)
+        print(role_path)
         self.vault.write(role_path, arn=iam_policy_arn) 
 
         # Generate temporary credentials for that role.
         creds_path = INGEST_CREDS_NAME.format(sanitized_domain, job_id)
-        return self.vault.read_dict(creds_path, raw=True)
+        return self.vault.read_dict(creds_path, raw=False)
 
     def get_credentials(self, job_id):
         """Get new temporary credentials for the given ingest job.
@@ -136,11 +138,11 @@ class IngestCredentials:
             job_id (int): Get new credentials for this ingest job.
 
         Returns:
-            (dict): Contains AWS key and secret key.
+            (dict): Contains keys: access_key and secret_key.
         """
         sanitized_domain = self.domain.replace('.', '-')
         path = INGEST_CREDS_NAME.format(sanitized_domain, job_id)
-        return self.vault.read_dict(path, raw=True)
+        return self.vault.read_dict(path, raw=False)
 
     def remove_credentials(self, job_id):
         """Revoke credentials and delete the Vault role associated with an ingest job.
