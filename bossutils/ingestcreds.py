@@ -17,6 +17,7 @@ from bossutils.vault import Vault
 import boto3
 import botocore
 from . import configuration
+import hvac
 import json
 
 # Constants used to generate names of AWS resources.
@@ -62,9 +63,7 @@ class IngestCredentials:
         self.vault = Vault(config)
         # Get the domain the endpoint lives in.
         self.domain = self.config['system']['fqdn'].split('.', 1)[1]
-        self.iam = boto3.resource('iam', region_name=region_name,
-            aws_access_key_id='AKIAJFH5RRFJKEOJIGXA', 
-            aws_secret_access_key='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')
+        self.iam = boto3.resource('iam', region_name=region_name)
 
     def create_policy(self, policy_document, job_id, description=''):
         """Create a new IAM policy for the given ingest job.
@@ -120,12 +119,11 @@ class IngestCredentials:
 
         # Create Vault role and associate with an IAM policy.
         sanitized_domain = self.domain.replace('.', '-')
-        role_path = INGEST_ROLE_NAME.format(sanitized_domain, job_id)
-        print(role_path)
+        role_path = INGEST_ROLE_NAME.format(job_id)
         self.vault.write(role_path, arn=iam_policy_arn) 
 
         # Generate temporary credentials for that role.
-        creds_path = INGEST_CREDS_NAME.format(sanitized_domain, job_id)
+        creds_path = INGEST_CREDS_NAME.format(job_id)
         return self.vault.read_dict(creds_path, raw=False)
 
     def get_credentials(self, job_id):
@@ -138,11 +136,15 @@ class IngestCredentials:
             job_id (int): Get new credentials for this ingest job.
 
         Returns:
-            (dict): Contains keys: access_key and secret_key.
+            (dict|None): Contains keys: access_key and secret_key.
+
         """
         sanitized_domain = self.domain.replace('.', '-')
-        path = INGEST_CREDS_NAME.format(sanitized_domain, job_id)
-        return self.vault.read_dict(path, raw=False)
+        path = INGEST_CREDS_NAME.format(job_id)
+        try:
+            return self.vault.read_dict(path, raw=False)
+        except hvac.exceptions.InvalidRequest:
+            return None
 
     def remove_credentials(self, job_id):
         """Revoke credentials and delete the Vault role associated with an ingest job.
@@ -153,9 +155,9 @@ class IngestCredentials:
             job_id (int): Get new credentials for this ingest job.
         """
         sanitized_domain = self.domain.replace('.', '-')
-        creds_path = INGEST_CREDS_NAME.format(sanitized_domain, job_id)
+        creds_path = INGEST_CREDS_NAME.format(job_id)
         self.vault.revoke_secret_prefix(creds_path)
 
-        role_path = INGEST_ROLE_NAME.format(sanitized_domain, job_id)
+        role_path = INGEST_ROLE_NAME.format(job_id)
         self.vault.delete(role_path)
 

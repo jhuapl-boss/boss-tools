@@ -108,4 +108,10 @@ class TestIngestCreds(unittest.TestCase):
             if creds_created:
                 self.ingest.remove_credentials(self.job_id)
             self.ingest.delete_policy(self.job_id)
+            self.assertIsNone(self.ingest.get_credentials(self.job_id))
+
+    def test_get_credentials_invalid(self):
+        """Test result of getting non-existent credentials.
+        """
+        self.assertIsNone(self.ingest.get_credentials(self.job_id))
 
