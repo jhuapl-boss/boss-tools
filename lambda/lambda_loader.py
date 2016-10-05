@@ -6,14 +6,25 @@ LAMBDA_PATH_PREFIX = "local/lib/python3.4/site-packages/lambda/"
 # List of supported Lambda functions
 lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
                      "page_in_lambda_function": LAMBDA_PATH_PREFIX + "s3_to_cache.py",
+                     "tile_upload": LAMBDA_PATH_PREFIX + "tile_upload_lambda.py",
+                     "ingest": LAMBDA_PATH_PREFIX + "tile_upload_lambda.py",
                      "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py"}
 
 
 def handler(event, context):
-    lambda_name = event["lambda-name"]
-    if lambda_name is None:
-        print("No lambda_name given")
-        exit(1)
+    # Check for a "lambda-name" setting
+    if "lambda-name" not in event:
+        # Check if this is an S3 event which can be assumed to be ingest uploading
+        if "eventSource" in event:
+            if event["eventSource"] == "aws:s3":
+                lambda_name = "tile_upload"
+        else:
+            print("No lambda-name given")
+            exit(1)
+    else:
+        lambda_name = event["lambda-name"]
+
+    # Load lambda details and launch
     lambda_path = lambda_dictionary[lambda_name]
     if lambda_path is None:
         print("No path found for lambda: " + lambda_name)
@@ -29,9 +40,7 @@ def handler(event, context):
     if "PYTHONPATH" in env:
         del env['PYTHONPATH']
 
-    popen = subprocess.Popen(
-        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=env)
+    popen = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     popen.wait()
     output = popen.stdout.read()
     err_str = popen.stderr.read()
