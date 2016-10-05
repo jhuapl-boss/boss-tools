@@ -78,17 +78,18 @@ while run_cnt < 2:
 
     # read all tiles from bucket into a slab
     tile_bucket = TileBucket(proj_info.project_name)
-    # make this a numpy 3d matrix using numpy to convert list of matrixes to 3d matrix
     data = []
-    tile_dims = None
     num_z_slices = 0
     for tile_key in tile_key_list:
         image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
         tile_img = np.asarray(Image.open(StringIO(image_data)))
-        tile_dims = tile_img.shape
-        data.append(tile_dims)
+        data.append(tile_img)
         num_z_slices += 1
         # TODO Make sure data type is correct
+
+    # Make 3D array of image data.
+    chunk_data = np.array(data)
+    tile_dims = chunk_data.shape
 
     # Break into Cube instances
     print("Tile Dims: {}".format(tile_dims))
@@ -98,23 +99,29 @@ while run_cnt < 2:
 
     # Cuboid List
     cuboids = []
-    for x_idx in num_x_cuboids:
-        for y_idx in num_y_cuboids:
-            # check time series support
+    for x_idx in range(0, num_x_cuboids):
+        for y_idx in range(0, num_y_cuboids):
+            # TODO: check time series support
             resource = BossResourceBasic()
-            # TODO add JSON from event msg.
-            #resource.from_json()
+            resource.from_json(event['resource'])
             cube = Cube.create_cube(resource, CUBOIDSIZE[proj_info.resolution], [])
             cube.zeros()
 
             # Compute Morton ID
-            # convert tile indices in chunk key to morton tile indices - multiply tile index by num_x_cuboids, etc
+            # TODO: verify Morton indices correct!
             chunk_key_parts = BossUtil.decode_chunk_key(chunk_key)
-            morton_x_ind = int(chunk_key_parts['x_index']) * num_x_cuboids
-            morton_y_ind = int(chunk_key_parts['y_index']) * num_y_cuboids
-            #morton_id = XYZMorton(morton_x_ind, morton_y_ind, int(chunk_key_parts))
+            morton_x_ind = x_idx * num_x_cuboids
+            morton_y_ind = y_idx * num_y_cuboids
+            morton_index = XYZMorton(morton_x_ind, morton_y_ind, int(chunk_key_parts))
 
-            # Insert sub-region from data into cuboid
+            # Insert sub-region from chunk_data into cuboid
+            x_start = x_idx * CUBOIDSIZE[proj_info.resolution][0]
+            x_end = x_start + CUBOIDSIZE[proj_info.resolution][0]
+            y_start = y_idx * CUBOIDSIZE[proj_info.resolution][1]
+            y_end = y_start + CUBOIDSIZE[proj_info.resolution][1]
+            z_end = CUBOIDSIZE[proj_info.resolution][2]
+            # TODO: get sub-array w/o making a copy.
+            chunk_data[x_start:xend, y_start:y_end, 0:z_end]
 
     # TODO: switch this to spdb's interface to the s3 index table
     cuboidindex_db.putItem(nd_proj.channel_name, nd_proj.resolution, x_tile, y_tile, z_tile)
