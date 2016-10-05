@@ -13,14 +13,16 @@ lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
 
 def handler(event, context):
     # Check for a "lambda-name" setting
+    print(event)
     if "lambda-name" not in event:
         # Check if this is an S3 event which can be assumed to be ingest uploading
-        if "eventSource" in event:
-            if event["eventSource"] == "aws:s3":
-                lambda_name = "tile_upload"
-        else:
-            print("No lambda-name given")
-            exit(1)
+        if "Records" in event:
+            if "eventSource" in event["Records"][0]:
+                if event["Records"][0]["eventSource"] == "aws:s3":
+                    lambda_name = "tile_upload"
+            else:
+                print("No lambda-name given")
+                exit(1)
     else:
         lambda_name = event["lambda-name"]
 
