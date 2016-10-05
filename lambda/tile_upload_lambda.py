@@ -37,14 +37,14 @@ print(event)
 
 # extract bucket name and tile key from the event
 bucket = event['Records'][0]['s3']['bucket']['name']
-tile_key = urllib.unquote_plus(event['Records'][0]['s3']['object']['key']).decode('utf8')
+tile_key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'])
 print("Bucket: {}".format(bucket))
 print("Tile key: {}".format(tile_key))
 
 # fetch metadata from the s3 object
 proj_info = BossIngestProj.fromTileKey(tile_key)
 tile_bucket = TileBucket(proj_info.project_name)
-_, message_id, receipt_handle, metadata = tile_bucket.getMetadata(tile_key)
+message_id, receipt_handle, metadata = tile_bucket.getMetadata(tile_key)
 print("Metadata: {}".format(metadata))
 
 # Currently this is what is sent from the client for the "metadata"
@@ -63,7 +63,7 @@ print("Metadata: {}".format(metadata))
 
 # TODO: DMK not sure if you actually need to set the job_id in proj_info
 # Set the job id
-proj_info.job_id(metadata["ingest_job"])
+proj_info.job_id = metadata["ingest_job"]
 
 # update value in the dynamo table
 tile_index_db = BossTileIndexDB(proj_info.project_name)
@@ -75,7 +75,7 @@ else:
     # First tile in the chunk
     print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
     tile_index_db.createCuboidEntry(metadata["chunk_key"], metadata["ingest_job"])
-    chunk_ready = False
+    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
 
 # ingest the chunk if we have all the tiles
 if chunk_ready:
