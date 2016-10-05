@@ -10,12 +10,14 @@ from spdb.spatialdb import SpatialDB
 from spdb.spatialdb import Cube
 from spdb.project import BossResourceBasic
 from spdb.c_lib.ndtype import CUBOIDSIZE
+from spdb.c_lib.ndlib import XYZMorton
 
 from ndingest.settings.bosssettings import BossSettings
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
 from ndingest.nddynamo.boss_tileindexdb import BossTileIndexDB
 from ndingest.ndqueue.ingestqueue import IngestQueue
 from ndingest.ndbucket.tilebucket import TileBucket
+from ndingest.util.bossutil import BossUtil
 
 from io import StringIO
 from PIL import Image
@@ -72,7 +74,7 @@ while run_cnt < 2:
 
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
-    tile_key_list = sorted(tile_index_result["tile_uploaded_map"])
+    tile_key_list = sorted(tile_index_result["tile_uploaded_map"].keys())
 
     # read all tiles from bucket into a slab
     tile_bucket = TileBucket(proj_info.project_name)
@@ -98,24 +100,35 @@ while run_cnt < 2:
     cuboids = []
     for x_idx in num_x_cuboids:
         for y_idx in num_y_cuboids:
-            # Create cube - need boss resource like object
             # check time series support
-            cube = Cube.create_cube(, CUBOIDSIZE[proj_info.resolution], [])
+            resource = BossResourceBasic()
+            # TODO add JSON from event msg.
+            #resource.from_json()
+            cube = Cube.create_cube(resource, CUBOIDSIZE[proj_info.resolution], [])
             cube.zeros()
 
             # Compute Morton ID
-            # convert tile indices in chunk key to morton tile indices - multiple tile index by num_x_cuboids, etc
+            # convert tile indices in chunk key to morton tile indices - multiply tile index by num_x_cuboids, etc
+            chunk_key_parts = BossUtil.decode_chunk_key(chunk_key)
+            morton_x_ind = int(chunk_key_parts['x_index']) * num_x_cuboids
+            morton_y_ind = int(chunk_key_parts['y_index']) * num_y_cuboids
+            #morton_id = XYZMorton(morton_x_ind, morton_y_ind, int(chunk_key_parts))
 
             # Insert sub-region from data into cuboid
 
+    # TODO: switch this to spdb's interface to the s3 index table
     cuboidindex_db.putItem(nd_proj.channel_name, nd_proj.resolution, x_tile, y_tile, z_tile)
+    # TODO: switch this to spdb's interface to the cuboid bucket
     cuboid_bucket.putObject(nd_proj.channel_name, nd_proj.resolution, morton_index, cube.toBlosc())
 
     # remove message from ingest queue
 
-    # TODO Delete Tiles
+    # Delete Tiles
+    for tile in tile_key_list:
+        tile_bucket.deleteObject(tile)
 
-    # TODO Delete Entry in tile table
+    # Delete Entry in tile table
+    tile_index_db.deleteCuboid(chunk_key)
 
     # Delete message since it was processed successfully
     ingest_queue = IngestQueue(proj_info)
