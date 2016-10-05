@@ -65,8 +65,9 @@ while run_cnt < 2:
                    event["params"]["STATEIO_CONFIG"],
                    event["params"]["OBJECTIO_CONFIG"])
 
-    # TODO Get tile list from Tile Index Table
+    # Get tile list from Tile Index Table
     tile_index_db = BossTileIndexDB(proj_info.project_name)
+    # tile_index_result (dict): keys are S3 object keys of the tiles comprising the chunk.
     tile_index_result = tile_index_db.getCuboid(msg_data["chunk_key"])
 
     # Sort the tile keys
@@ -75,6 +76,7 @@ while run_cnt < 2:
 
     # read all tiles from bucket into a slab
     tile_bucket = TileBucket(proj_info.project_name)
+    # make this a numpy 3d matrix using numpy to convert list of matrixes to 3d matrix
     data = []
     tile_dims = None
     num_z_slices = 0
@@ -89,18 +91,20 @@ while run_cnt < 2:
     # Break into Cube instances
     print("Tile Dims: {}".format(tile_dims))
     print("Num Z Slices: {}".format(num_z_slices))
-    num_x_cuboids = tile_dims[0] / CUBOIDSIZE[proj_info.resolution][2]
+    num_x_cuboids = tile_dims[0] / CUBOIDSIZE[proj_info.resolution][0]
     num_y_cuboids = tile_dims[1] / CUBOIDSIZE[proj_info.resolution][1]
 
     # Cuboid List
     cuboids = []
     for x_idx in num_x_cuboids:
         for y_idx in num_y_cuboids:
-            # Create cube
+            # Create cube - need boss resource like object
+            # check time series support
             cube = Cube.create_cube(, CUBOIDSIZE[proj_info.resolution], [])
             cube.zeros()
 
             # Compute Morton ID
+            # convert tile indices in chunk key to morton tile indices - multiple tile index by num_x_cuboids, etc
 
             # Insert sub-region from data into cuboid
 
