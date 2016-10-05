@@ -28,18 +28,21 @@ IAM_PATH = '/{}/ingest/'                    # Uses domain.
 
 class IngestCredentials:
     """Manages temporary AWS credentials used by ingest clients.
-    
+
     Typical usage:
         ingest_creds = IngestCredentials()
 
-        # On POST to endpoint from ingest client.
+        #### On POST to endpoint from ingest client.
+        # If supplying a custom policy:
         arn = ingest_creds.create_policy(policy_doc, job_id)
+        # Otherwise generate the policy using ndingest.util.bossutil.generate_ingest_policy().
+        # Generate credentials in Vault.
         ingest_creds.generate_credentials(job_id, arn)
 
-        # On GET to endpoint from ingest client.
+        #### On GET to endpoint from ingest client.
         ingest_creds.get_credentials(job_id)
 
-        # When ingest job complete.
+        #### When ingest job complete.
         ingest_creds.remove_credentials(job_id)
         ingest_creds.delete_policy(job_id)
 
@@ -88,7 +91,7 @@ class IngestCredentials:
 
     def delete_policy(self, job_id):
         """Delete the IAM policy associated with an ingest job.
-        
+
         Args:
             job_id (int): Id of ingest job used for name of Vault role.
 
@@ -120,7 +123,7 @@ class IngestCredentials:
         # Create Vault role and associate with an IAM policy.
         sanitized_domain = self.domain.replace('.', '-')
         role_path = INGEST_ROLE_NAME.format(job_id)
-        self.vault.write(role_path, arn=iam_policy_arn) 
+        self.vault.write(role_path, arn=iam_policy_arn)
 
         # Generate temporary credentials for that role.
         creds_path = INGEST_CREDS_NAME.format(job_id)
@@ -129,7 +132,7 @@ class IngestCredentials:
     def get_credentials(self, job_id):
         """Get new temporary credentials for the given ingest job.
 
-        Before calling get_credentials(), the Vault role must be created by 
+        Before calling get_credentials(), the Vault role must be created by
         generate_credentials() for the given job_id.
 
         Args:
@@ -160,4 +163,3 @@ class IngestCredentials:
 
         role_path = INGEST_ROLE_NAME.format(job_id)
         self.vault.delete(role_path)
-
