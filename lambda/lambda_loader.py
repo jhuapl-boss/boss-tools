@@ -7,7 +7,7 @@ LAMBDA_PATH_PREFIX = "local/lib/python3.4/site-packages/lambda/"
 lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
                      "page_in_lambda_function": LAMBDA_PATH_PREFIX + "s3_to_cache.py",
                      "tile_upload": LAMBDA_PATH_PREFIX + "tile_upload_lambda.py",
-                     "ingest": LAMBDA_PATH_PREFIX + "tile_upload_lambda.py",
+                     "ingest": LAMBDA_PATH_PREFIX + "ingest_lambda.py",
                      "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py"}
 
 

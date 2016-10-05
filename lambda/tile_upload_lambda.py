@@ -75,7 +75,7 @@ else:
     # First tile in the chunk
     print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
     tile_index_db.createCuboidEntry(metadata["chunk_key"], metadata["ingest_job"])
-    chunk_ready = False
+    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
 
 # ingest the chunk if we have all the tiles
 if chunk_ready:
