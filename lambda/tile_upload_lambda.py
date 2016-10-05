@@ -43,7 +43,7 @@ print("Tile key: {}".format(tile_key))
 
 # fetch metadata from the s3 object
 proj_info = BossIngestProj.fromTileKey(tile_key)
-tile_bucket = TileBucket(proj_info.project_name, endpoint_url=SETTINGS.S3_ENDPOINT)
+tile_bucket = TileBucket(proj_info.project_name)
 _, message_id, receipt_handle, metadata = tile_bucket.getMetadata(tile_key)
 print("Metadata: {}".format(metadata))
 
@@ -66,22 +66,22 @@ print("Metadata: {}".format(metadata))
 proj_info.job_id(metadata["ingest_job"])
 
 # update value in the dynamo table
-tileindex_db = BossTileIndexDB(proj_info.project_name, endpoint_url=SETTINGS.DYNAMO_ENDPOINT)
-chunk = tileindex_db.getCuboid(metadata["chunk_key"])
+tile_index_db = BossTileIndexDB(proj_info.project_name)
+chunk = tile_index_db.getCuboid(metadata["chunk_key"])
 if chunk:
     print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
-    chunk_ready = tileindex_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
+    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
 else:
     # First tile in the chunk
     print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
-    tileindex_db.createCuboidEntry(metadata["chunk_key"], metadata["ingest_job"])
+    tile_index_db.createCuboidEntry(metadata["chunk_key"], metadata["ingest_job"])
     chunk_ready = False
 
 # ingest the chunk if we have all the tiles
 if chunk_ready:
     print("Chunk ready: {}".format(metadata["chunk_key"]))
     # insert a new job in the insert queue if we have all the tiles
-    ingest_queue = IngestQueue(proj_info, endpoint_url=SETTINGS.SQS_ENDPOINT)
+    ingest_queue = IngestQueue(proj_info)
     ingest_queue.sendMessage(json.dumps(metadata))
 
     # Invoke Ingest lambda function
@@ -93,6 +93,6 @@ if chunk_ready:
         Payload=json.dumps(metadata).encode())
 
 # Delete message from upload queue
-upload_queue = UploadQueue(proj_info, endpoint_url=SETTINGS.SQS_ENDPOINT)
+upload_queue = UploadQueue(proj_info)
 upload_queue.deleteMessage(message_id, receipt_handle)
 print("DONE!")
