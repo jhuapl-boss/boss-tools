@@ -19,9 +19,12 @@ from ndingest.ndqueue.ingestqueue import IngestQueue
 from ndingest.ndbucket.tilebucket import TileBucket
 from ndingest.util.bossutil import BossUtil
 
-from io import StringIO
+from io import BytesIO
 from PIL import Image
 import numpy as np
+import math
+
+print("$$$ IN INGEST LAMBDA $$$")
 
 # Load settings
 SETTINGS = BossSettings.load()
@@ -32,6 +35,7 @@ event = json.loads(json_event)
 
 # Load the project info from the chunk key you are processing
 proj_info = BossIngestProj.fromSupercuboidKey(event["chunk_key"])
+proj_info.job_id = event["ingest_job"]
 
 # Handle up to 2 messages before quitting (helps deal with making sure all messages get processed)
 run_cnt = 0
@@ -45,27 +49,31 @@ while run_cnt < 2:
         ingest_queue = IngestQueue(proj_info)
         msg = [x for x in ingest_queue.receiveMessage()]
         if msg:
+            msg = msg[0]
+            print("MESSAGE: {}".format(msg))
+            print(len(msg))
             msg_id = msg[0]
             msg_rx_handle = msg[1]
-            msd_data = json.loads(msg[2])
+            msg_data = json.loads(msg[2])
+            print("MESSAGE DATA: {}".format(msg_data))
             break
         else:
             rx_cnt += 1
             print("No message found. Try {} of 4".format(rx_cnt))
             time.sleep(.25)
 
-    if not msg_data:
+    if not msg_id:
         # Nothing to flush. Exit.
-        sys.exit("No flush message available")
+        sys.exit("No ingest message available")
 
     # Get the write-cuboid key to flush
     chunk_key = msg_data['chunk_key']
     print("Ingesting Chunk {}".format(chunk_key))
 
     # Setup SPDB instance
-    sp = SpatialDB(event["params"]["KVIO_SETTINGS"],
-                   event["params"]["STATEIO_CONFIG"],
-                   event["params"]["OBJECTIO_CONFIG"])
+    sp = SpatialDB(msg_data['parameters']["KVIO_SETTINGS"],
+                   msg_data['parameters']["STATEIO_CONFIG"],
+                   msg_data['parameters']["OBJECTIO_CONFIG"])
 
     # Get tile list from Tile Index Table
     tile_index_db = BossTileIndexDB(proj_info.project_name)
@@ -75,6 +83,12 @@ while run_cnt < 2:
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
     tile_key_list = sorted(tile_index_result["tile_uploaded_map"].keys())
+    print("Sorted Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
+
+    # Setup the resource
+    resource = BossResourceBasic()
+    resource.from_dict(msg_data['parameters']['resource'])
+    dtype = resource.get_numpy_data_type()
 
     # read all tiles from bucket into a slab
     tile_bucket = TileBucket(proj_info.project_name)
@@ -82,37 +96,43 @@ while run_cnt < 2:
     num_z_slices = 0
     for tile_key in tile_key_list:
         image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
-        tile_img = np.asarray(Image.open(StringIO(image_data)))
+        tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
         data.append(tile_img)
         num_z_slices += 1
         # TODO Make sure data type is correct
 
-    # Make 3D array of image data.
+    # Make 3D array of image data. It should be in XYZ at this point
     chunk_data = np.array(data)
+    # TODO: Make sure data is not transposed
     tile_dims = chunk_data.shape
 
     # Break into Cube instances
     print("Tile Dims: {}".format(tile_dims))
     print("Num Z Slices: {}".format(num_z_slices))
-    num_x_cuboids = tile_dims[0] / CUBOIDSIZE[proj_info.resolution][0]
-    num_y_cuboids = tile_dims[1] / CUBOIDSIZE[proj_info.resolution][1]
+    num_x_cuboids = int(math.ceil(tile_dims[2] / CUBOIDSIZE[proj_info.resolution][0]))
+    num_y_cuboids = int(math.ceil(tile_dims[1] / CUBOIDSIZE[proj_info.resolution][1]))
+
+    print("Num X Cuboids: {}".format(num_x_cuboids))
+    print("Num Y Cuboids: {}".format(num_y_cuboids))
 
     # Cuboid List
     cuboids = []
+    chunk_key_parts = BossUtil.decode_chunk_key(chunk_key)
+    t_index = chunk_key_parts['t_index']
     for x_idx in range(0, num_x_cuboids):
         for y_idx in range(0, num_y_cuboids):
             # TODO: check time series support
-            resource = BossResourceBasic()
-            resource.from_json(event['resource'])
-            cube = Cube.create_cube(resource, CUBOIDSIZE[proj_info.resolution], [])
+            cube = Cube.create_cube(resource, CUBOIDSIZE[proj_info.resolution])
             cube.zeros()
 
             # Compute Morton ID
             # TODO: verify Morton indices correct!
-            chunk_key_parts = BossUtil.decode_chunk_key(chunk_key)
-            morton_x_ind = x_idx * num_x_cuboids
-            morton_y_ind = y_idx * num_y_cuboids
-            morton_index = XYZMorton(morton_x_ind, morton_y_ind, int(chunk_key_parts))
+            print(chunk_key_parts)
+            morton_x_ind = x_idx + (chunk_key_parts["x_index"] * num_x_cuboids)
+            morton_y_ind = y_idx + (chunk_key_parts["y_index"] * num_y_cuboids)
+            print("Morton X: {}".format(morton_x_ind))
+            print("Morton Y: {}".format(morton_y_ind))
+            morton_index = XYZMorton([morton_x_ind, morton_y_ind, int(chunk_key_parts['z_index'])])
 
             # Insert sub-region from chunk_data into cuboid
             x_start = x_idx * CUBOIDSIZE[proj_info.resolution][0]
@@ -121,21 +141,26 @@ while run_cnt < 2:
             y_end = y_start + CUBOIDSIZE[proj_info.resolution][1]
             z_end = CUBOIDSIZE[proj_info.resolution][2]
             # TODO: get sub-array w/o making a copy.
-            chunk_data[x_start:xend, y_start:y_end, 0:z_end]
+            cube.data[0, 0:num_z_slices, 0:(y_end - y_start), 0:(x_end - x_start)] = chunk_data[0:num_z_slices,
+                                                                                 y_start:y_end, x_start:x_end]
 
-    # TODO: switch this to spdb's interface to the s3 index table
-    cuboidindex_db.putItem(nd_proj.channel_name, nd_proj.resolution, x_tile, y_tile, z_tile)
-    # TODO: switch this to spdb's interface to the cuboid bucket
-    cuboid_bucket.putObject(nd_proj.channel_name, nd_proj.resolution, morton_index, cube.toBlosc())
+            # Create object key
+            object_key = sp.objectio.generate_object_key(resource, proj_info.resolution, t_index, morton_index)
+            print("Object Key: {}".format(object_key))
 
-    # remove message from ingest queue
+            # Put object in S3
+            sp.objectio.put_objects([object_key], [cube.to_blosc_numpy()])
+
+            # Add object to index
+            sp.objectio.add_cuboid_to_index(object_key)
 
     # Delete Tiles
     for tile in tile_key_list:
-        tile_bucket.deleteObject(tile)
+        print("Deleting tile: {}".format(tile))
+        #tile_bucket.deleteObject(tile)
 
     # Delete Entry in tile table
-    tile_index_db.deleteCuboid(chunk_key)
+    #tile_index_db.deleteCuboid(chunk_key)
 
     # Delete message since it was processed successfully
     ingest_queue = IngestQueue(proj_info)

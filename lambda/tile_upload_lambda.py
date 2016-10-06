@@ -79,7 +79,7 @@ else:
 
 # ingest the chunk if we have all the tiles
 if chunk_ready:
-    print("Chunk ready: {}".format(metadata["chunk_key"]))
+    print("CHUNK READY SENDING MESSAGE: {}".format(metadata["chunk_key"]))
     # insert a new job in the insert queue if we have all the tiles
     ingest_queue = IngestQueue(proj_info)
     ingest_queue.sendMessage(json.dumps(metadata))
@@ -91,6 +91,8 @@ if chunk_ready:
         FunctionName=metadata["parameters"]["ingest_lambda"],
         InvocationType='Event',
         Payload=json.dumps(metadata).encode())
+else:
+    print("Chunk not ready for ingest yet: {}".format(metadata["chunk_key"]))
 
 # Delete message from upload queue
 upload_queue = UploadQueue(proj_info)
