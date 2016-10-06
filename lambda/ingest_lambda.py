@@ -137,10 +137,16 @@ while run_cnt < 2:
             # Insert sub-region from chunk_data into cuboid
             x_start = x_idx * CUBOIDSIZE[proj_info.resolution][0]
             x_end = x_start + CUBOIDSIZE[proj_info.resolution][0]
+            x_end = min(x_end, tile_dims[2])
             y_start = y_idx * CUBOIDSIZE[proj_info.resolution][1]
             y_end = y_start + CUBOIDSIZE[proj_info.resolution][1]
+            y_end = min(y_end, tile_dims[1])
             z_end = CUBOIDSIZE[proj_info.resolution][2]
             # TODO: get sub-array w/o making a copy.
+            print("Yrange: {}".format(y_end - y_start))
+            print("Xrange: {}".format(x_end - x_start))
+            print("X start: {}".format(x_start))
+            print("X stop: {}".format(x_end))
             cube.data[0, 0:num_z_slices, 0:(y_end - y_start), 0:(x_end - x_start)] = chunk_data[0:num_z_slices,
                                                                                  y_start:y_end, x_start:x_end]
 
