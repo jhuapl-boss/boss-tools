@@ -15,7 +15,7 @@
 
 import boto3
 from urllib.error import URLError
-from bossutils import configuration, credentials, utils
+from bossutils import configuration, utils
 from bossutils.logger import BossLogger
 import multiprocessing
 import queue
@@ -75,7 +75,6 @@ class AWSManager:
         # Set Properties
         self.region = region
         self.__sessions = queue.Queue()
-        self.__credentials = None
 
         if config['aws_mngr']['num_sessions'] == 'auto':
             self.__num_sessions = multiprocessing.cpu_count()
@@ -85,33 +84,11 @@ class AWSManager:
         # Initialize the credentials and sessions
         self.__init_sessions()
 
-    def __get_credentials(self):
-        """
-        Private method to query the credential service for for AWS credentials
-        :return: None
-        """
-        blog = BossLogger().logger
-        blog.info("AWSManager - Getting credentials from service")
-
-        # Get credentials
-        creds = credentials.get_credentials()
-
-        # Finish updating the class
-        if creds:
-            self.__credentials = creds
-            blog = BossLogger().logger
-            blog.info("AWSManager - Successfully updated AWS credentials")
-        else:
-            blog.error("AWSManager - Failed to acquire AWS credentials")
-
     def __init_sessions(self):
         """
         Private method to initialize the instance by getting credentials and creating a pool of sessions
         :return:
         """
-        # Get new credentials
-        self.__get_credentials()
-
         # Create Sessions and store in class
         for session in range(0, self.__num_sessions):
             self.__create_session()
@@ -121,9 +98,7 @@ class AWSManager:
         Method to create a new boto3.session.Session object and add it to the pool
         :return: None
         """
-        temp_session = boto3.session.Session(aws_access_key_id=self.__credentials["access_key"],
-                                             aws_secret_access_key=self.__credentials["secret_key"],
-                                             region_name=self.region)
+        temp_session = get_session()
         
         blog = BossLogger().logger
         blog.info("AWSManager - Created new boto3 session and added to the pool")
