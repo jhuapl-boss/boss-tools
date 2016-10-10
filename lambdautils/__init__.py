@@ -15,7 +15,7 @@
 import boto3
 import json
 
-S3_BUCKET = 'boss-lambda-env'
+S3_BUCKET = 'boss-lambda-prod-env'
 
 def create_session(cred_fh):
     """Read AWS credentials from the given file object and create a Boto3 session.
