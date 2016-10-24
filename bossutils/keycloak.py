@@ -187,6 +187,18 @@ class KeyCloakClient:
 
         return response
 
+    def user_exist(self, uid):
+        try:
+            url = "users/{}".format(userid)
+            resp = self._get(url)
+
+            return True
+        except KeyCloakError as ex:
+            if ex.status == 404:
+                return False
+            else:
+                raise
+
     def get_userdata(self, username):
         userid = self.get_user_id(username)
         url = "users/{}".format(userid)
