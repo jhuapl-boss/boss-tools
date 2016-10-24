@@ -189,7 +189,7 @@ class KeyCloakClient:
 
     def user_exist(self, uid):
         try:
-            url = "users/{}".format(userid)
+            url = "users/{}".format(uid)
             resp = self._get(url)
 
             return True
