@@ -19,20 +19,16 @@ import boto3
 import os
 import sys
 
-from lambdautils import S3_BUCKET
 from lambdautils import create_session
 
-def delete_func(args):
+
+def delete_func(session, name):
     """Delete the lambda function and all of its versions.
     """
-    if args.aws_credentials is None:
-        # This allows aws roles to be used to create sessions.
-        session = boto3.session.Session()
-    else:
-        session = create_session(args.aws_credentials)
     client = session.client('lambda')
     resp = client.delete_function(FunctionName=args.name)
     print(resp)
+
 
 def setup_parser():
     parser = argparse.ArgumentParser(
@@ -55,4 +51,10 @@ if __name__ == '__main__':
     parser = setup_parser()
     args = parser.parse_args()
 
-    delete_func(args)
+    if args.aws_credentials is None:
+        # This allows aws roles to be used to create sessions.
+        session = boto3.session.Session()
+    else:
+        session = create_session(args.aws_credentials)
+
+    delete_func(session, args.name)

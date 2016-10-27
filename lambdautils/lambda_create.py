@@ -19,7 +19,7 @@ import boto3
 import os
 import sys
 
-from lambdautils import S3_BUCKET
+
 from lambdautils import create_session
 
 def create(args):
@@ -65,10 +65,6 @@ def setup_parser():
         type = int,
         help = 'Amount of memory in MB.  Must be a multiple of 64.')
     parser.add_argument(
-        '--bucket', '-b',
-        default = S3_BUCKET,
-        help = 'Name of S3 bucket containing lambda function.')
-    parser.add_argument(
         '--vpcsubnets', '-sn',
         default = [],
         help = 'List of subnet IDs in the lambda function\'s VPC.')
@@ -86,12 +82,13 @@ def setup_parser():
         help = 'Name of function.')
     parser.add_argument(
         'key',
-        default = None,
         help = 'S3 key that identifies zip containing lambda function.')
     parser.add_argument(
         'handler',
-        default = None,
         help = 'Name of lambda handler function.')
+    parser.add_argument(
+        'bucket',
+        help = 'Name of S3 bucket containing lambda function.')
 
     return parser
 

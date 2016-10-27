@@ -22,7 +22,6 @@ import sys
 import tempfile
 
 
-from lambdautils import S3_BUCKET
 from lambdautils import create_session
 
 def zip(src_folder, zip_name):
@@ -49,6 +48,7 @@ def zip(src_folder, zip_name):
         return False
     return True
 
+
 def upload_to_s3(session, zip_file, bucket):
     """Upload the zip file to the given S3 bucket.
 
@@ -62,6 +62,7 @@ def upload_to_s3(session, zip_file, bucket):
     s3.create_bucket(Bucket=bucket)
     s3.put_object(Bucket=bucket, Key=key, Body=open(zip_file, 'rb'))
 
+
 def setup_parser():
     parser = argparse.ArgumentParser(
         description='Script for deploying lambda functions to S3.')
@@ -71,10 +72,6 @@ def setup_parser():
         default = os.environ.get('AWS_CREDENTIALS'),
         type = argparse.FileType('r'),
         help = 'File with credentials for connecting to AWS (default: AWS_CREDENTIALS)')
-    parser.add_argument(
-        '--bucket', '-b',
-        default = S3_BUCKET,
-        help = 'Name of S3 bucket to upload lambdas to.')
     parser.add_argument(
         '--upload-only', '-u',
         action = 'store_const',
@@ -87,6 +84,9 @@ def setup_parser():
     parser.add_argument(
         'zip_file',
         help = 'source_folder will be zipped and stored in this filename.')
+    parser.add_argument(
+        'bucket',
+        help = 'Name of S3 bucket to upload lambdas to.')
 
     return parser
 

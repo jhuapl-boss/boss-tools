@@ -19,8 +19,8 @@ import boto3
 import os
 import sys
 
-from lambdautils import S3_BUCKET
 from lambdautils import create_session
+
 
 def update_cfg(args):
     """Update the configuration (everything but code) of the lambda function.
