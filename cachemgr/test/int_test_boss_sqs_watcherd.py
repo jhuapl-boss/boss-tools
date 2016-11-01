@@ -48,7 +48,7 @@ class SqsWatcherIntegrationTestMixin(object):
         morton_idx = ndlib.XYZMorton([0, 0, 0])
         t = 0
         write_cuboid_key = self.kvio.insert_cube_in_write_buffer(base_write_cuboid_key, t, morton_idx,
-                                                                 cube1.get_blosc_numpy_by_time_index(t))
+                                                                 cube1.to_blosc_by_time_index(t))
 
         # Put page out job on the queue
         sqs = boto3.client('sqs', region_name=get_region())

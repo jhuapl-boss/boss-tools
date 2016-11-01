@@ -47,7 +47,7 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         write_cuboid_base = "WRITE-CUBOID&{}&{}".format(self.resource.get_lookup_key(), 0)
 
         write_cuboid_key = sp.kvio.insert_cube_in_write_buffer(write_cuboid_base, res, cube1.morton_id,
-                                                               cube1.get_blosc_numpy_by_time_index(time_sample))
+                                                               cube1.to_blosc_by_time_index(time_sample))
 
         sp.cache_state.add_to_delayed_write(write_cuboid_key,
                                             self.resource.get_lookup_key(),
@@ -89,7 +89,7 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         write_cuboid_base = "WRITE-CUBOID&{}&{}".format(self.resource.get_lookup_key(), 0)
 
         write_cuboid_key = sp.kvio.insert_cube_in_write_buffer(write_cuboid_base, res, cube1.morton_id,
-                                                               cube1.get_blosc_numpy_by_time_index(time_sample))
+                                                               cube1.to_blosc_by_time_index(time_sample))
 
         sp.cache_state.add_to_delayed_write(write_cuboid_key,
                                             self.resource.get_lookup_key(),
@@ -108,7 +108,7 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         cube2.data[0, 5, 100, 102] = 0
         cube2.data[0, 5, 100, 103] = 0
         write_cuboid_key = sp.kvio.insert_cube_in_write_buffer(write_cuboid_base, res, cube2.morton_id,
-                                                               cube2.get_blosc_numpy_by_time_index(time_sample))
+                                                               cube2.to_blosc_by_time_index(time_sample))
 
         sp.cache_state.add_to_delayed_write(write_cuboid_key,
                                             self.resource.get_lookup_key(),

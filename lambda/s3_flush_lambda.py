@@ -99,19 +99,19 @@ while run_cnt < 2:
         write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
         new_cube = Cube.create_cube(resource, cube_dim)
         new_cube.morton_id = morton
-        new_cube.from_blosc_numpy(write_cuboid_bytes)
+        new_cube.from_blosc(write_cuboid_bytes)
 
         # Get existing cuboid from S3
         existing_cube = Cube.create_cube(resource, cube_dim)
         existing_cube.morton_id = new_cube.morton_id
         existing_cube_bytes = sp.objectio.get_single_object(object_keys[0])
-        existing_cube.from_blosc_numpy(existing_cube_bytes, new_cube.time_range)
+        existing_cube.from_blosc(existing_cube_bytes, new_cube.time_range)
 
         # Merge cuboids
         existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
         # Get bytes
-        cuboid_bytes = existing_cube.to_blosc_numpy()
+        cuboid_bytes = existing_cube.to_blosc()
 
     else:  # Cuboid Does Not Exist
         # Get cuboid to flush from write buffer
@@ -125,7 +125,7 @@ while run_cnt < 2:
         # Create cube for current data
         existing_cube = Cube.create_cube(resource, cube_dim)
         existing_cube.morton_id = morton
-        existing_cube.from_blosc_numpy(cuboid_bytes)
+        existing_cube.from_blosc(cuboid_bytes)
 
         # Collapse all writes into a single op
         for key in delayed_writes:
@@ -136,13 +136,13 @@ while run_cnt < 2:
             write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(key)
             new_cube = Cube.create_cube(resource, cube_dim)
             new_cube.morton_id = morton
-            new_cube.from_blosc_numpy(write_cuboid_bytes)
+            new_cube.from_blosc(write_cuboid_bytes)
 
             # Merge data
             existing_cube.overwrite(new_cube.data, existing_cube.time_range)
 
         # Update bytes to send to s3
-        cuboid_bytes = existing_cube.to_blosc_numpy()
+        cuboid_bytes = existing_cube.to_blosc()
 
     # Write cuboid to S3
     sp.objectio.put_objects(object_keys, [cuboid_bytes])

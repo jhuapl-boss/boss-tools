@@ -155,7 +155,7 @@ while run_cnt < 2:
             print("Object Key: {}".format(object_key))
 
             # Put object in S3
-            sp.objectio.put_objects([object_key], [cube.to_blosc_numpy()])
+            sp.objectio.put_objects([object_key], [cube.to_blosc()])
 
             # Add object to index
             sp.objectio.add_cuboid_to_index(object_key)
