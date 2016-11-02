@@ -127,12 +127,11 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
                 resource = body['resource']
                 coll = resource['collection']
                 exp = resource['experiment']
-                chan_lyr = resource['channel_layer']
-                info = 'collection: {}, experiment: {}, channel/layer: {}'.format(coll, exp, chan_lyr)
+                chan = resource['channel']
+                info = 'collection: {}, experiment: {}, channel: {}'.format(coll, exp, chan)
 
             self._sp.cache_state.set_project_lock(lookup_key, True)
-            self.log.info(
-                'Setting write lock for lookup key: {} for {}'.format(lookup_key, info))
+            self.log.info('Setting write lock for lookup key: {} for {}'.format(lookup_key, info))
 
             # Send notification that something is wrong!
             self.send_alert(lookup_key, info)

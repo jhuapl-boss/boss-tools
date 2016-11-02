@@ -15,17 +15,13 @@
 import unittest
 import numpy as np
 
-from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
-from spdb.spatialdb.test.setup import SetupTests
 
 from cachemgr.boss_delayedwrited import DelayedWriteDaemon
+from spdb.spatialdb.test.setup import AWSSetupLayer
 
 import redis
 import time
-from botocore.exceptions import ClientError
-
-from bossutils import configuration
 
 
 class DelayedWriteDaemonIntegrationTestMixin(object):
@@ -38,8 +34,8 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         dwd = DelayedWriteDaemon("boss-delayedwrited-test.pid")
 
         # Create some a single delayed write
-        cube1 = Cube.create_cube(self.resource, [128, 128, 16])
-        cube1.data = np.random.randint(1, 254, (1, 16, 128, 128))
+        cube1 = Cube.create_cube(self.resource, [512, 512, 16])
+        cube1.random()
         cube1.morton_id = 0
         res = 0
         time_sample = 0
@@ -61,7 +57,7 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         time.sleep(30)
 
         # Make sure they went through
-        cube2 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
+        cube2 = sp.cutout(self.resource, (0, 0, 0), (512, 512, 16), 0)
 
         np.testing.assert_array_equal(cube1.data, cube2.data)
 
@@ -77,8 +73,8 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         dwd = DelayedWriteDaemon("boss-delayedwrited-test.pid")
 
         # Create some a single delayed write
-        cube1 = Cube.create_cube(self.resource, [128, 128, 16])
-        cube1.data = np.random.randint(4, 254, (1, 16, 128, 128))
+        cube1 = Cube.create_cube(self.resource, [512, 512, 16])
+        cube1.random()
         cube1.morton_id = 0
         res = 0
         time_sample = 0
@@ -98,8 +94,8 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
                                             time_sample,
                                             self.resource.to_json())
 
-        cube2 = Cube.create_cube(self.resource, [128, 128, 16])
-        cube2.data = np.random.randint(4, 254, (1, 16, 128, 128))
+        cube2 = Cube.create_cube(self.resource, [512, 512, 16])
+        cube2.random()
         cube2.morton_id = 0
         res = 0
         time_sample = 0
@@ -122,7 +118,7 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
         time.sleep(30)
 
         # Make sure they went through
-        cube3 = sp.cutout(self.resource, (0, 0, 0), (128, 128, 16), 0)
+        cube3 = sp.cutout(self.resource, (0, 0, 0), (512, 512, 16), 0)
 
         cube2.data[0, 5, 100, 100] = 2
         cube2.data[0, 5, 100, 101] = 1
@@ -137,94 +133,29 @@ class DelayedWriteDaemonIntegrationTestMixin(object):
 
 
 class TestIntegrationDelayedWriteDaemon(DelayedWriteDaemonIntegrationTestMixin, unittest.TestCase):
+    layer = AWSSetupLayer
 
     def setUp(self):
-        """Clean kv store in between tests"""
+
+        # Get data from nose2 layer based setup
+        self.data = self.layer.data
+        self.resource = self.layer.resource
+        self.kvio_config = self.layer.kvio_config
+        self.state_config = self.layer.state_config
+        self.object_store_config = self.layer.object_store_config
+
         client = redis.StrictRedis(host=self.kvio_config['cache_host'],
                                    port=6379, db=1, decode_responses=False)
         client.flushdb()
-
         client = redis.StrictRedis(host=self.state_config['cache_state_host'],
                                    port=6379, db=1, decode_responses=False)
         client.flushdb()
 
-    def setUpParams(self):
-        """ Create a diction of configuration values for the test resource. """
-        # setup resources
-        self.setup_helper = SetupTests()
-        self.setup_helper.mock = False
-
-        self.data = self.setup_helper.get_image8_dict()
-        self.resource = BossResourceBasic(self.data)
-
-        self.config = configuration.BossConfig()
-
-        # kvio settings
-        self.kvio_config = {"cache_host": self.config['aws']['cache'],
-                            "cache_db": 1,
-                            "read_timeout": 86400}
-
-        # state settings
-        self.state_config = {"cache_state_host": self.config['aws']['cache-state'], "cache_state_db": 1}
-
-        # object store settings
-        _, domain = self.config['aws']['cuboid_bucket'].split('.', 1)
-        self.s3_flush_queue_name = "intTest.S3FlushQueue.{}".format(domain).replace('.', '-')
-        self.object_store_config = {"s3_flush_queue": "",
-                                    "cuboid_bucket": "intTest.{}".format(self.config['aws']['cuboid_bucket']),
-                                    "page_in_lambda_function": self.config['lambda']['page_in_function'],
-                                    "page_out_lambda_function": self.config['lambda']['flush_function'],
-                                    "s3_index_table": "intTest.{}".format(self.config['aws']['s3-index-table'])}
-
-    @classmethod
-    def setUpClass(cls):
-        """ get_some_resource() is slow, to avoid calling it for each test use setUpClass()
-            and store the result as class variable
-        """
-        super(TestIntegrationDelayedWriteDaemon, cls).setUpClass()
-        cls.setUpParams(cls)
-        try:
-            cls.setup_helper.create_s3_index_table(cls.object_store_config["s3_index_table"])
-        except ClientError:
-            cls.setup_helper.delete_s3_index_table(cls.object_store_config["s3_index_table"])
-            cls.setup_helper.create_s3_index_table(cls.object_store_config["s3_index_table"])
-
-        try:
-            cls.setup_helper.create_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
-        except ClientError:
-            cls.setup_helper.delete_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
-            cls.setup_helper.create_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
-
-        try:
-            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
-        except ClientError:
-            try:
-                cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
-            except:
-                pass
-            time.sleep(61)
-            cls.object_store_config["s3_flush_queue"] = cls.setup_helper.create_flush_queue(cls.s3_flush_queue_name)
-
-    @classmethod
-    def tearDownClass(cls):
-        super(TestIntegrationDelayedWriteDaemon, cls).tearDownClass()
-        try:
-            cls.setup_helper.delete_s3_index_table(cls.object_store_config["s3_index_table"])
-        except:
-            pass
-
-        try:
-            cls.setup_helper.delete_cuboid_bucket(cls.object_store_config["cuboid_bucket"])
-        except:
-            pass
-
-        try:
-            cls.setup_helper.delete_flush_queue(cls.object_store_config["s3_flush_queue"])
-        except:
-            pass
-
-    def get_num_cache_keys(self, spdb):
-        return len(self.cache_client.keys("*"))
-
-    def get_num_status_keys(self, spdb):
-        return len(self.status_client.keys("*"))
+    def tearDown(self):
+        """Clean kv store in between tests"""
+        client = redis.StrictRedis(host=self.kvio_config['cache_host'],
+                                   port=6379, db=1, decode_responses=False)
+        client.flushdb()
+        client = redis.StrictRedis(host=self.state_config['cache_state_host'],
+                                   port=6379, db=1, decode_responses=False)
+        client.flushdb()

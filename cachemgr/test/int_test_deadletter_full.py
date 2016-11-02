@@ -12,21 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-import base64
+import botocore
 from bossutils.aws import get_region
 import bossutils.configuration as configuration
 import boto3
 from botocore.exceptions import ClientError
-import json
 import numpy as np
 import time
 import unittest
 from unittest.mock import patch, ANY
-import spdb
 from spdb.project import BossResourceBasic
 from spdb.spatialdb import Cube, SpatialDB
-from spdb.spatialdb.error import SpdbError, ErrorCodes
 from spdb.spatialdb.test.setup import SetupTests
 import tempfile
 import warnings
@@ -65,7 +61,11 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
         lambda_client = boto3.client('lambda', region_name=get_region())
         cls.test_lambda = 'IntTest-{}'.format(cls.domain).replace('.', '-')
-        lambda_client.delete_function(FunctionName=cls.test_lambda)   
+        try:
+            lambda_client.delete_function(FunctionName=cls.test_lambda)
+        except botocore.exceptions.ClientError:
+            pass
+
         resp = lambda_client.get_function(FunctionName=cls.object_store_config['page_out_lambda_function'])
         lambda_cfg = resp['Configuration']
         vpc_cfg = lambda_cfg['VpcConfig']
@@ -74,7 +74,7 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
         temp_file = tempfile.NamedTemporaryFile()
         temp_name = temp_file.name + '.zip'
-        temp_file.close();
+        temp_file.close()
         with ZipFile(temp_name, mode='w') as zip:
             t = time.localtime()
             lambda_file = ZipInfo('lambda_function.py', date_time=(
@@ -121,7 +121,10 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
             pass
 
         lambda_client = boto3.client('lambda', region_name=get_region())
-        #lambda_client.delete_function(FunctionName=cls.test_lambda)
+        try:
+            lambda_client.delete_function(FunctionName=cls.test_lambda)
+        except botocore.exceptions.ClientError:
+            pass
 
     def setUpParams(self):
         self.setup_helper = SetupTests()
@@ -191,9 +194,7 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
 
 
         try:
-            with patch.object(
-                self.dead_letter, 'send_alert', wraps=self.dead_letter.send_alert
-                ) as send_alert_spy:
+            with patch.object(self.dead_letter, 'send_alert', wraps=self.dead_letter.send_alert) as send_alert_spy:
 
                 # Method under test.  Returns True if it found a message.
                 i = 0

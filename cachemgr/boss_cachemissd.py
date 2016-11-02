@@ -30,6 +30,7 @@ import time
 from bossutils import daemon_base
 from bossutils.configuration import BossConfig
 from spdb.spatialdb import SpatialDB
+from spdb.spatialdb.error import SpdbError
 from spdb.c_lib import ndlib
 
 
