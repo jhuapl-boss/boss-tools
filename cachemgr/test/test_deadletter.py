@@ -58,10 +58,10 @@ class TestDeadLetterDaemon(unittest.TestCase):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
         receipt_handle = 'blah'
-        resource = { 
-            'collection': 'JHU', 
-            'experiment': 'mouse1', 
-            'channel_layer': 'EM' 
+        resource = {
+            'collection': 'JHU',
+            'experiment': 'mouse1',
+            'channel': 'EM'
         }
         msg = [{"Body": json.dumps({
                     "write_cuboid_key": key,
@@ -96,10 +96,10 @@ class TestDeadLetterDaemon(unittest.TestCase):
         key = 'a4931d58076dc47773957809380f206e4228517c9fa6daed536043782024e480&1&1&1&0&0&12'
         lookup_key = '1&1&1'
         receipt_handle = 'blah'
-        resource = { 
-            'collection': 'JHU', 
-            'experiment': 'mouse1', 
-            'channel_layer': 'EM' 
+        resource = {
+            'collection': 'JHU',
+            'experiment': 'mouse1',
+            'channel': 'EM'
         }
         msg = [{"Body": json.dumps({
                     "write_cuboid_key": key,
@@ -130,6 +130,5 @@ class TestDeadLetterDaemon(unittest.TestCase):
                 state.set_project_lock.assert_called_with(lookup_key, True)
 
                 # Alert should be sent.
-                info = 'collection: JHU, experiment: mouse1, channel/layer: EM'
+                info = 'collection: JHU, experiment: mouse1, channel: EM'
                 send_alert_fake.assert_called_with(lookup_key, info)
-
