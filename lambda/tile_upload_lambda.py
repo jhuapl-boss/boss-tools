@@ -67,15 +67,15 @@ proj_info.job_id = metadata["ingest_job"]
 
 # update value in the dynamo table
 tile_index_db = BossTileIndexDB(proj_info.project_name)
-chunk = tile_index_db.getCuboid(metadata["chunk_key"])
+chunk = tile_index_db.getCuboid(metadata["chunk_key"], int(metadata["ingest_job"]))
 if chunk:
     print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
-    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
+    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
 else:
     # First tile in the chunk
     print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
-    tile_index_db.createCuboidEntry(metadata["chunk_key"], metadata["ingest_job"])
-    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key)
+    tile_index_db.createCuboidEntry(metadata["chunk_key"], int(metadata["ingest_job"]))
+    chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
 
 # ingest the chunk if we have all the tiles
 if chunk_ready:

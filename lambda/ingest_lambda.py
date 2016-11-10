@@ -4,7 +4,6 @@
 import sys
 import json
 import time
-import boto3
 
 from spdb.spatialdb import SpatialDB
 from spdb.spatialdb import Cube
@@ -45,7 +44,7 @@ while run_cnt < 2:
     msg_data = None
     msg_id = None
     msg_rx_handle = None
-    while rx_cnt < 4:
+    while rx_cnt < 6:
         ingest_queue = IngestQueue(proj_info)
         msg = [x for x in ingest_queue.receiveMessage()]
         if msg:
@@ -59,8 +58,8 @@ while run_cnt < 2:
             break
         else:
             rx_cnt += 1
-            print("No message found. Try {} of 4".format(rx_cnt))
-            time.sleep(.25)
+            print("No message found. Try {} of 6".format(rx_cnt))
+            time.sleep(1)
 
     if not msg_id:
         # Nothing to flush. Exit.
@@ -78,12 +77,14 @@ while run_cnt < 2:
     # Get tile list from Tile Index Table
     tile_index_db = BossTileIndexDB(proj_info.project_name)
     # tile_index_result (dict): keys are S3 object keys of the tiles comprising the chunk.
-    tile_index_result = tile_index_db.getCuboid(msg_data["chunk_key"])
+    tile_index_result = tile_index_db.getCuboid(msg_data["chunk_key"], int(msg_data["ingest_job"]))
 
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
-    tile_key_list = sorted(tile_index_result["tile_uploaded_map"].keys())
-    print("Sorted Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
+    tile_key_list = [x.rsplit("&", 2) for x in tile_index_result["tile_uploaded_map"].keys()]
+    tile_key_list = sorted(tile_key_list, key=lambda x: int(x[1]))
+    tile_key_list = ["&".join(x) for x in tile_key_list]
+    print("Sorted Tile Keys: {}".format(tile_key_list))
 
     # Setup the resource
     resource = BossResourceBasic()
@@ -97,12 +98,14 @@ while run_cnt < 2:
     for tile_key in tile_key_list:
         image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
         tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
+        tile_img = np.swapaxes(tile_img, 0, 1)
         data.append(tile_img)
         num_z_slices += 1
         # TODO Make sure data type is correct
 
     # Make 3D array of image data. It should be in XYZ at this point
     chunk_data = np.array(data)
+    del data
     # TODO: Make sure data is not transposed
     tile_dims = chunk_data.shape
 
@@ -160,16 +163,16 @@ while run_cnt < 2:
             # Add object to index
             sp.objectio.add_cuboid_to_index(object_key)
 
+    ingest_queue = IngestQueue(proj_info)
     # Delete Tiles
     for tile in tile_key_list:
         print("Deleting tile: {}".format(tile))
-        #tile_bucket.deleteObject(tile)
+        tile_bucket.deleteObject(tile)
 
     # Delete Entry in tile table
-    #tile_index_db.deleteCuboid(chunk_key)
+    tile_index_db.deleteCuboid(chunk_key, int(msg_data["ingest_job"]))
 
     # Delete message since it was processed successfully
-    ingest_queue = IngestQueue(proj_info)
     ingest_queue.deleteMessage(msg_id, msg_rx_handle)
 
     # Increment run counter
