@@ -187,6 +187,13 @@ class KeyCloakClient:
 
         return response
 
+    def get_all_users(self, search=None):
+        url = "users"
+        if search is not None:
+            url += "?search=" + search
+
+        return self._get(url).json()
+
     def user_exist(self, uid):
         try:
             url = "users/{}".format(uid)
