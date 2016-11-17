@@ -90,7 +90,8 @@ while run_cnt < 2:
     print("object key: {}".format(object_keys[0]))
     print("cache key: {}".format(cache_key))
 
-    cube_dim = CUBOIDSIZE[int(write_cuboid_key.split('&')[4])]
+    resolution = int(write_cuboid_key.split('&')[4])
+    cube_dim = CUBOIDSIZE[resolution]
     morton = int(write_cuboid_key.split('&')[6])
     write_cuboid_keys_to_remove = [write_cuboid_key]
 
@@ -150,6 +151,10 @@ while run_cnt < 2:
     # Add to S3 Index if this is a new cube
     if not exist_keys:
         sp.objectio.add_cuboid_to_index(object_keys[0])
+
+    # Update id indices if this is an annotation channel
+    if resource.data['channel']['type'] == 'annotation':
+        sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [cuboid_bytes])
 
     # Check if cuboid already exists in the cache
     if sp.kvio.cube_exists(cache_key):
