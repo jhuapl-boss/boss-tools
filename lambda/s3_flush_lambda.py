@@ -92,6 +92,7 @@ while run_cnt < 2:
 
     resolution = int(write_cuboid_key.split('&')[4])
     cube_dim = CUBOIDSIZE[resolution]
+    time_sample = int(write_cuboid_key.split('&')[5])
     morton = int(write_cuboid_key.split('&')[6])
     write_cuboid_keys_to_remove = [write_cuboid_key]
 
@@ -113,10 +114,15 @@ while run_cnt < 2:
 
         # Get bytes
         cuboid_bytes = existing_cube.to_blosc()
+        uncompressed_cuboid_bytes = existing_cube.data
 
     else:  # Cuboid Does Not Exist
         # Get cuboid to flush from write buffer
         cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
+        new_cube = Cube.create_cube(resource, cube_dim)
+        t_range = [time_sample, time_sample+1]
+        new_cube.from_blosc(cuboid_bytes, t_range)
+        uncompressed_cuboid_bytes = new_cube.data
 
 
     # Check for delayed writes for this cuboid
@@ -142,8 +148,9 @@ while run_cnt < 2:
             # Merge data
             existing_cube.overwrite(new_cube.data, existing_cube.time_range)
 
-        # Update bytes to send to s3
+        # Update bytes to send to s3 and bytes scanned for ids
         cuboid_bytes = existing_cube.to_blosc()
+        uncompressed_cuboid_bytes = existing_cube.data
 
     # Write cuboid to S3
     sp.objectio.put_objects(object_keys, [cuboid_bytes])
@@ -154,7 +161,7 @@ while run_cnt < 2:
 
     # Update id indices if this is an annotation channel
     if resource.data['channel']['type'] == 'annotation':
-        sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [cuboid_bytes])
+        sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [uncompressed_cuboid_bytes])
 
     # Check if cuboid already exists in the cache
     if sp.kvio.cube_exists(cache_key):
