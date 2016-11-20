@@ -16,6 +16,7 @@ import numpy as np
 import redis
 
 from spdb.spatialdb.test.setup import AWSSetupLayer
+from spdb.project import BossResourceBasic
 
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
@@ -43,8 +44,12 @@ class IntegrationTestCacheMissDaemon(unittest.TestCase):
     def setUp(self):
 
         # Get data from nose2 layer based setup
-        self.data = self.layer.data
-        self.resource = self.layer.resource
+
+        # Setup Data
+        self.data = self.layer.setup_helper.get_image8_dict()
+        self.resource = BossResourceBasic(self.data)
+
+        # Setup config
         self.kvio_config = self.layer.kvio_config
         self.state_config = self.layer.state_config
         self.object_store_config = self.layer.object_store_config

@@ -22,6 +22,7 @@ import redis
 import time
 import boto3
 from spdb.spatialdb.test.setup import AWSSetupLayer
+from spdb.project import BossResourceBasic
 
 from bossutils.aws import get_region
 from spdb.c_lib import ndlib
@@ -92,8 +93,12 @@ class TestIntegrationSqsWatcher(SqsWatcherIntegrationTestMixin, unittest.TestCas
 
     def setUp(self):
         # Get data from nose2 layer based setup
-        self.data = self.layer.data
-        self.resource = self.layer.resource
+
+        # Setup Data
+        self.data = self.layer.setup_helper.get_image8_dict()
+        self.resource = BossResourceBasic(self.data)
+
+        # Setup config
         self.kvio_config = self.layer.kvio_config
         self.state_config = self.layer.state_config
         self.object_store_config = self.layer.object_store_config

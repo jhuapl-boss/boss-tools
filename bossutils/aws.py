@@ -19,6 +19,7 @@ from bossutils import configuration, utils
 from bossutils.logger import BossLogger
 import multiprocessing
 import queue
+import os
 
 
 def get_region():
@@ -30,14 +31,18 @@ def get_region():
     Returns: aws region
 
     """
-    try:
-        region = utils.read_url(utils.METADATA_URL + 'placement/availability-zone')[:-1]
-        return region
-    except NotImplementedError:
-        # If you get here, you are mocking and metadata is not supported.
+    if 'LOCAL_DYNAMODB_URL' in os.environ:
+        # If you get here, you are testing locally
         return "us-east-1"
-    except URLError:
-        return None
+    else:
+        try:
+            region = utils.read_url(utils.METADATA_URL + 'placement/availability-zone')[:-1]
+            return region
+        except NotImplementedError:
+            # If you get here, you are mocking and metadata is not supported.
+            return "us-east-1"
+        except URLError:
+            return None
 
 
 def get_session():
