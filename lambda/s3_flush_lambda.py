@@ -56,7 +56,7 @@ while run_cnt < 2:
             flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
         except botocore.exceptions.ClientError:
             print("Failed to get message. Trying again...")
-            flush_msg = None
+            flush_msg = {}
             time.sleep(.5)
 
         if "Messages" in flush_msg:
