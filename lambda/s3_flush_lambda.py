@@ -39,10 +39,6 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 json_event = sys.argv[1]
 event = json.loads(json_event)
 
-# Setup SPDB instance
-sp = SpatialDB(event["config"]["kv_config"],
-               event["config"]["state_config"],
-               event["config"]["object_store_config"])
 run_cnt = 0
 
 while run_cnt < 2:
@@ -76,6 +72,13 @@ while run_cnt < 2:
 
         # Load the message body
         flush_msg_data = json.loads(flush_msg_data['Body'])
+
+        print("Message: {}".format(flush_msg_data))
+
+        # Setup SPDB instance
+        sp = SpatialDB(flush_msg_data["config"]["kv_config"],
+                       flush_msg_data["config"]["state_config"],
+                       flush_msg_data["config"]["object_store_config"])
 
         # Get the write-cuboid key to flush
         write_cuboid_key = flush_msg_data['write_cuboid_key']
