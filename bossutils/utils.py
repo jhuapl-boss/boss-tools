@@ -34,13 +34,29 @@ def read_url(url):
     """Read the data from the given url and return it as a utf-8 string."""
     return urllib.request.urlopen(url).read().decode("utf-8")
 
-def execute(cmd):
-    """Execute the given command on the system."""
+def execute(cmd, whole=False, shell=False):
+    """
+    Execute the given command on the system.
+    Args:
+        cmd: command to execute
+        whole: if true don't split the command into parts, execute as a whole command.  Defaults to False to be compatible with previous uses of the function.
+        shell: run the command through a shell which allows Pipes to work.  Defaults to False to be compatible with previous uses of the function.
+
+    Returns:
+        (int) Return code from command executed.
+    """
     log = logger.BossLogger().logger
     log.info("Executing command: {}".format(cmd))
-    proc = subprocess.Popen(shlex.split(cmd),
-                            stdout = subprocess.PIPE,
-                            stderr = subprocess.PIPE)
+    if whole:
+        proc = subprocess.Popen(cmd,
+                                shell=shell,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+    else:
+        proc = subprocess.Popen(shlex.split(cmd),
+                                shell=shell,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
 
     # Right now use communicate, no big out process should
     # be executed by this.
