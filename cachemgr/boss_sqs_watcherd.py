@@ -61,7 +61,9 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
                                "cuboid_bucket": self.config['aws']['cuboid_bucket'],
                                "page_in_lambda_function": self.config['lambda']['page_in_function'],
                                "page_out_lambda_function": self.config['lambda']['flush_function'],
-                               "s3_index_table": self.config['aws']['s3-index-table']}
+                               "s3_index_table": self.config['aws']['s3-index-table'],
+                               "id_index_table": self.config['aws']['id-index-table'],
+                               "id_count_table": self.config['aws']['id-count-table']}
 
         config_data = {"kv_config": kvio_config,
                        "state_config": state_config,

@@ -26,6 +26,7 @@ from spdb.spatialdb import Cube, SpatialDB
 from spdb.spatialdb.test.setup import SetupTests
 import tempfile
 import warnings
+import random
 from zipfile import ZipFile, ZipInfo
 
 # Add a reference to parent so that we can import those files.
@@ -151,10 +152,12 @@ class TestEnd2EndIntegrationDeadLetterDaemon(unittest.TestCase):
         self.s3_flush_queue_name = "intTest.S3FlushQueue.{}".format(self.domain).replace('.', '-')
         self.object_store_config = {
             "s3_flush_queue": '', # This will get updated after the queue is created.
-            "cuboid_bucket": "intTest.{}".format(self.config['aws']['cuboid_bucket']),
+            "cuboid_bucket": "intTest{}.{}".format(random.randint(0, 9999), self.config['aws']['cuboid_bucket']),
             "page_in_lambda_function": self.config['lambda']['page_in_function'],
             "page_out_lambda_function": self.config['lambda']['flush_function'],
-            "s3_index_table": "intTest.{}".format(self.config['aws']['s3-index-table'])}
+            "s3_index_table": "intTest.{}".format(self.config['aws']['s3-index-table']),
+            "id_index_table": "intTest.{}".format(self.config['aws']['id-index-table']),
+            "id_count_table": "intTest.{}".format(self.config['aws']['id-count-table'])}
 
     def setUp(self):
         # Suppress ResourceWarning messages about unclosed connections.

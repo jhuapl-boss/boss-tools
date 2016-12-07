@@ -27,6 +27,7 @@ import sys
 import json
 import time
 import boto3
+import botocore
 
 from spdb.spatialdb import SpatialDB
 from spdb.spatialdb import Cube
@@ -38,10 +39,6 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 json_event = sys.argv[1]
 event = json.loads(json_event)
 
-# Setup SPDB instance
-sp = SpatialDB(event["config"]["kv_config"],
-               event["config"]["state_config"],
-               event["config"]["object_store_config"])
 run_cnt = 0
 
 while run_cnt < 2:
@@ -51,7 +48,13 @@ while run_cnt < 2:
     flush_msg_data = None
     rx_handle = ''
     while rx_cnt < 6:
-        flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
+        try:
+            flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
+        except botocore.exceptions.ClientError:
+            print("Failed to get message. Trying again...")
+            flush_msg = {}
+            time.sleep(.5)
+
         if "Messages" in flush_msg:
             # Get Message
             flush_msg_data = flush_msg['Messages'][0]
@@ -69,6 +72,13 @@ while run_cnt < 2:
 
         # Load the message body
         flush_msg_data = json.loads(flush_msg_data['Body'])
+
+        print("Message: {}".format(flush_msg_data))
+
+        # Setup SPDB instance
+        sp = SpatialDB(flush_msg_data["config"]["kv_config"],
+                       flush_msg_data["config"]["state_config"],
+                       flush_msg_data["config"]["object_store_config"])
 
         # Get the write-cuboid key to flush
         write_cuboid_key = flush_msg_data['write_cuboid_key']
@@ -90,7 +100,9 @@ while run_cnt < 2:
     print("object key: {}".format(object_keys[0]))
     print("cache key: {}".format(cache_key))
 
-    cube_dim = CUBOIDSIZE[int(write_cuboid_key.split('&')[4])]
+    resolution = int(write_cuboid_key.split('&')[4])
+    cube_dim = CUBOIDSIZE[resolution]
+    time_sample = int(write_cuboid_key.split('&')[5])
     morton = int(write_cuboid_key.split('&')[6])
     write_cuboid_keys_to_remove = [write_cuboid_key]
 
@@ -112,10 +124,15 @@ while run_cnt < 2:
 
         # Get bytes
         cuboid_bytes = existing_cube.to_blosc()
+        uncompressed_cuboid_bytes = existing_cube.data
 
     else:  # Cuboid Does Not Exist
         # Get cuboid to flush from write buffer
         cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
+        new_cube = Cube.create_cube(resource, cube_dim)
+        t_range = [time_sample, time_sample+1]
+        new_cube.from_blosc(cuboid_bytes, t_range)
+        uncompressed_cuboid_bytes = new_cube.data
 
 
     # Check for delayed writes for this cuboid
@@ -141,8 +158,9 @@ while run_cnt < 2:
             # Merge data
             existing_cube.overwrite(new_cube.data, existing_cube.time_range)
 
-        # Update bytes to send to s3
+        # Update bytes to send to s3 and bytes scanned for ids
         cuboid_bytes = existing_cube.to_blosc()
+        uncompressed_cuboid_bytes = existing_cube.data
 
     # Write cuboid to S3
     sp.objectio.put_objects(object_keys, [cuboid_bytes])
@@ -150,6 +168,10 @@ while run_cnt < 2:
     # Add to S3 Index if this is a new cube
     if not exist_keys:
         sp.objectio.add_cuboid_to_index(object_keys[0])
+
+    # Update id indices if this is an annotation channel
+    if resource.data['channel']['type'] == 'annotation':
+        sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [uncompressed_cuboid_bytes])
 
     # Check if cuboid already exists in the cache
     if sp.kvio.cube_exists(cache_key):
