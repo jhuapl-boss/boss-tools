@@ -18,6 +18,7 @@
 from lambdafcns.upload_enqueue_lambda import download_from_s3, enqueue_msgs, parse_line, MAX_BATCH_MSGS
 import boto3
 from io import StringIO
+import json
 from ndingest.ndqueue.uploadqueue import UploadQueue
 import os
 import unittest
@@ -39,6 +40,27 @@ class TestUploadEnqueueLambda(unittest.TestCase):
             self.assertEqual(TEST_FILE_DATA.decode('utf-8'), actual)
         finally:
             os.remove(local_filename)
+
+    def test_parse_line_bad_line(self):
+        header = { 'job_id': 1, 'upload_queue_arn': '', 'ingest_queue_arn': '' }
+        line = 'one_column'
+        with self.assertRaises(RuntimeError):
+            parse_line(header, line)
+
+    def test_parse_line(self):
+        header = { 'job_id': 1, 'upload_queue_arn': '', 'ingest_queue_arn': '' }
+        line = 'chunk_key, tile_key'
+        expected = {
+            'job_id': 1,
+            'upload_queue_arn': '',
+            'ingest_queue_arn': '',
+            'tile_key': 'tile_key',
+            'chunk_key': 'chunk_key'
+        }
+
+        actual = parse_line(header, line)
+
+        self.assertEqual(expected, json.loads(actual))
 
     @patch('lambdafcns.upload_enqueue_lambda.UploadQueue', autospec=True)
     @patch('lambdafcns.upload_enqueue_lambda.parse_line', autospec=True)

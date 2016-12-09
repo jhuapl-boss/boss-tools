@@ -21,6 +21,7 @@ import boto3
 import copy
 import json
 import os
+import sys
 import tempfile
 from ndingest.ndqueue.uploadqueue import UploadQueue
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
@@ -52,18 +53,31 @@ def enqueue_msgs(fp):
     read_header = False
     msgs = []
     upload_queue = None
+    lineNum = 0
+
     for line in fp:
+        lineNum += 1
         if not read_header:
             header = json.loads(line)
+            if 'upload_queue_url' not in header:
+                raise KeyError('Expected upload_queue_url in header')
+            if 'ingest_queue_url' not in header:
+                raise KeyError('Expected ingest_queue_url in header')
+            if 'job_id' not in header:
+                raise KeyError('Expected job_id in header')
             read_header = True
             continue
 
-        msgs.append(parse_line(header, line))
+        try:
+            msgs.append(parse_line(header, line))
+        except:
+            print('Error parsing line {}: {}'.format(lineNum, line))
 
         if len(msgs) == 1 and upload_queue is None:
             # Instantiate the upload queue object.
             asDict = json.loads(msgs[0])
             boss_ingest_proj = BossIngestProj.fromTileKey(asDict['tile_key'])
+            boss_ingest_proj.job_id = header['job_id']
             upload_queue = UploadQueue(boss_ingest_proj)
         if len(msgs) >= MAX_BATCH_MSGS:
             # Enqueue messages.
@@ -78,17 +92,32 @@ def enqueue_msgs(fp):
 def parse_line(header, line):
     """Parse one line of data from the message file.
 
+    Each line is expected to contain chunk key - comma - tile key (CSV style).
+
     Args:
         header (dict): Data to join with contents of line to construct a full message.
         line (string): Contents of the line.
 
     Returns:
         (string): JSON encoded data ready for enqueuing.
-    """
-    working_header = copy.deepcopy(header)
-    # TODO: Extract chunk key and tile key from line.
 
-    return json.dumps(working_header)
+    Raises:
+        (RuntimeError): if less than 2 columns found on a line.
+    """
+    msg = {}
+    msg['job_id'] = header['job_id']
+    msg['upload_queue_arn'] = header['upload_queue_url']
+    msg['ingest_queue_arn'] = header['ingest_queue_url']
+
+    tokens = line.split(',')
+    if len(tokens) < 2:
+        raise RuntimeError('Bad message line encountered.')
+
+    msg['chunk_key'] = tokens[0].strip()
+    msg['tile_key'] = tokens[1].strip()
+
+    return json.dumps(msg)
+
 
 if __name__ == '__main__':
     # Load settings
@@ -110,4 +139,8 @@ if __name__ == '__main__':
     local_filename = download_from_s3(bucket, filename)
 
     # Parse and start enqueuing.
-    enqueue_msgs(local_filename)
+    with open(local_filename) as fp:
+        enqueue_msgs(fp)
+
+    # Clean up.
+    os.remove(local_filename)
