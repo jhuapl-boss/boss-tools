@@ -144,3 +144,7 @@ if __name__ == '__main__':
 
     # Clean up.
     os.remove(local_filename)
+    bucket.delete_objects(Delete={
+        'Objects': [{ 'Key': filename }],
+        'Quiet': True
+    })
