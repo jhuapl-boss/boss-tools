@@ -98,7 +98,7 @@ while run_cnt < 2:
     for tile_key in tile_key_list:
         image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
         tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
-        tile_img = np.swapaxes(tile_img, 0, 1)
+        #tile_img = np.swapaxes(tile_img, 0, 1)
         data.append(tile_img)
         num_z_slices += 1
         # TODO Make sure data type is correct
