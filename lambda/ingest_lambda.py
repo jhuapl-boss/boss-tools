@@ -161,7 +161,7 @@ while run_cnt < 2:
             sp.objectio.put_objects([object_key], [cube.to_blosc()])
 
             # Add object to index
-            sp.objectio.add_cuboid_to_index(object_key)
+            sp.objectio.add_cuboid_to_index(object_key, ingest_job=int(msg_data["ingest_job"]))
 
     ingest_queue = IngestQueue(proj_info)
     # Delete Tiles
