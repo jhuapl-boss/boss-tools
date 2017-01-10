@@ -18,15 +18,15 @@ from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
 
 bossutils.utils.set_excepthook()
 
-def pass(input_):
+def Pass(input_):
     return input_
 
 class BossActivityManager(ActivityManager):
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
         config = bossutils.configuration.BossConfig()
 
-        self.domain = config['system']['fqdn'].split('.', 1)
+        self.domain = config['system']['fqdn'].split('.', 1)[1]
 
     def build(self):
         def dispatch(target):
@@ -36,7 +36,7 @@ class BossActivityManager(ActivityManager):
 
         return [
             #lambda: ActivityProcess('Name.'+self.domain, dispatch(function))
-            lambda: ActivityProcess('Pass.'+self.domain, dispatch(input_))
+            lambda: ActivityProcess('Pass.'+self.domain, dispatch(Pass))
         ]
 
 if __name__ == '__main__':
