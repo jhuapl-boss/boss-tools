@@ -13,8 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import bossutils
 from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
+
+from bossutils.delete import *
 
 bossutils.utils.set_excepthook()
 
@@ -36,7 +37,10 @@ class BossActivityManager(ActivityManager):
 
         return [
             #lambda: ActivityProcess('Name.'+self.domain, dispatch(function))
-            lambda: ActivityProcess('Pass.'+self.domain, dispatch(Pass))
+            lambda: ActivityProcess('Pass.'+self.domain, dispatch(Pass)),
+            lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
+            lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
+            lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
         ]
 
 if __name__ == '__main__':
