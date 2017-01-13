@@ -22,10 +22,11 @@ import boto3
 import bossutils
 import bossutils.aws
 import pprint
-from boto3.dynamodb.conditions import Key as awsKey
+from boto3.dynamodb.conditions import Key, Attr
 import hashlib
 
 TEST_TABLE = 'hiderrt1-test1'
+S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 
 """
 DeleteError will be used if an Exception occurs within any of the delete functions.
@@ -55,7 +56,7 @@ def delete_metedata(input, session=None):
                     'ExpressionAttributeNames': {"#bosskey": "key"},
                     'ProjectionExpression': "lookup_key, #bosskey",
                     'ConsistentRead': True,
-                    'Limit': 1000}
+                    'Limit': 100}
     query_resp = client.query(**query_params)
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         raise DeleteError(query_resp)
@@ -108,7 +109,7 @@ def delete_id_count(input, session=None):
                     'ExpressionAttributeNames': {"#channel_key": "channel-key", "#version": "version"},
                     'ProjectionExpression': "#channel_key, #version",
                     'ConsistentRead': True,
-                    'Limit': 1000}
+                    'Limit': 100}
     query_resp = client.query(**query_params)
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         raise DeleteError(query_resp)
@@ -134,6 +135,12 @@ def delete_id_count(input, session=None):
             del_resp["deleting"] = id
             raise DeleteError(query_resp)
     print("deleted {} items".format(count))
+
+
+def get_channel_id_key(lookup_key, resolution, id):
+    base_key = '{}&{}&{}'.format(lookup_key, resolution, id)
+    hash_str = hashlib.md5(base_key.encode()).hexdigest()
+    return '{}&{}'.format(hash_str, base_key)
 
 
 def delete_id_index(input, session=None):
@@ -146,19 +153,77 @@ def delete_id_index(input, session=None):
     Returns:
 
     """
-    id_count_table = input["id-index-table"]
+    if session is None:
+        session = bossutils.aws.get_session()
+    id_index_table = input["id-index-table"]
+    lookup_key = input["lookup_key"]
+    client = session.client('dynamodb')
+    and_lookup_key = "&{}&".format(lookup_key)
+    #and_lookup_key = "45aeef7ae7626d34f32c14512b25b1fa&19&14&16&0&1478"
+
+    query_params = {'TableName': id_index_table,
+                    # 'ScanFilter': { '"#channel_id_key":': {'AttributeValueList': [{"S": ":channel_id_key_value"}],
+                    #                                        'ComparisonOperator': "CONTAINS"}},
+                    'FilterExpression': 'contains(#channel_id_key, :channel_id_key_value)',
+                    'ExpressionAttributeValues': {":channel_id_key_value": {"S": and_lookup_key}},
+                    'ExpressionAttributeNames': {"#channel_id_key": "channel-id-key", "#version": "version"},
+                    'ProjectionExpression': "#channel_id_key, #version",
+                    'ConsistentRead': True,
+                    'Limit': 100}
+    scan_resp = client.scan(**query_params)
+
+    if scan_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        raise DeleteError(scan_resp)
+
+    count = 0
+    while scan_resp['Count'] > 0:
+        for id in scan_resp["Items"]:
+            exclusive_start_key=id
+            count += 1
+            print("deleting: {}".format(id))
+            del_resp = client.delete_item(
+                TableName=id_index_table,
+                Key=id,
+                ReturnValues='NONE',
+                ReturnConsumedCapacity='NONE')
+            if del_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                del_resp["deleting"] = id
+                raise DeleteError(del_resp)
+        # Keep querying to make sure we have them all.
+        query_params['ExclusiveStartKey'] = exclusive_start_key
+        scan_resp = client.scan(**query_params)
+        if scan_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+            del_resp["deleting"] = id
+            raise DeleteError(scan_resp)
+    print("deleted {} items".format(count))
+
+
+def delete_s3_index(input, session=None):
+    """
+    Deletes s3 index keys containing the lookup key after deleting the S3 Object from cuboid bucket
+    Args:
+        input(Dict): Dictionary containing following keys: lookup_key, id-count-table
+        session(Session): AWS boto3 Session
+
+    Returns:
+
+    """
+    s3_index_table = input["s3-index-table"]
+
     lookup_key = input["lookup_key"]
     channel_key = get_channel_key(lookup_key)
-
+    col, exp, ch = lookup_key.split("&")
     session = bossutils.aws.get_session()
     client = session.client('dynamodb')
-    query_params = {'TableName': id_count_table,
-                    'KeyConditionExpression': '#channel_key = :channel_key_value',
-                    'ExpressionAttributeValues': {":channel_key_value": {"S": channel_key}},
-                    'ExpressionAttributeNames': {"#channel_key": "channel-key", "#version": "version"},
-                    'ProjectionExpression': "#channel_key, #version",
-                    'ConsistentRead': True,
-                    'Limit': 1000}
+    s3client = session.client('s3')
+    query_params = {'TableName': s3_index_table,
+                    'IndexName': S3_INDEX_TABLE_INDEX,
+                    'KeyConditionExpression': '#ingest_job_hash = :ingest_job_hash_value AND begins_with(#ingest_job_range, :ingest_job_range_value)',
+                    'ExpressionAttributeValues': {":ingest_job_hash_value": {"S": col}, ":ingest_job_range_value": {"S": exp+"&"+ch}},
+                    'ExpressionAttributeNames': {"#object_key": "object-key", "#version_node": "version-node",
+                                                 "#ingest_job_hash": "ingest-job-hash", "#ingest_job_range": "ingest-job-range"},
+                    'ProjectionExpression': "#object_key, #version_node",
+                    'Limit': 10}
     query_resp = client.query(**query_params)
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         raise DeleteError(query_resp)
@@ -169,8 +234,10 @@ def delete_id_index(input, session=None):
             exclusive_start_key=id
             count += 1
             print("deleting: {}".format(id))
+            # this is where you would delete the s3 objects.
+
             del_resp = client.delete_item(
-                TableName=id_count_table,
+                TableName=s3_index_table,
                 Key=id,
                 ReturnValues='NONE',
                 ReturnConsumedCapacity='NONE')
@@ -185,20 +252,41 @@ def delete_id_index(input, session=None):
             raise DeleteError(query_resp)
     print("deleted {} items".format(count))
 
+def delete_test_1(input, context=None):
+    print("entered fcn delete_test_1")
+    input["dt1"] = True
+    pprint.pprint(input)
+    return input
 
 
+def delete_test_2(input, context=None):
+    print("entered fcn delete_test_2")
+    input["dt2"] = True
+    pprint.pprint(input)
+    return input
+
+
+def delete_test_3(input, context=None):
+    print("entered fcn delete_test_3")
+    input["dt3"] = True
+    pprint.pprint(input)
+    return input
 
 
 if __name__ == "__main__":
-    session = bossutils.aws.get_session()
-    input = {
-        #"lookup_key": "36&25&53",  # was lookup key being used by intTest
-        "lookup_key": "23",  # lookup key being used by metadata
+    input_from_main = {
+        "lookup_key": "41&29&35",  # was lookup key being used by intTest
+        #"lookup_key": "23",  # lookup key being used by metadata
         "meta-db": "bossmeta.hiderrt1.boss",
         "s3-index-table": "s3index.hiderrt1.boss",
         "id-index-table": "idIndex.hiderrt1.boss",
         "id-count-table": "idCount.hiderrt1.boss",
+        "cuboid_bucket": "cuboids.hiderrt1.boss",
         #"id-count-table": "intTest.idCount.hiderrt1.boss"  # had data for idCount
     }
-    delete_metedata(input)
-    #delete_id_count(input)
+    test = "hello"
+    #delete_metedata(input_from_main)
+    #delete_id_count(input_from_main)
+    #delete_id_index(input_from_main)
+    delete_s3_index(input_from_main)
+    print("done.")
