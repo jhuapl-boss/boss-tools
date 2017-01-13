@@ -20,7 +20,6 @@ These may be run in Lambdas or Activities in Setup Functions.
 
 import boto3
 import bossutils
-import bossutils.aws
 import pprint
 from boto3.dynamodb.conditions import Key, Attr
 import hashlib

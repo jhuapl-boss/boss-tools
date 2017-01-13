@@ -13,14 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
-
-from bossutils.delete import *
-
+import bossutils
 bossutils.utils.set_excepthook()
 
-def Pass(input_):
-    return input_
+from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
+
+from delete_cuboid import *
 
 class BossActivityManager(ActivityManager):
     def __init__(self):
@@ -37,7 +35,6 @@ class BossActivityManager(ActivityManager):
 
         return [
             #lambda: ActivityProcess('Name.'+self.domain, dispatch(function))
-            lambda: ActivityProcess('Pass.'+self.domain, dispatch(Pass)),
             lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
             lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
             lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
