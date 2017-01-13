@@ -267,9 +267,21 @@ def delete_test_2(input, context=None):
 
 def delete_test_3(input, context=None):
     print("entered fcn delete_test_3")
-    input["dt3"] = True
     pprint.pprint(input)
-    return input
+    output = {
+        'data': [1,2,3,4],
+        'index': 3 # zero indexed
+    }
+    pprint.pprint(output)
+    return output
+
+def delete_test_4(input_):
+    print("entered fcn delete_test_4")
+    idx = input_['index']
+    data = input_['data']
+    print("Processing item: {}".format(data[idx]))
+    input_['index'] -= 1
+    return input_
 
 
 if __name__ == "__main__":

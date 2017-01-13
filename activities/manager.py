@@ -38,6 +38,7 @@ class BossActivityManager(ActivityManager):
             lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
             lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
             lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
+            lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
         ]
 
 if __name__ == '__main__':
