@@ -42,13 +42,13 @@ class TestUploadEnqueueLambda(unittest.TestCase):
             os.remove(local_filename)
 
     def test_parse_line_bad_line(self):
-        header = { 'job_id': 1, 'upload_queue_arn': '', 'ingest_queue_arn': '' }
+        header = { 'job_id': 1, 'upload_queue_url': '', 'ingest_queue_url': '' }
         line = 'one_column'
         with self.assertRaises(RuntimeError):
             parse_line(header, line)
 
     def test_parse_line(self):
-        header = { 'job_id': 1, 'upload_queue_arn': '', 'ingest_queue_arn': '' }
+        header = { 'job_id': 1, 'upload_queue_url': '', 'ingest_queue_url': '' }
         line = 'chunk_key, tile_key'
         expected = {
             'job_id': 1,
@@ -71,7 +71,7 @@ class TestUploadEnqueueLambda(unittest.TestCase):
         # Create fake file with StringIO.
         s = StringIO()
         # Add header.
-        s.write('{"job_id": 20}\n')
+        s.write('{"job_id": 20, "upload_queue_url": "", "ingest_queue_url": "" }\n')
         # Add data lines (expect 2 msgs).
         s.write('chunk_key1, tile_key1\n')
         s.write('chunk_key2, tile_key2\n')
@@ -99,7 +99,7 @@ class TestUploadEnqueueLambda(unittest.TestCase):
         # Create fake file with StringIO.
         s = StringIO()
         # Add header.
-        s.write('{"job_id": 20}\n')
+        s.write('{"job_id": 20, "upload_queue_url": "", "ingest_queue_url": "" }\n')
         # Add data lines (expect 2 msgs).
         s.write('chunk_key1, tile_key1\n')
         s.write('chunk_key2, tile_key2\n')

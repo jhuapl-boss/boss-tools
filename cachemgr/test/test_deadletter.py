@@ -29,7 +29,10 @@ from boss_deadletterd import DeadLetterDaemon
 class TestDeadLetterDaemon(unittest.TestCase):
 
     def setUp(self):
-        self.dead_letter = DeadLetterDaemon('foo')
+        with patch('boss_deadletterd.get_region') as fake_get_region:
+            # Force us-east-1 region for testing.
+            fake_get_region.return_value = 'us-east-1'
+            self.dead_letter = DeadLetterDaemon('foo')
 
     def test_zero_msgs(self):
         """Make sure empty array doesn't cause an error."""
