@@ -35,10 +35,19 @@ class BossActivityManager(ActivityManager):
 
         return [
             #lambda: ActivityProcess('Name.'+self.domain, dispatch(function))
-            lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
-            lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
-            lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
-            lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
+            # lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
+            # lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
+            # lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
+            # lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
+
+            lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_metadata)),
+            lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_id_count)),
+            lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_id_index)),
+            lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(find_s3_index)),
+            lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_s3_index)),
+            lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(save_and_delete)),
+            lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(notify_admins)),
+            lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_clean_up))
         ]
 
 if __name__ == '__main__':

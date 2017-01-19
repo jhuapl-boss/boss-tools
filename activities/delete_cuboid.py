@@ -446,6 +446,21 @@ def delete_clean_up(data, session=None):
     print("deleted {} delete shard lists".format(count))
     return data
 
+def save_and_delete(data, session=None):
+    # if session is None:
+    #     session = bossutils.aws.get_session()
+    print("Need to perform save error here: {}".format(data["error-info"]))
+    return data
+
+def notify_admins(data, session=None):
+    if session is None:
+        session = bossutils.aws.get_session()
+    client = session.client('sns')
+    client.publish(TopicArn=data["notify_topic"], Message=data["error-info"])
+
+    print("Need to notify admins here:")
+    return data
+
 
 def delete_test_1(input, context=None):
     print("entered fcn delete_test_1")
@@ -484,12 +499,15 @@ def delete_test_4(input_):
 if __name__ == "__main__":
     input_from_main = {
         "lookup_key": "18&13&15",
+        "db": "endpoint-db.hiderrt1.boss",
         "meta-db": "bossmeta.hiderrt1.boss",
         "s3-index-table": "s3index.hiderrt1.boss",
         "id-index-table": "idIndex.hiderrt1.boss",
         "id-count-table": "idCount.hiderrt1.boss",
         "cuboid_bucket": "cuboids.hiderrt1.boss",
-        "delete_bucket": "delete.hiderrt1.boss"
+        "delete_bucket": "delete.hiderrt1.boss",
+        "delete-sfn": "arn needed here",
+        "notify_topic": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
     }
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
