@@ -26,6 +26,7 @@ import uuid
 import json
 
 
+LOG = bossutils.logger.BossLogger().logger
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 MAX_ITEMS_PER_SHARD = 100
 
@@ -47,10 +48,12 @@ def delete_metadata(data, session=None):
         (Dict): Data dictionary passed in.
     """
     #if "meta-db" not in input:
+    LOG.info("delete_metadata started")
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
 
+    LOG.info("created dynamodb client")
     lookup_key = data["lookup_key"]
     meta_db = data["meta-db"]
     query_params = {'TableName': meta_db,
@@ -61,7 +64,10 @@ def delete_metadata(data, session=None):
                     'ConsistentRead': True,
                     'Limit': 100}
     query_resp = client.query(**query_params)
+    LOG.info("dyanmo query created")
+
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        LOG.info("response is {}, about to raise DeleteError".format(query_resp["ResponseMetadata"]["HTTPStatusCode"]))
         raise DeleteError(
             "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                 query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
@@ -74,8 +80,12 @@ def delete_metadata(data, session=None):
                           'Key': meta,
                           'ReturnValues': 'NONE',
                           'ReturnConsumedCapacity': 'NONE'}
+            LOG.info("about to delete item")
             del_resp = client.delete_item(**del_params)
+            LOG.info("delete item completed")
             if del_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                LOG.info("response is {}, about to raise DeleteError".format(
+                    del_resp["ResponseMetadata"]["HTTPStatusCode"]))
                 raise DeleteError(
                     "Error deleting from bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                         del_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(del_params)))
@@ -87,6 +97,7 @@ def delete_metadata(data, session=None):
                 "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                     query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
     print("deleted {} metadata items".format(count))
+    LOG.info("deleted {} metadata items".format(count))
     return data
 
 
