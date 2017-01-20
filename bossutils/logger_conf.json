@@ -10,6 +10,12 @@
       "handlers": ["fileHandler", "criticalHandler"],
       "qualname": "boss",
       "propagate": 0
+    },
+    "djangooidc": {
+      "level": "DEBUG",
+      "handlers": ["fileHandler"],
+      "qualname": "boss",
+      "propagate": 0
     }
   },
   "handlers": {
