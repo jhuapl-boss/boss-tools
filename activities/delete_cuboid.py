@@ -25,7 +25,7 @@ import hashlib
 import uuid
 import json
 
-
+bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 MAX_ITEMS_PER_SHARD = 100
