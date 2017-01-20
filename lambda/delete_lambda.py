@@ -11,7 +11,7 @@
 #   "id-count-table": "idCount.hiderrt1.boss",
 #   "cuboid_bucket": "cuboids.hiderrt1.boss",
 #   "delete_bucket": "delete.hiderrt1.boss"
-#   "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:Delete-cuboidHiderrt1Boss",
+#   "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
 #   "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
 
 # }
@@ -42,7 +42,7 @@ event = json.loads(json_event)
 #     "id-count-table": "idCount.hiderrt1.boss",
 #     "cuboid_bucket": "cuboids.hiderrt1.boss",
 #     "delete_bucket": "delete.hiderrt1.boss",
-#     "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:Delete-cuboidHiderrt1Boss",
+#     "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
 #     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
 # }
 #===========================================
