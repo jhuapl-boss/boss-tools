@@ -285,7 +285,7 @@ def get_primary_key(s3_index_row):
     return primary
 
 def find_s3_index(data, session=None):
-    """
+    """backoff rate
     Find s3 index keys containing the lookup key write them to s3 to be deleted.  Split the list into
     s3 objects with KEYS_PER_S3_OBJECT each.  Also write an index Object contining the list of other objects.
     Args:
@@ -327,7 +327,6 @@ def find_s3_index(data, session=None):
         for id in query_resp["Items"]:
             exclusive_start_key=id
             count += 1
-            print("found: {}".format(id))
             shard_list.append(get_primary_key(id))
             shard_count += 1
             if shard_count == MAX_ITEMS_PER_SHARD:
@@ -456,9 +455,9 @@ def notify_admins(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('sns')
-    client.publish(TopicArn=data["notify_topic"], Message=data["error-info"])
-
-    print("Need to notify admins here:")
+    resp = client.publish(TopicArn=data["notify_topic"], Message=data["error"])
+    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        raise DeleteError("Error notifying admins after delete failed.")
     return data
 
 
@@ -479,7 +478,7 @@ def delete_test_2(input, context=None):
 def delete_test_3(input, context=None):
     print("entered fcn delete_test_3")
     pprint.pprint(input)
-    output = {
+    outpule, names.pyt = {
         'data': [1,2,3,4],
         'index': 3 # zero indexed
     }
@@ -506,16 +505,18 @@ if __name__ == "__main__":
         "id-count-table": "idCount.hiderrt1.boss",
         "cuboid_bucket": "cuboids.hiderrt1.boss",
         "delete_bucket": "delete.hiderrt1.boss",
-        "delete-sfn": "arn needed here",
-        "notify_topic": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
+        "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:Delete-cuboidHiderrt1Boss",
+        "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
+        "error":  "test error for SFN"
     }
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
 
-    dict = delete_metadata(input_from_main, session=session)
-    dict = delete_id_count(dict, session=session)
+    #dict = delete_metadata(input_from_main, session=session)
+    #dict = delete_id_count(dict, session=session)
     #dict = delete_id_index(dict, session=session)
     #dict = find_s3_index(dict, session=session)
-    # dict = delete_s3_index(dict, session=session)
-    # dict = delete_clean_up(dict, session=session)
+    #dict = delete_s3_index(dict, session=session)
+    #dict = delete_clean_up(dict, session=session)
+    #dict = notify_admins(input_from_main, session=session)
     print("done.")
