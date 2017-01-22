@@ -16,6 +16,29 @@
 """
 This file holds the functions need to perform deletes for Collections, Experiment, Channel
 These may be run in Lambdas or Activities in Step Functions.
+
+The entire set of step functions need the following in data
+data = {
+    "lookup_key": "36&26&31",
+    "channel_id": "1",
+    "lookup_key_id": "1",
+    "lambda-name": "delete_lambda",
+    "db": "endpoint-db.hiderrt1.boss",
+    "meta-db": "bossmeta.hiderrt1.boss",
+    "s3-index-table": "s3index.hiderrt1.boss",
+    "id-index-table": "idIndex.hiderrt1.boss",
+    "id-count-table": "idCount.hiderrt1.boss",
+    "cuboid_bucket": "cuboids.hiderrt1.boss",
+    "delete_bucket": "delete.hiderrt1.boss",
+    "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
+    "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
+    "db_name":  "boss",
+    "db_user": "testuser",
+    "db_password": "xxxxxxxxxxxxxxxx",
+    "db_port": "3306",
+
+}
+
 """
 
 import boto3
@@ -24,12 +47,13 @@ import pprint
 import hashlib
 import uuid
 import json
+import pymysql.cursors
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 MAX_ITEMS_PER_SHARD = 100
-
+DELETED_STATUS_FINISHED = 'finished'
 """
 DeleteError will be used if an Exception occurs within any of the delete functions.
 """
@@ -53,7 +77,6 @@ def delete_metadata(data, session=None):
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
 
-    LOG.info("created dynamodb client")
     lookup_key = data["lookup_key"]
     meta_db = data["meta-db"]
     query_params = {'TableName': meta_db,
@@ -64,10 +87,9 @@ def delete_metadata(data, session=None):
                     'ConsistentRead': True,
                     'Limit': 100}
     query_resp = client.query(**query_params)
-    LOG.info("dyanmo query created")
 
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-        LOG.info("response is {}, about to raise DeleteError".format(query_resp["ResponseMetadata"]["HTTPStatusCode"]))
+        #LOG.critical("response is {}, about to raise DeleteError".format(query_resp["ResponseMetadata"]["HTTPStatusCode"]))
         raise DeleteError(
             "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                 query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
@@ -80,9 +102,7 @@ def delete_metadata(data, session=None):
                           'Key': meta,
                           'ReturnValues': 'NONE',
                           'ReturnConsumedCapacity': 'NONE'}
-            LOG.info("about to delete item")
             del_resp = client.delete_item(**del_params)
-            LOG.info("delete item completed")
             if del_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
                 LOG.info("response is {}, about to raise DeleteError".format(
                     del_resp["ResponseMetadata"]["HTTPStatusCode"]))
@@ -97,7 +117,7 @@ def delete_metadata(data, session=None):
                 "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                     query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
     print("deleted {} metadata items".format(count))
-    LOG.info("deleted {} metadata items".format(count))
+    #LOG.info("deleted {} metadata items".format(count))
     return data
 
 
@@ -306,6 +326,9 @@ def find_s3_index(data, session=None):
     Returns:
         (Dict): data dictionary passed in
     """
+#    data = data[0]  # TODO SH find out how to do this in the sfn as a transform.
+                    # this command is added because the step function last command was a parallel. This command converts
+                    # data the output of the first parallel activity.
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -391,7 +414,7 @@ def delete_s3_index(data, session=None):
     """
     if session is None:
         session = bossutils.aws.get_session()
-    client = session.client('dynamodb')
+    dynclient = session.client('dynamodb')
     s3client = session.client('s3')
     s3_cuboid_bucket = data["cuboid_bucket"]
     s3_delete_bucket = data["delete_bucket"]
@@ -403,7 +426,7 @@ def delete_s3_index(data, session=None):
     count = 0
     for shard_list_name in shard_index:
         shard_list =  get_json_from_s3(s3client, s3_delete_bucket, shard_list_name)
-        # TODO SH Can implement delete faster using this method.  It will be sightly more complex to review the errors and avoid deleting errored objects from DynamoDB
+        # TODO SH Can implement delete faster using this method.  It will be sightly more complex to review the errors to avoid deleting DynamoDB entries when corresponding S3 objects failed to delete
         #key_list = get_key_list(shard_list)
         #response = cuboid_bucket.delete_objects(Bucket=s3_cuboid_bucket, Delete=key_list)
 
@@ -417,16 +440,17 @@ def delete_s3_index(data, session=None):
             delete_params = {'TableName': s3_index_table,
                             'Key': {'object-key': {'S': row["object-key"]["S"]}, 'version-node': {"N": row["version-node"]["N"]}}}
             count += 1
-            query_resp = client.delete_item(**delete_params)
+            query_resp = dynclient.delete_item(**delete_params)
             if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
                 raise DeleteError(query_resp)
-    print("deleted {} s3_index items".format(count))
+    print("deleted {} s3 objects and s3_index items".format(count))
     return data
 
 
 def delete_clean_up(data, session=None):
     """
-    deletes the shard_index and the shard_lists from the delete_bucket
+    first sets delete status to finished, then deletes the shard_index and the shard_lists from the delete_bucket,
+    finally it deletes the channel and lookup entries.
     Args:
         data(Dict): Dictionary containing at least the following keys:  delete_bucket, delete_shard_index_key
         session(Session): AWS boto3 Session
@@ -437,23 +461,52 @@ def delete_clean_up(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
     s3client = session.client('s3')
-    delete_bucket = data["delete_bucket"]
-    delete_shard_index_key = data["delete_shard_index_key"]
 
-    shard_index = get_json_from_s3(s3client, delete_bucket, delete_shard_index_key)
-    count = 0
-    for shard_list_name in shard_index:
-        s3_response = s3client.delete_object(Bucket=delete_bucket, Key=shard_list_name)
-        if s3_response["ResponseMetadata"]["HTTPStatusCode"] != 204:
-            raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
-                shard_list_name, delete_bucket, s3_response["HTTPStatusCode"]))
-        count += 1
+    # Connect to the database
+    connection = pymysql.connect(host=data["db"],
+                                 user=data["db_user"],
+                                 password=data["db_password"],
+                                 db=data["db_name"],
+                                 port=int(data["db_port"]),
+                                 charset='utf8mb4',
+                                 cursorclass=pymysql.cursors.DictCursor)
+    try:
+        with connection.cursor() as cursor:
+            sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
+            resp = cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["channel_id"]),))
+            connection.commit()
 
-    s3_response = s3client.delete_object(Bucket=delete_bucket, Key=delete_shard_index_key)
-    if s3_response["ResponseMetadata"]["HTTPStatusCode"] != 204:
-        raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
-            delete_shard_index_key, delete_bucket, s3_response["HTTPStatusCode"]))
-    print("deleted {} delete shard lists".format(count))
+
+            delete_bucket = data["delete_bucket"]
+            delete_shard_index_key = data["delete_shard_index_key"]
+
+            shard_index = get_json_from_s3(s3client, delete_bucket, delete_shard_index_key)
+            count = 0
+            for shard_list_name in shard_index:
+                s3_response = s3client.delete_object(Bucket=delete_bucket, Key=shard_list_name)
+                if s3_response["ResponseMetadata"]["HTTPStatusCode"] != 204:
+                    raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
+                        shard_list_name, delete_bucket, s3_response["HTTPStatusCode"]))
+                count += 1
+
+            s3_response = s3client.delete_object(Bucket=delete_bucket, Key=delete_shard_index_key)
+            if s3_response["ResponseMetadata"]["HTTPStatusCode"] != 204:
+                raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
+                    delete_shard_index_key, delete_bucket, s3_response["HTTPStatusCode"]))
+            print("deleted {} delete shard lists".format(count))
+
+            # delete lookup_key given lookup_id
+            sql = "DELETE FROM `lookup` where `id`=%s"
+            cursor.execute(sql, (str(data["lookup_key_id"]),))
+
+            # delete channel given channel id
+            sql = "DELETE FROM `channel` where `id`=%s"
+            cursor.execute(sql, (str(data["channel_id"]),))
+            connection.commit()
+
+    finally:
+        connection.close()
+
     return data
 
 def save_and_delete(data, session=None):
@@ -470,7 +523,6 @@ def notify_admins(data, session=None):
     if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         raise DeleteError("Error notifying admins after delete failed.")
     return data
-
 
 def delete_test_1(input, context=None):
     print("entered fcn delete_test_1")
@@ -489,7 +541,7 @@ def delete_test_2(input, context=None):
 def delete_test_3(input, context=None):
     print("entered fcn delete_test_3")
     pprint.pprint(input)
-    outpule, names.pyt = {
+    output = {
         'data': [1,2,3,4],
         'index': 3 # zero indexed
     }
@@ -508,8 +560,11 @@ def delete_test_4(input_):
 
 if __name__ == "__main__":
     input_from_main = {
-        "lookup_key": "18&13&15",
+        "lookup_key": "1&1&1",
+        "channel_id": "1",
+        "lookup_key_id": "1",
         "db": "endpoint-db.hiderrt1.boss",
+        #"db": "localhost",
         "meta-db": "bossmeta.hiderrt1.boss",
         "s3-index-table": "s3index.hiderrt1.boss",
         "id-index-table": "idIndex.hiderrt1.boss",
@@ -518,16 +573,21 @@ if __name__ == "__main__":
         "delete_bucket": "delete.hiderrt1.boss",
         "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
         "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
-        "error":  "test error for SFN"
+        "error":  "test error for SFN",
+        "db_name":  "boss",
+        "db_user": "testuser",
+        "db_password": "xxxxxxxxxxxxx",
+        "db_port": "3306",
     }
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
 
-    #dict = delete_metadata(input_from_main, session=session)
-    #dict = delete_id_count(dict, session=session)
-    #dict = delete_id_index(dict, session=session)
-    #dict = find_s3_index(dict, session=session)
-    #dict = delete_s3_index(dict, session=session)
-    #dict = delete_clean_up(dict, session=session)
-    #dict = notify_admins(input_from_main, session=session)
+    # dict = delete_metadata(input_from_main, session=session)
+    # dict = delete_id_count(dict, session=session)
+    # dict = delete_id_index(dict, session=session)
+    # dict = find_s3_index(dict, session=session)
+    # dict = delete_s3_index(dict, session=session)
+    # dict = delete_clean_up(dict, session=session)
+    # #dict = notify_admins(dict, session=session)
+
     print("done.")
