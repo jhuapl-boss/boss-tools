@@ -12,46 +12,67 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+import time
+from datetime import datetime
+
 # Need:
 # * ingest-client
 # * ndingest
-from ingest.core.config import Configuration
 from ingest.core.backend import BossBackend
 
+from ndingest.ndqueue.uploadqueue import UploadQueue
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
+
+from bossutils import aws
 
 SQS_BATCH_SIZE = 10
 def populate_upload_queue(args):
+    """Populate the ingest upload SQS Queue with tile information
+
+    Note: This activity will clear the upload queue of any existing
+          messages
+
+    Args:
+        args: {
+            'job_id': '',
+            'upload_queue': ARN,
+            'ingest_queue': ARN,
+
+            'collection_name': '',
+            'experiment_name': '',
+            'channel_name': '',
+
+            'resolution': 0,
+            'project_info': [col_id, exp_id, ch_id],
+            
+            't_start': 0,
+            't_stop': 0,
+            't_tile_size': 0,
+
+            'x_start': 0,
+            'x_stop': 0,
+            'x_tile_size': 0,
+
+            'y_start': 0,
+            'y_stop': 0
+            'y_tile_size': 0,
+
+            'z_start': 0,
+            'z_stop': 0
+            'z_tile_size': 16,
+        }
+
+    Returns:
+        {'arn': Upload queue ARN,
+         'count': Number of messages put into the queue}
     """
-    args: {
-        'job_id': '',
-        'upload_queue': ARN,
-        'ingest_queue': ARN,
 
-        'collection_name': '',
-        'experiment_name': '',
-        'channel_name': '',
+    # DP NOTE: Could transform create_messages into a generator
+    #          and yield after each sendBatchMessages
 
-        'resolution': 0,
-        'project_info': [col_id, exp_id, ch_id],
-        
-        't_start': 0,
-        't_stop': 0,
-        't_tile_size': 0,
-
-        'x_start': 0,
-        'x_stop': 0,
-        'x_tile_size': 0,
-
-        'y_start': 0,
-        'y_stop': 0
-        'y_tile_size': 0,
-
-        'z_start': 0,
-        'z_stop': 0
-        'z_tile_size': 16,
-    }
-    """
+    clear_queue(args['upload_queue'])
+    start = datetime.now()
 
     msgs = create_messages(args)
     batches = (msgs[x:x+SQS_BATCH_SIZE] for x in range(0, len(msgs), SQS_PATCH_SIZE))
@@ -63,13 +84,44 @@ def populate_upload_queue(args):
                           args['job_id'])
     queue = UploadQueue(proj)
 
+    end = datetime.now()
+    delta = (end - start).seconds
+    if delta < 60:
+        # It takes up to 60 seconds to purge a SQS queue
+        # If messages are added before the delete is finished
+        # they might be deleted
+        time.sleep(60 - delta)
+
     for batch in batches:
         resp = queue.sendBatchMessages(batch)
         # { 'Successful': [], 'Failed': [] }
+        # DP ???: Does sendBatchMessage throw an exception or do we need to check the result?
 
-    return len(msgs)
+    return {
+        'arn': args['upload_queue'],
+        'count': len(msgs),
+    }
+
+def clear_queue(arn):
+    """Delete any existing messages in the given SQS queue
+
+    Args:
+        arn (string): SQS ARN of the queue to empty
+    """
+    session = aws.get_session()
+    client = session.client('sqs')
+    client.purge_queue(QueueUrl = arn)
 
 def create_messages(args):
+    """Create all of the tile messages to be enqueued
+
+    Args:
+        args (dict): Same arguments as populate_upload_queue()
+
+    Returns:
+        list: List of strings containing Json data
+    """
+
     tile_size = lambda v: args[v + "_tile_size"]
     range_ = lambda v: range(args[v + '_start'], args[v + '_stop'], tile_size(v))
 
@@ -114,4 +166,31 @@ def create_messages(args):
                         msgs.append(json.dumps(msg))
 
     return msgs
+
+def verify_count(args):
+    """Verify that the number of messages in a queue is the given number
+
+    Args:
+        args: {
+            'arn': ARN,
+            'count': 0,
+        }
+
+    Returns:
+        int: The total number of messages in the queue
+
+    Raises:
+        Error: If the count doesn't match the messages in the queue
+    """
+
+    session = aws.get_session()
+    client = session.client('sqs')
+    resp = client.get_queue_attributes(QueueUrl = args['arn'],
+                                       AttributeNames = ['ApproximateNumberOfMessages'])
+    messages = int(resp['Attributes']['ApproximateNumberOfMessages'])
+
+    if messages != args['count']
+        raise Exception('Counts do not match')
+
+    return args['count']
 

@@ -20,6 +20,8 @@ from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
 
 from delete_cuboid import *
 
+import populate_upload_queue as puq
+
 class BossActivityManager(ActivityManager):
     def __init__(self):
         super().__init__()
@@ -40,6 +42,7 @@ class BossActivityManager(ActivityManager):
             # lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
             # lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
 
+            # Delete Cuboid StepFunction
             lambda: ActivityProcess('delete_metadata.' + self.domain, dispatch(delete_metadata)),
             lambda: ActivityProcess('delete_id_count.' + self.domain, dispatch(delete_id_count)),
             lambda: ActivityProcess('delete_id_index.' + self.domain, dispatch(delete_id_index)),
@@ -47,7 +50,11 @@ class BossActivityManager(ActivityManager):
             lambda: ActivityProcess('delete_s3_index.' + self.domain, dispatch(delete_s3_index)),
             lambda: ActivityProcess('save_and_delete.' + self.domain, dispatch(save_and_delete)),
             lambda: ActivityProcess('notify_admins.' + self.domain, dispatch(notify_admins)),
-            lambda: ActivityProcess('delete_clean_up.' + self.domain, dispatch(delete_clean_up))
+            lambda: ActivityProcess('delete_clean_up.' + self.domain, dispatch(delete_clean_up)),
+
+            # Populate Upload Queue StepFunction
+            lambda: ActivityProcess('PopulateQueue.' + self.domain, dispatch(puq.populate_upload_queue)),
+            lambda: ActivityProcess('VerifyCount.' + self.domain, dispatch(puq.verify_count)),
         ]
 
 if __name__ == '__main__':
