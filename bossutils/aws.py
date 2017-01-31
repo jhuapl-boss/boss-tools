@@ -20,6 +20,8 @@ from bossutils.logger import BossLogger
 import multiprocessing
 import queue
 import os
+import json
+from datetime import datetime
 
 
 def get_region():
@@ -53,6 +55,82 @@ def get_session():
     """
     return boto3.session.Session(region_name=get_region())
 
+# DP NOTE: StepFunction methods adapted from heaviside library
+def sfn_execute(session, name, data = None):
+    """Start executing a StepFunction
+
+    Args:
+        session (Session): Boto3 session
+        name (string): Name of the StepFunction to execute
+        input_ (Json): Json input data for the first state to process
+
+    Returns:
+        string: ARN of the state machine execution, used to get status and output data
+    """
+    client = session.client('stepfunctions')
+
+    arn = None
+    resp = client.list_state_machines()
+    for machine in resp['stateMachines']:
+        if machine['name'] == name:
+            arn = machine['stateMachineArn']
+
+    if arn is None:
+        raise Exception("StepFunction '{}' doesn't exist".format(name))
+
+    input_ = json.dumps(input_)
+    name = name + "-" + datetime.now().strftime("%Y%m%d%H%M%s%f")
+
+    resp = client.start_execution(stateMachineArn = arn,
+                                  name = name,
+                                  input = input_)
+    arn = resp['executionArn']
+    return arn
+
+def sfn_status(session, arn):
+    """Get the status of a StepFunction execution
+
+    Args:
+        session (Session): Boto3 session
+        arn (string): ARN of the execution to get the status of
+
+    Returns:
+        string: One of 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED'
+    """
+    client = session.client('stepfunctions')
+    resp = client.describe_execution(executionArn = arn)
+    return resp['status']
+
+def sfn_result(session, arn, wait=10):
+    """Get the results of a StepFunction execution
+
+    Args:
+        session (Session): Boto3 session
+        arn (string): ARN of the execution to get the results of
+        wait (int): Seconds to wait between polling
+
+    Returns:
+        dict|None: Dict of Json data or
+                   None if there was an error getting the failure output
+    """
+    client = session.client('stepfunctions')
+
+    while True:
+        resp = client.describe_execution(executionArn = arn)
+        if resp['status'] != 'RUNNING':
+            if 'output' in resp:
+                return json.loads(resp['output'])
+            else:
+                resp = client.get_execution_history(executionArn = arn,
+                                                    reverseOrder = True)
+                event = resp['events'][0]
+                for key in ['Failed', 'Aborted', 'TimedOut']:
+                    key = 'execution{}EventDetails'.format(key)
+                    if key in event:
+                        return event[key]
+                return None
+        else:
+            time.sleep(wait)
 
 class AWSManager:
     """
