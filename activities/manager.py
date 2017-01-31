@@ -39,7 +39,7 @@ class BossActivityManager(ActivityManager):
             # lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
             # lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
             # lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
-
+            lambda: ActivityProcess('query_for_deletes.' + self.domain, dispatch(query_for_deletes)),
             lambda: ActivityProcess('delete_metadata.' + self.domain, dispatch(delete_metadata)),
             lambda: ActivityProcess('delete_id_count.' + self.domain, dispatch(delete_id_count)),
             lambda: ActivityProcess('delete_id_index.' + self.domain, dispatch(delete_id_index)),
