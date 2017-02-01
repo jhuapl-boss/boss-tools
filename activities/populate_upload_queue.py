@@ -75,7 +75,7 @@ def populate_upload_queue(args):
     start = datetime.now()
 
     msgs = create_messages(args)
-    batches = (msgs[x:x+SQS_BATCH_SIZE] for x in range(0, len(msgs), SQS_PATCH_SIZE))
+    batches = (msgs[x:x+SQS_BATCH_SIZE] for x in range(0, len(msgs), SQS_BATCH_SIZE))
 
     proj = BossIngestProj(args['collection_name'],
                           args['experiment_name'],
@@ -139,7 +139,7 @@ def create_messages(args):
 
                     num_of_tiles = min(tile_size('z'), args['z_stop'] - z)
 
-                    chuck_key = backend.encode_chunk_key(num_of_tiles,
+                    chunk_key = backend.encode_chunk_key(num_of_tiles,
                                                          args['project_info'],
                                                          args['resolution'],
                                                          chunk_x,
@@ -189,7 +189,7 @@ def verify_count(args):
                                        AttributeNames = ['ApproximateNumberOfMessages'])
     messages = int(resp['Attributes']['ApproximateNumberOfMessages'])
 
-    if messages != args['count']
+    if messages != args['count']:
         raise Exception('Counts do not match')
 
     return args['count']
