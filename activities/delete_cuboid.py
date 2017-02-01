@@ -30,6 +30,7 @@ data = {
     "id-count-table": "idCount.hiderrt1.boss",
     "cuboid_bucket": "cuboids.hiderrt1.boss",
     "delete_bucket": "delete.hiderrt1.boss",
+    "find-deletes-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:FindDeletesHiderrt1Boss",
     "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
     "db_name":  "boss",
@@ -43,22 +44,130 @@ data = {
 
 import boto3
 import bossutils
+import botocore
 import pprint
 import hashlib
 import uuid
 import json
 import pymysql.cursors
+import time
+import uuid
+import pprint
+import pymysql.cursors
+from datetime import datetime, timedelta
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 MAX_ITEMS_PER_SHARD = 100
+
 DELETED_STATUS_FINISHED = 'finished'
-"""
-DeleteError will be used if an Exception occurs within any of the delete functions.
-"""
+DELETED_STATUS_START = 'start'
+DELETED_STATUS_ERROR = 'error'
+
+
 class DeleteError(Exception):
+    """
+    DeleteError will be used if an Exception occurs within any of the delete functions.
+    """
     pass
+
+
+def query_for_deletes(data, session=None):
+    """
+    Queries for data to be deteleted and kicks off delete step function
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): Data dictionary passed in.
+    """
+    rds_client = boto3.client('rds')
+    sfn_client = boto3.client('stepfunctions')
+
+    # TODO SH need to get vault working from lambda or pass credentials into activity.
+    vault = bossutils.vault.Vault()
+    data["db_name"] = vault.read('secret/endpoint/django/db', 'name')
+    data["db_user"] = vault.read('secret/endpoint/django/db', 'user')
+    data["db_password"] = vault.read('secret/endpoint/django/db', 'password')
+    data["db_port"] = vault.read('secret/endpoint/django/db', 'port')
+
+    #### for testing locally
+    # data["db_name"] = 'boss'
+    # data["db_user"] = "testuser"
+    # data["db_password"] = "xxxxxxxxxxxxx"
+    # data["db"] = "localhost"
+    # data["db_port"] = 3306
+    #####
+
+    # Connect to the database
+    connection = pymysql.connect(host=data["db"],
+                                 user=data["db_user"],
+                                 password=data["db_password"],
+                                 db=data["db_name"],
+                                 port=int(data["db_port"]),
+                                 charset='utf8mb4',
+                                 cursorclass=pymysql.cursors.DictCursor)
+    try:
+        with connection.cursor() as cursor:
+            # Read a single record
+            one_day = timedelta(days=1)
+            # this query will find 1 item to be deleted that does not have a delete_status (good for debugging)
+            sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` is not null AND deleted_status is null limit 1"
+            cursor.execute(sql)
+            # # This query version will only find items older than a day.
+            # sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` > %s AND deleted_status is null"
+            # cursor.execute(sql, (one_day,))
+            for ch_row in cursor:
+                LOG.info("found channel: " + str(ch_row))
+                print("found channel: " + str(ch_row))
+
+                # get lookup key given channel id and channel name
+                channel_id = ch_row['id']
+                sql = "SELECT `id`, `channel_name`, `lookup_key` FROM `lookup` where `channel_name`=%s"
+                cursor.execute(sql, (ch_row['name'],))
+                lookup_key_id = None
+                lookup_key = None
+                for lookup_row in cursor:  # its possible for two channels to have the same name so we search for the one with the correct channel id.
+                    parts = lookup_row['lookup_key'].split("&")
+                    if int(parts[2]) == channel_id:
+                        lookup_key_id = lookup_row['id']
+                        lookup_key = lookup_row['lookup_key']
+                        break
+                if lookup_key_id is None:
+                    LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'.format(channel_id))
+                    client = boto3.client('sns')
+                    resp = client.publish(TopicArn=data["notify_topic"],
+                                          Message="Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
+                                              channel_id))
+                    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                        LOG.error(
+                            "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}"
+                            .format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
+                            "Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
+                                channel_id))
+                    sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
+                    cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
+                    connection.commit()
+                else:
+                    sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
+                    cursor.execute(sql, (DELETED_STATUS_START, str(channel_id),))
+                    connection.commit()
+                    # Kick off step-function
+                    data["lookup_key"] = lookup_key
+                    data["lookup_key_id"] = lookup_key_id
+                    data["channel_id"] = channel_id
+
+                    response = sfn_client.start_execution(
+                        stateMachineArn=data["delete-sfn-arn"],
+                        name="delete-boss-{}".format(uuid.uuid4().hex),
+                        input=json.dumps(data)
+                    )
+                    LOG.info(response)
+
+    finally:
+        connection.close()
 
 
 def delete_metadata(data, session=None):
@@ -582,6 +691,7 @@ if __name__ == "__main__":
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
 
+    dict = query_for_deletes(input_from_main, session=session)
     # dict = delete_metadata(input_from_main, session=session)
     # dict = delete_id_count(dict, session=session)
     # dict = delete_id_index(dict, session=session)
