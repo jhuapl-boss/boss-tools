@@ -28,3 +28,6 @@ OIDC_VERIFY_SSL =
 [lambda]
 page_in_function=
 flush_function=
+
+[sfn]
+populate_upload_queue =
