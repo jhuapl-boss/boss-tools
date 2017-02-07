@@ -49,6 +49,7 @@ class BossActivityManager(ActivityManager):
             lambda: ActivityProcess('delete_metadata.' + self.domain, dispatch(delete_metadata)),
             lambda: ActivityProcess('delete_id_count.' + self.domain, dispatch(delete_id_count)),
             lambda: ActivityProcess('delete_id_index.' + self.domain, dispatch(delete_id_index)),
+            lambda: ActivityProcess('merge_parallel_outputs.' + self.domain, dispatch(merge_parallel_outputs)),
             lambda: ActivityProcess('find_s3_index.' + self.domain, dispatch(find_s3_index)),
             lambda: ActivityProcess('delete_s3_index.' + self.domain, dispatch(delete_s3_index)),
             lambda: ActivityProcess('save_and_delete.' + self.domain, dispatch(save_and_delete)),

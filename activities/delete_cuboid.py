@@ -83,15 +83,21 @@ def query_for_deletes(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    rds_client = boto3.client('rds')
-    sfn_client = boto3.client('stepfunctions')
+    LOG.debug("starting query_for_deletes()")
+    if session is None:
+        session = bossutils.aws.get_session()
+        LOG.debug("created session")
+    sfn_client = session.client('stepfunctions')
+    LOG.debug("created sfn_client")
 
     # TODO SH need to get vault working from lambda or pass credentials into activity.
     vault = bossutils.vault.Vault()
+    LOG.debug("got vault")
     data["db_name"] = vault.read('secret/endpoint/django/db', 'name')
     data["db_user"] = vault.read('secret/endpoint/django/db', 'user')
     data["db_password"] = vault.read('secret/endpoint/django/db', 'password')
     data["db_port"] = vault.read('secret/endpoint/django/db', 'port')
+    LOG.debug("read vault port = {}".format(data["db_port"]))
 
     #### for testing locally
     # data["db_name"] = 'boss'
@@ -109,6 +115,7 @@ def query_for_deletes(data, session=None):
                                  port=int(data["db_port"]),
                                  charset='utf8mb4',
                                  cursorclass=pymysql.cursors.DictCursor)
+    LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as cursor:
             # Read a single record
@@ -159,6 +166,7 @@ def query_for_deletes(data, session=None):
                     data["lookup_key_id"] = lookup_key_id
                     data["channel_id"] = channel_id
 
+                    LOG.debug("about to call sfn_client.start_execution")
                     response = sfn_client.start_execution(
                         stateMachineArn=data["delete-sfn-arn"],
                         name="delete-boss-{}".format(uuid.uuid4().hex),
@@ -424,6 +432,22 @@ def get_primary_key(s3_index_row):
     primary["version-node"] = s3_index_row["version-node"]
     return primary
 
+def merge_parallel_outputs(data):
+    """
+    parallel outputs returns an array of dicts, one from each parallel output. This method combines the dicts into
+    a single dict.
+    Args:
+        data(list(dists): List of dicts
+
+    Returns:
+        (dict) merged dict
+    """
+    merge = {}
+    for items in data:
+        merge.update(items)
+    return merge
+
+
 def find_s3_index(data, session=None):
     """backoff rate
     Find s3 index keys containing the lookup key write them to s3 to be deleted.  Split the list into
@@ -435,9 +459,7 @@ def find_s3_index(data, session=None):
     Returns:
         (Dict): data dictionary passed in
     """
-#    data = data[0]  # TODO SH find out how to do this in the sfn as a transform.
-                    # this command is added because the step function last command was a parallel. This command converts
-                    # data the output of the first parallel activity.
+
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
