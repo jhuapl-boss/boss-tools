@@ -163,6 +163,11 @@ while run_cnt < 2:
             # Add object to index
             sp.objectio.add_cuboid_to_index(object_key, ingest_job=int(msg_data["ingest_job"]))
 
+            # Update id indices if this is an annotation channel
+            if resource.data['channel']['type'] == 'annotation':
+                sp.objectio.update_id_indices(
+                    resource, proj_info.resolution, [object_key], [cube.data])
+
     ingest_queue = IngestQueue(proj_info)
     # Delete Tiles
     for tile in tile_key_list:
