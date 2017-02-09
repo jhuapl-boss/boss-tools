@@ -19,9 +19,6 @@ These may be run in Lambdas or Activities in Step Functions.
 
 The entire set of step functions need the following in data
 data = {
-    "lookup_key": "36&26&31",
-    "channel_id": "1",
-    "lookup_key_id": "1",
     "lambda-name": "delete_lambda",
     "db": "endpoint-db.hiderrt1.boss",
     "meta-db": "bossmeta.hiderrt1.boss",
@@ -33,11 +30,6 @@ data = {
     "find-deletes-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:FindDeletesHiderrt1Boss",
     "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
-    "db_name":  "boss",
-    "db_user": "testuser",
-    "db_password": "xxxxxxxxxxxxxxxx",
-    "db_port": "3306",
-
 }
 
 """
@@ -76,6 +68,11 @@ class DeleteError(Exception):
 def query_for_deletes(data, session=None):
     """
     Queries for data to be deteleted and kicks off delete step function
+    adds the following values to data (values are examples only):
+            "lookup_key": "36&26&31",
+            "channel_id": "1",
+            "lookup_key_id": "1",
+
     Args:
         data(Dict): Dictionary containing following keys: lookup_key, meta-db
         session(Session): AWS boto3 Session
@@ -93,26 +90,13 @@ def query_for_deletes(data, session=None):
     # TODO SH need to get vault working from lambda or pass credentials into activity.
     vault = bossutils.vault.Vault()
     LOG.debug("got vault")
-    data["db_name"] = vault.read('secret/endpoint/django/db', 'name')
-    data["db_user"] = vault.read('secret/endpoint/django/db', 'user')
-    data["db_password"] = vault.read('secret/endpoint/django/db', 'password')
-    data["db_port"] = vault.read('secret/endpoint/django/db', 'port')
-    LOG.debug("read vault port = {}".format(data["db_port"]))
-
-    #### for testing locally
-    # data["db_name"] = 'boss'
-    # data["db_user"] = "testuser"
-    # data["db_password"] = "xxxxxxxxxxxxx"
-    # data["db"] = "localhost"
-    # data["db_port"] = 3306
-    #####
 
     # Connect to the database
     connection = pymysql.connect(host=data["db"],
-                                 user=data["db_user"],
-                                 password=data["db_password"],
-                                 db=data["db_name"],
-                                 port=int(data["db_port"]),
+                                 user=vault.read('secret/endpoint/django/db', 'user'),
+                                 password=vault.read('secret/endpoint/django/db', 'password'),
+                                 db=vault.read('secret/endpoint/django/db', 'name'),
+                                 port=int(vault.read('secret/endpoint/django/db', 'port')),
                                  charset='utf8mb4',
                                  cursorclass=pymysql.cursors.DictCursor)
     LOG.debug("created pymysql connection")
@@ -612,21 +596,24 @@ def delete_clean_up(data, session=None):
         session = bossutils.aws.get_session()
     s3client = session.client('s3')
 
+    vault = bossutils.vault.Vault()
+    LOG.debug("got vault")
+
     # Connect to the database
     connection = pymysql.connect(host=data["db"],
-                                 user=data["db_user"],
-                                 password=data["db_password"],
-                                 db=data["db_name"],
-                                 port=int(data["db_port"]),
+                                 user=vault.read('secret/endpoint/django/db', 'user'),
+                                 password=vault.read('secret/endpoint/django/db', 'password'),
+                                 db=vault.read('secret/endpoint/django/db', 'name'),
+                                 port=int(vault.read('secret/endpoint/django/db', 'port')),
                                  charset='utf8mb4',
                                  cursorclass=pymysql.cursors.DictCursor)
+
     try:
         with connection.cursor() as cursor:
             LOG.debug("Updating deleted_status to finished.")
             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
             resp = cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["channel_id"]),))
             connection.commit()
-
 
             delete_bucket = data["delete_bucket"]
             delete_shard_index_key = data["delete_shard_index_key"]
@@ -646,6 +633,18 @@ def delete_clean_up(data, session=None):
                 raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
                     delete_shard_index_key, delete_bucket, s3_response["HTTPStatusCode"]))
             print("deleted {} delete shard lists".format(count))
+
+            # delete bosscore_source given channel_id as derived_channel_id or source_channel_id
+            LOG.debug("Deleting from bosscore_source table")
+            sql = "DELETE FROM `bosscore_source` where `derived_channel_id`=%s or `source_channel_id`=%s"
+            cursor.execute(sql, (str(data["channel_id"]), str(data["channel_id"]),))
+            connection.commit()
+
+            # delete channel_related given channel_id as fromm_channel_id or to_channel_id
+            LOG.debug("Deleting from channel_related table")
+            sql = "DELETE FROM `channel_related` where `from_channel_id`=%s or `to_channel_id`=%s"
+            cursor.execute(sql, (str(data["channel_id"]), str(data["channel_id"]),))
+            connection.commit()
 
             # delete lookup_key given lookup_id
             LOG.debug("Deleting lookup_key from lookup table")
@@ -729,6 +728,7 @@ if __name__ == "__main__":
         "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
         "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
         "error":  "test error for SFN",
+        # the following are not needed passed in through lambda but needed if testing through main.
         "db_name":  "boss",
         "db_user": "testuser",
         "db_password": "xxxxxxxxxxxxx",
@@ -737,7 +737,7 @@ if __name__ == "__main__":
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
 
-    dict = query_for_deletes(input_from_main, session=session)
+    #dict = query_for_deletes(input_from_main, session=session)
     # dict = delete_metadata(input_from_main, session=session)
     # dict = delete_id_count(dict, session=session)
     # dict = delete_id_index(dict, session=session)
