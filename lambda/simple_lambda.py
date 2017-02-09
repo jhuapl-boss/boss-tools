@@ -3,13 +3,11 @@
 #
 # It expects to get from events dictionary
 # {
-#   "lambda-name": "test_lambda",
+#   "lambda-name": "simple_lambda",
 # }
 
 import sys
 import json
-import boto3
-import uuid
 import logging
 
 
