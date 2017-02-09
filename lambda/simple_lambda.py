@@ -18,5 +18,7 @@ event = json.loads(json_event)
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
+print (sys.version)
+
 print("test_lambda fired.")
 log.info("test_lambda fired.")

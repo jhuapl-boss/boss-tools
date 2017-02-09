@@ -1,7 +1,11 @@
 import json
 import os
 import subprocess
+import logging
 LAMBDA_PATH_PREFIX = "local/lib/python3.4/site-packages/lambda/"
+
+log = logging.getLogger()
+log.setLevel(logging.DEBUG)
 
 # List of supported Lambda functions
 lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
@@ -16,7 +20,9 @@ lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
 
 def handler(event, context):
     # Check for a "lambda-name" setting
-    print(event)
+    log.debug("starting lambda_loader -> handler()")
+    #log.debug(event)
+
     if "lambda-name" not in event:
         # Check if this is an S3 event which can be assumed to be ingest uploading
         if "Records" in event:
@@ -35,6 +41,7 @@ def handler(event, context):
         print("No path found for lambda: " + lambda_name)
         exit(2)
 
+    log.debug("got lambda path")
     json_event = json.dumps(event)
     print("event: " + json_event)
     args = ("bin/python3.4", lambda_path, json_event)
