@@ -56,7 +56,7 @@ def get_session():
     return boto3.session.Session(region_name=get_region())
 
 # DP NOTE: StepFunction methods adapted from heaviside library
-def sfn_execute(session, name, data = None):
+def sfn_execute(session, name, input_ = None):
     """Start executing a StepFunction
 
     Args:
@@ -182,7 +182,7 @@ class AWSManager:
         :return: None
         """
         temp_session = get_session()
-        
+
         blog = BossLogger().logger
         blog.info("AWSManager - Created new boto3 session and added to the pool")
         self.__sessions.put(temp_session)
@@ -205,7 +205,7 @@ class AWSManager:
 
             except queue.Empty:
                 # No session was available so generate one
-                blog = BossLogger().logger        
+                blog = BossLogger().logger
                 blog.info("AWSManager - No session was available while trying to execute get_session.  Dynamically creating a new session.")
                 self.__create_session()
 
