@@ -33,16 +33,11 @@ data = {
 }
 
 """
-
 import boto3
 import bossutils
-import botocore
-import pprint
 import hashlib
-import uuid
 import json
 import pymysql.cursors
-import time
 import uuid
 import pprint
 import pymysql.cursors
@@ -87,90 +82,106 @@ def query_for_deletes(data, session=None):
     sfn_client = session.client('stepfunctions')
     LOG.debug("created sfn_client")
 
-    # TODO SH need to get vault working from lambda or pass credentials into activity.
     vault = bossutils.vault.Vault()
     LOG.debug("got vault")
 
+    host = data["db"]
+    user = vault.read('secret/endpoint/django/db', 'user')
+    password = vault.read('secret/endpoint/django/db', 'password')
+    db_name = vault.read('secret/endpoint/django/db', 'name')
+    port = int(vault.read('secret/endpoint/django/db', 'port'))
+
+    ##### debug locally #################
+    # host = "localhost"
+    # user = "testuser"
+    # password = ""
+    # db_name = "boss"
+    # port = 3306
+
     # Connect to the database
-    connection = pymysql.connect(host=data["db"],
-                                 user=vault.read('secret/endpoint/django/db', 'user'),
-                                 password=vault.read('secret/endpoint/django/db', 'password'),
-                                 db=vault.read('secret/endpoint/django/db', 'name'),
-                                 port=int(vault.read('secret/endpoint/django/db', 'port')),
+    connection = pymysql.connect(host=host,
+                                 user=user,
+                                 password=password,
+                                 db=db_name,
+                                 port=port,
                                  charset='utf8mb4',
                                  cursorclass=pymysql.cursors.DictCursor)
     LOG.debug("created pymysql connection")
     try:
-        with connection.cursor() as cursor:
+        with connection.cursor() as ch_cursor:
             # Read a single record
             one_day = timedelta(days=1)
             channel_type = 'annotation'
+
             while True:
                 # this query will find 1 item to be deleted that does not have a delete_status (good for debugging)
-                sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` is not null AND `deleted_status` is null and `channel_type` = %s limit 1"
-                cursor.execute(sql, (channel_type,))
-                # # This query version will only find items older than a day.
-                # sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` > %s AND deleted_status is null"
-                # cursor.execute(sql, (one_day,))
+                sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` is not null AND `deleted_status` is null and `type` =%s limit 1"
+                ch_cursor.execute(sql, (channel_type,))
+                # This query version will only find items older than a day.
+                # sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` > %s AND deleted_status is null and `type` = %s"
+                # cursor.execute(sql, (one_day, channel_type,))
                 row_count = 0
-                for ch_row in cursor:
+                for ch_row in ch_cursor:
                     row_count += 1
                     LOG.info("found channel: " + str(ch_row))
                     print("found channel: " + str(ch_row))
 
-                    # get lookup key given channel id and channel name
-                    channel_id = ch_row['id']
-                    sql = "SELECT `id`, `channel_name`, `lookup_key` FROM `lookup` where `channel_name`=%s"
-                    cursor.execute(sql, (ch_row['name'],))
-                    lookup_key_id = None
-                    lookup_key = None
-                    for lookup_row in cursor:  # its possible for two channels to have the same name so we search for the one with the correct channel id.
-                        parts = lookup_row['lookup_key'].split("&")
-                        if int(parts[2]) == channel_id:
-                            lookup_key_id = lookup_row['id']
-                            lookup_key = lookup_row['lookup_key']
-                            break
-                    if lookup_key_id is None:
-                        LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'.format(channel_id))
-                        client = boto3.client('sns')
-                        resp = client.publish(TopicArn=data["notify_topic"],
-                                              Message="Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
-                                                  channel_id))
-                        if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-                            LOG.error(
-                                "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}"
-                                .format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
-                                "Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
-                                    channel_id))
-                        sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
-                        cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
-                        connection.commit()
-                    else:
-                        sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
-                        cursor.execute(sql, (DELETED_STATUS_START, str(channel_id),))
-                        connection.commit()
-                        # Kick off step-function
-                        data["lookup_key"] = lookup_key
-                        data["lookup_key_id"] = lookup_key_id
-                        data["channel_id"] = channel_id
+                    with connection.cursor() as cursor:
+                        # get lookup key given channel id and channel name
+                        channel_id = ch_row['id']
+                        sql = "SELECT `id`, `channel_name`, `lookup_key` FROM `lookup` where `channel_name`=%s"
+                        cursor.execute(sql, (ch_row['name'],))
+                        lookup_key_id = None
+                        lookup_key = None
+                        for lookup_row in cursor:  # its possible for two channels to have the same name so we search for the one with the correct channel id.
+                            parts = lookup_row['lookup_key'].split("&")
+                            if int(parts[2]) == channel_id:
+                                lookup_key_id = lookup_row['id']
+                                lookup_key = lookup_row['lookup_key']
+                                break
+                        if lookup_key_id is None:
+                            LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'.format(channel_id))
+                            client = boto3.client('sns')
+                            resp = client.publish(TopicArn=data["notify_topic"],
+                                                  Message="Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
+                                                      channel_id))
+                            if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                                LOG.error(
+                                    "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}"
+                                    .format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
+                                    "Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
+                                        channel_id))
+                            sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
+                            cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
+                            connection.commit()
+                        else:
+                            sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
+                            cursor.execute(sql, (DELETED_STATUS_START, str(channel_id),))
+                            connection.commit()
+                            # Kick off step-function
+                            data["lookup_key"] = lookup_key
+                            data["lookup_key_id"] = lookup_key_id
+                            data["channel_id"] = channel_id
 
-                        LOG.debug("about to call sfn_client.start_execution")
-                        response = sfn_client.start_execution(
-                            stateMachineArn=data["delete-sfn-arn"],
-                            name="delete-boss-{}".format(uuid.uuid4().hex),
-                            input=json.dumps(data)
-                        )
-                        LOG.debug(response)
+                            LOG.debug("about to call sfn_client.start_execution")
+                            response = sfn_client.start_execution(
+                                stateMachineArn=data["delete-sfn-arn"],
+                                name="delete-boss-{}".format(uuid.uuid4().hex),
+                                input=json.dumps(data)
+                            )
+                            LOG.debug(response)
+
                 if row_count == 0 and channel_type == "annotation":
                     # no annotation channels were deleted, loop again and delete any image channels
                     channel_type = "image"
                     LOG.debug("No annotation channels found to delete, now looking for image channels.")
                 else:
                     break  # while loop
-            LOG.debug("found {} channels to delete".format())
+            LOG.debug("found {} channels to delete".format(row_count))
 
     finally:
         connection.close()
+
     LOG.debug("leaving query_for_deletes()")
 
 def delete_metadata(data, session=None):
@@ -714,9 +725,9 @@ def delete_test_4(input_):
 
 if __name__ == "__main__":
     input_from_main = {
-        "lookup_key": "1&1&1",
-        "channel_id": "1",
-        "lookup_key_id": "1",
+        #"lookup_key": "1&1&1",
+        #"channel_id": "1",
+        #"lookup_key_id": "1",
         "db": "endpoint-db.hiderrt1.boss",
         #"db": "localhost",
         "meta-db": "bossmeta.hiderrt1.boss",
@@ -728,11 +739,6 @@ if __name__ == "__main__":
         "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
         "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
         "error":  "test error for SFN",
-        # the following are not needed passed in through lambda but needed if testing through main.
-        "db_name":  "boss",
-        "db_user": "testuser",
-        "db_password": "xxxxxxxxxxxxx",
-        "db_port": "3306",
     }
     session = boto3.session.Session(region_name="us-east-1")
     s3client = session.client("s3")
