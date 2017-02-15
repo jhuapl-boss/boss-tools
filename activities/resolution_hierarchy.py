@@ -71,13 +71,7 @@ def xyz_range(*args, step=None):
                 yield XYZ(x, y, z)
 
 # BOSS Key creation functions / classes
-class S3IndexKey(dict):
-    def __init__(self, obj_key, version=0):
-        super().__init__()
-        self['object-key'] = {'S': obj_key},
-        self['version-node'] = {'N': str(version)}
-
-def S3ObjectKey(*args, version=0):
+def HashedKey(*args, version = None):
     """
     Args:
         collection_id
@@ -86,63 +80,195 @@ def S3ObjectKey(*args, version=0):
         resolution
         time_sample
         morton (str): Morton ID of cube
+
+    Keyword Args:
         version : Optional Object version
     """
     key = '&'.join(map(str, args))
     digest = hashlib.md5(key.encode()).hexdigest()
-    return '{}&{}&{}'.format(digest, key, version)
+    key = '{}&{}'.format(digest, key)
+    if version is not None:
+        key = '{}&{}'.format(key, version)
+    return key
+
+class S3Bucket(object):
+    def __init__(self, bucket):
+        self.bucket = bucket
+        self.s3 = boto3.client('s3')
+
+    def _check_error(self, resp, action):
+        if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
+            raise Exception("Error {} cuboid to/from S3".format(action))
+
+    def get(self, key):
+        resp = s3.get_object(Key = key,
+                             Bucket = self.bucket)
+
+        self._check_error(resp, "reading")
+
+        data = resp['Body'].read()
+        return data
+
+    def put(self, key, data):
+        resp = s3.put_object(Key = key,
+                             Body = data,
+                             Bucket = self.bucket)
+
+        self._check_error(resp, "writing")
+
+class S3IndexKey(dict):
+    def __init__(self, obj_key, version=0, job_hash=None, job_range=None):
+        super().__init__()
+        self['object-key'] = {'S': obj_key},
+        self['version-node'] = {'N': str(version)}
+
+        if job_hash is not None:
+            self['ingest-job-hash'] = {'S': str(job_hash)}
+
+        if job_range is not None:
+            self['ingest-job-range'] = {'S': job_range}
+
+class IdIndexKey(dict):
+    def __init__(self, chan_key, version=0):
+        super().__init__()
+        self['channel-id-key'] = {'S': chan_key}
+        self['version'] = {'N': str(version)}
+
+class DynamoDBTable(object):
+    def __init__(self, table):
+        self.table = table
+        self.ddb = boto3.client('dynamodb')
+
+    def _check_error(self, resp, action):
+        if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
+            raise Exception("Error {} index information to/from/in DynamoDB".format(action))
+
+    def put(self, item):
+        try:
+            self.ddb.put_item(TableName = self.table,
+                              Item = item,
+                              ReturnConsumedCapacity = 'NONE',
+                              ReturnItemCollectionMetrics = 'NONE')
+        except:
+            raise Exception("Error adding item to DynamoDB Table")
+
+    def update_ids(self, key, ids):
+        resp = self.ddb.update_item(TableName = self.table,
+                                    Key = key,
+                                    UpdateExpression='ADD #idset :ids',
+                                    ExpressionAttributeNames={'#idset': 'id-set'},
+                                    ExpressionAttributeValues={':ids': {'NS': ids}},
+                                    ReturnConsumedCapacity='NONE')
+
+        self._check_error(resp, 'updating')
+
+    def update_id(self, key, obj_key):
+        resp = self.ddb.update_item(TableName = self.table,
+                                    Key = key,
+                                    UpdateExpression='ADD #cuboidset :objkey',
+                                    ExpressionAttributeNames={'#cuboidset': 'cuboid-set'},
+                                    ExpressionAttributeValues={':objkey': {'SS': [obj_key]}},
+                                    ReturnConsumedCapacity='NONE')
+
+        self._check_error(resp, 'updating')
+
+    def exists(self, key):
+        resp = self.ddb.get_item(TableName = self.table,
+                                 Key = key,
+                                 ConsistentRead=True,
+                                 ReturnConsumedCapacity='NONE')
+
+        return 'Item' in resp
 
 # ACTUAL Activities
-def foo(frame, resolution):
-    dynamodb = boto3.client('dynamodb')
-    s3 = boto3.client('s3')
+def generate_resolution_heirarchy(args):
+    """
+    Args:
+        args {
+            collection_id (int)
+            experiment_id (int)
+            channel_id (int)
+            annotation_channel (bool)
 
-    col_id = 0
-    exp_id = 0
-    chan_id = 0
+            s3_bucket
+            s3_index
+            s3_index_table (int)
+            id_index
+            id_index_table (int)
+
+            x_stop (int)
+            y_stop (int)
+            z_stop (int)
+
+            resolution_max (int)
+        }
+    """
+    # Hard coded values
     version = 0
     t = 0
-    s3_bucket = ''
 
-    # Assume starting from 0,0,0
-    dim = XYZ(*CUBOIDSIZE[resolution])
+    col_id = args['collection_id']
+    exp_id = args['experiment_id']
+    chan_id = args['channel_id']
+    annotation_chan = args['annotation_channel']
 
-    cubes = XYZ(ceildiv(frame.x_stop, dim.x),
-                ceildiv(frame.y_stop, dim.y),
-                ceildiv(frame.z_stop, dim.z))
+    x_stop = args['x_stop']
+    y_stop = args['y_stop']
+    z_stop = args['z_stop']
 
-    cube_data = {}
-    for xyz in xyz_range(cubes):
-        obj_key = S3ObjectKey(col_id, exp_id, chan_id, resolution, t, xyz.morton)
+    resolution_max = args['resolution_max']
 
-        resp = s3.get_object(Key = obj_key,
-                             Bucket = s3_bucket)
+    for resolution in range(resolution_max):
+        # Assume starting from 0,0,0
+        dim = XYZ(*CUBOIDSIZE[resolution])
 
-        # TODO check for error
+        cubes = XYZ(ceildiv(x_stop, dim.x),
+                    ceildiv(y_stop, dim.y),
+                    ceildiv(z_stop, dim.z))
 
-        obj_data = resp['Body'].read()
+        step = XYZ(2,2,1)
+        for target in xyz_range(cubes, step=step):
+            # NOTE Can fan out here
+            # Download all of the cubes that will be downsamples
+            volume = XYZVolume(step)
+            for cube in xyz_range(target, target + step):
+                obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
+                volume[cube - target] = s3.get(obj_key)
 
-        cube_data[xyz] = obj_data
+            # Create downsampled cube
+            cube = downsample_cube(volume)
 
-    one = XYZ(1,1,1)
-    step = XYZ(2,2,1)
-    for target in xyz_range(cubes, step=step):
-        volume = XYZVolume(step)
-        for cube in xyz_range(target, target + step):
-            volume[cube - target] = cube_data[xyz]
+            # Save new cube in S3
+            obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
+            s3.put(obj_key, cube)
 
-        cube = downsample(volume)
+            # Update indicies
+            # Create S3 Index if it doesn't exist
+            idx_key = S3IndexKey(obj_key, version)
+            if not s3_index.exists(idx_key):
+                ingest_job = 0 # Valid to be 0, as posting a cutout uses 0
+                idx_key = S3IndexKey(obj_key,
+                                     version,
+                                     col_id,
+                                     '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
+                s3_index.put(idx_key)
 
-        obj_key = S3ObjectKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton)
-        resp = s3.put_object(Key = obj_key,
-                             Body = cube,
-                             Bucket = s3_bucket)
+            # Update ID Index if the channel is an annotation channel
+            if annotation_chan:
+                ids = ndlib.unique(cube)
 
-        # TODO check for error
+                # Convert IDs to strings and drop any IDs that equal zero
+                ids = [str(id) for id in ids if id != 0]
 
-        # Update indicies
+                if len(ids) > 0:
+                    idx_key = S3IndexKey(obj_key, version)
+                    s3_index.update_ids(idx_key, id_strs)
 
+                    for id in ids:
+                        idx_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, id)
+                        chan_key = IdIndexKey(idx_key, version)
+                        id_index.update_id(chan_key, obj_key)
 
-def downsample(volume):
+def downsample_cube(volume):
     raise NotImplemented()
 
