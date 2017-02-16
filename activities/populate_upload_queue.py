@@ -109,7 +109,7 @@ def populate_upload_queue(args):
             break
 
         retry = 3
-        while retry > 0
+        while retry > 0:
             resp = queue.queue.send_messages(Entries=batch)
             sent += len(resp['Successful'])
 
