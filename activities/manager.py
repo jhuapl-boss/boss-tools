@@ -21,6 +21,7 @@ from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
 from delete_cuboid import *
 
 import populate_upload_queue as puq
+import resolution_hierarchy as rh
 
 class BossActivityManager(ActivityManager):
     def __init__(self):
@@ -59,6 +60,9 @@ class BossActivityManager(ActivityManager):
             # Populate Upload Queue StepFunction
             lambda: ActivityProcess('PopulateQueue.' + self.domain, dispatch(puq.populate_upload_queue)),
             lambda: ActivityProcess('VerifyCount.' + self.domain, dispatch(puq.verify_count)),
+
+            # Resolution Hierarchy StepFunction
+            #lambda: ActivityProcess('DownsampleChannel.' + self.domain, dispatch(rh.downsample_channel))
         ]
 
 if __name__ == '__main__':

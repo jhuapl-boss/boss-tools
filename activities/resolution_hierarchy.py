@@ -219,6 +219,7 @@ def downsample_channel(args):
 
     step = XYZ(2,2,1) # TODO Base off of downsample type
     for target in xyz_range(cubes, step=step):
+        # NOTE Can fan-out these calls
         downsample_volume(args, target, step)
 
     # Advance the look and recalculate the conditional
@@ -284,5 +285,7 @@ def downsample_volume(args, target, step):
                 id_index.update_id(chan_key, obj_key)
 
 def downsample_cube(volume):
-    raise NotImplemented()
+    #raise NotImplemented()
+    print("Not implemented")
+    return volume[0][0][0]
 
