@@ -101,8 +101,8 @@ class S3Bucket(object):
             raise Exception("Error {} cuboid to/from S3".format(action))
 
     def get(self, key):
-        resp = s3.get_object(Key = key,
-                             Bucket = self.bucket)
+        resp = self.s3.get_object(Key = key,
+                                  Bucket = self.bucket)
 
         self._check_error(resp, "reading")
 
@@ -110,9 +110,9 @@ class S3Bucket(object):
         return data
 
     def put(self, key, data):
-        resp = s3.put_object(Key = key,
-                             Body = data,
-                             Bucket = self.bucket)
+        resp = self.s3.put_object(Key = key,
+                                  Body = data,
+                                  Bucket = self.bucket)
 
         self._check_error(resp, "writing")
 
@@ -181,7 +181,7 @@ class DynamoDBTable(object):
         return 'Item' in resp
 
 # ACTUAL Activities
-def generate_resolution_heirarchy(args):
+def downsample_channel(args):
     """
     Args:
         args {
@@ -192,17 +192,41 @@ def generate_resolution_heirarchy(args):
 
             s3_bucket
             s3_index
-            s3_index_table (int)
             id_index
-            id_index_table (int)
 
             x_stop (int)
             y_stop (int)
             z_stop (int)
 
+            resolution (int)
             resolution_max (int)
+            res_lt_max (bool)
         }
     """
+
+    x_stop = args['x_stop']
+    y_stop = args['y_stop']
+    z_stop = args['z_stop']
+
+    resolution = args['resolution']
+
+    # Assume starting from 0,0,0
+    dim = XYZ(*CUBOIDSIZE[resolution])
+
+    cubes = XYZ(ceildiv(x_stop, dim.x),
+                ceildiv(y_stop, dim.y),
+                ceildiv(z_stop, dim.z))
+
+    step = XYZ(2,2,1) # TODO Base off of downsample type
+    for target in xyz_range(cubes, step=step):
+        downsample_volume(args, target, step)
+
+    # Advance the look and recalculate the conditional
+    args['resolution'] = resolution + 1
+    args['res_lt_max'] = args['resolution'] < args['resolution_max']
+    return args
+
+def downsample_volume(args, target, step):
     # Hard coded values
     version = 0
     t = 0
@@ -212,62 +236,52 @@ def generate_resolution_heirarchy(args):
     chan_id = args['channel_id']
     annotation_chan = args['annotation_channel']
 
-    x_stop = args['x_stop']
-    y_stop = args['y_stop']
-    z_stop = args['z_stop']
+    resolution = args['resolution']
 
-    resolution_max = args['resolution_max']
+    s3 = S3Bucket(args['s3_bucket'])
+    s3_index = DynamoDBTable(args['s3_index'])
+    id_index = DynamoDBTable(args['id_index'])
 
-    for resolution in range(resolution_max):
-        # Assume starting from 0,0,0
-        dim = XYZ(*CUBOIDSIZE[resolution])
+    # Download all of the cubes that will be downsamples
+    volume = XYZVolume(step)
+    # NOTE Could also be xyz_range(step) and offset the result for the morton
+    for cube in xyz_range(target, target + step):
+        obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
+        volume[cube - target] = s3.get(obj_key)
 
-        cubes = XYZ(ceildiv(x_stop, dim.x),
-                    ceildiv(y_stop, dim.y),
-                    ceildiv(z_stop, dim.z))
+    # Create downsampled cube
+    cube = downsample_cube(volume)
 
-        step = XYZ(2,2,1)
-        for target in xyz_range(cubes, step=step):
-            # NOTE Can fan out here
-            # Download all of the cubes that will be downsamples
-            volume = XYZVolume(step)
-            for cube in xyz_range(target, target + step):
-                obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
-                volume[cube - target] = s3.get(obj_key)
+    # Save new cube in S3
+    obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
+    s3.put(obj_key, cube)
 
-            # Create downsampled cube
-            cube = downsample_cube(volume)
+    # Update indicies
+    # Create S3 Index if it doesn't exist
+    idx_key = S3IndexKey(obj_key, version)
+    if not s3_index.exists(idx_key):
+        ingest_job = 0 # Valid to be 0, as posting a cutout uses 0
+        idx_key = S3IndexKey(obj_key,
+                             version,
+                             col_id,
+                             '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
+        s3_index.put(idx_key)
 
-            # Save new cube in S3
-            obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
-            s3.put(obj_key, cube)
+    # Update ID Index if the channel is an annotation channel
+    if annotation_chan:
+        ids = ndlib.unique(cube)
 
-            # Update indicies
-            # Create S3 Index if it doesn't exist
+        # Convert IDs to strings and drop any IDs that equal zero
+        ids = [str(id) for id in ids if id != 0]
+
+        if len(ids) > 0:
             idx_key = S3IndexKey(obj_key, version)
-            if not s3_index.exists(idx_key):
-                ingest_job = 0 # Valid to be 0, as posting a cutout uses 0
-                idx_key = S3IndexKey(obj_key,
-                                     version,
-                                     col_id,
-                                     '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
-                s3_index.put(idx_key)
+            s3_index.update_ids(idx_key, id_strs)
 
-            # Update ID Index if the channel is an annotation channel
-            if annotation_chan:
-                ids = ndlib.unique(cube)
-
-                # Convert IDs to strings and drop any IDs that equal zero
-                ids = [str(id) for id in ids if id != 0]
-
-                if len(ids) > 0:
-                    idx_key = S3IndexKey(obj_key, version)
-                    s3_index.update_ids(idx_key, id_strs)
-
-                    for id in ids:
-                        idx_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, id)
-                        chan_key = IdIndexKey(idx_key, version)
-                        id_index.update_id(chan_key, obj_key)
+            for id in ids:
+                idx_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, id)
+                chan_key = IdIndexKey(idx_key, version)
+                id_index.update_id(chan_key, obj_key)
 
 def downsample_cube(volume):
     raise NotImplemented()
