@@ -41,7 +41,7 @@ import pymysql.cursors
 import uuid
 import pprint
 import pymysql.cursors
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
@@ -129,11 +129,11 @@ def query_for_deletes(data, session=None):
                 #        "is not null AND `deleted_status` is null and `type` =%s limit 1")
                 # ch_cursor.execute(sql, (channel_type,))
 
-                # This query version will only find items older than a day.
-                one_day = timedelta(days=1)
+                # This query version will only find items older than a 1.5 days (gives us time to stop deletes).
+                one_day_ago = datetime.now() - timedelta(days=1, hours=12)
                 sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where "
-                       "`to_be_deleted` > %s AND `deleted_status` is null and `type` = %s")
-                ch_cursor.execute(sql, (one_day, channel_type,))
+                       "`to_be_deleted` < %s AND `deleted_status` is null and `type` = %s")
+                ch_cursor.execute(sql, (one_day_ago, channel_type,))
                 row_count = 0
                 for ch_row in ch_cursor:
                     row_count += 1
@@ -757,7 +757,7 @@ def main():
     }
     session = boto3.session.Session(region_name="us-east-1")
 
-    # dict = query_for_deletes(input_from_main, session=session)
+    #dict = query_for_deletes(input_from_main, session=session)
     # dict = delete_metadata(input_from_main, session=session)
     # dict = delete_id_count(dict, session=session)
     # dict = delete_id_index(dict, session=session)
