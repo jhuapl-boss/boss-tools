@@ -52,7 +52,6 @@ class BossActivityManager(ActivityManager):
             lambda: ActivityProcess('merge_parallel_outputs.' + self.domain, dispatch(merge_parallel_outputs)),
             lambda: ActivityProcess('find_s3_index.' + self.domain, dispatch(find_s3_index)),
             lambda: ActivityProcess('delete_s3_index.' + self.domain, dispatch(delete_s3_index)),
-            lambda: ActivityProcess('save_and_delete.' + self.domain, dispatch(save_and_delete)),
             lambda: ActivityProcess('notify_admins.' + self.domain, dispatch(notify_admins)),
             lambda: ActivityProcess('delete_clean_up.' + self.domain, dispatch(delete_clean_up)),
 
