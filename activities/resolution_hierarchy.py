@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
+import boto3
+from bossutils import aws
 from collections import namedtuple
 
 from spdb.c_lib import ndlib
@@ -27,7 +30,7 @@ class XYZ(namedtuple('XYZ', ['x', 'y', 'z'])):
 
     @property
     def morton(self):
-        return ndlib.XYZMorton(*self)
+        return ndlib.XYZMorton(self)
 
     def __add__(self, other):
         return XYZ(self.x + other.x,
@@ -94,7 +97,7 @@ def HashedKey(*args, version = None):
 class S3Bucket(object):
     def __init__(self, bucket):
         self.bucket = bucket
-        self.s3 = boto3.client('s3')
+        self.s3 = aws.get_session().client('s3')
 
     def _check_error(self, resp, action):
         if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
@@ -137,7 +140,7 @@ class IdIndexKey(dict):
 class DynamoDBTable(object):
     def __init__(self, table):
         self.table = table
-        self.ddb = boto3.client('dynamodb')
+        self.ddb = aws.get_session().client('dynamodb')
 
     def _check_error(self, resp, action):
         if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
@@ -203,6 +206,8 @@ def downsample_channel(args):
             res_lt_max (bool)
         }
     """
+
+    print("Downsampling resolution " + str(args['resolution']))
 
     x_stop = args['x_stop']
     y_stop = args['y_stop']
