@@ -26,7 +26,14 @@ from ndingest.ndingestproj.bossingestproj import BossIngestProj
 
 from bossutils import aws
 
-SQS_BATCH_SIZE = 10
+class FailedToSendMessages(Exception):
+    pass
+
+# Max SQS message / batch message size if 256 KB
+# If messages are estimated to be no more than 512 bytes
+# then 512 messages can be batch sent within the 256 KB limit
+SQS_BATCH_SIZE = 500 # + buffer = 512
+
 def populate_upload_queue(args):
     """Populate the ingest upload SQS Queue with tile information
 
@@ -72,10 +79,7 @@ def populate_upload_queue(args):
     #          and yield after each sendBatchMessages
 
     clear_queue(args['upload_queue'])
-    start = datetime.now()
 
-    msgs = create_messages(args)
-    batches = (msgs[x:x+SQS_BATCH_SIZE] for x in range(0, len(msgs), SQS_BATCH_SIZE))
 
     proj = BossIngestProj(args['collection_name'],
                           args['experiment_name'],
@@ -84,22 +88,44 @@ def populate_upload_queue(args):
                           args['job_id'])
     queue = UploadQueue(proj)
 
-    end = datetime.now()
-    delta = (end - start).seconds
-    if delta < 60:
-        # It takes up to 60 seconds to purge a SQS queue
-        # If messages are added before the delete is finished
-        # they might be deleted
-        time.sleep(60 - delta)
+    msgs = create_messages(args)
+    sent = 0
 
-    for batch in batches:
-        resp = queue.sendBatchMessages(batch)
-        # { 'Successful': [], 'Failed': [] }
-        # DP ???: Does sendBatchMessage throw an exception or do we need to check the result?
+    # Implement a custom queue.sendBatchMessages so that more than 10
+    # messages can be sent at once (hard limit in sendBatchMessages)
+    while True:
+        batch = []
+        for i in range(SQS_BATCH_SIZE):
+            try:
+                batch.append({
+                    'Id': str(i),
+                    'MessageBody': next(msgs),
+                    'DelaySeconds': queue.delay_seconds
+                })
+            except StopIteration:
+                break
+
+        if len(batch) == 0:
+            break
+
+        retry = 3
+        while retry > 0
+            resp = queue.queue.send_messages(Entries=batch)
+            sent += len(resp['Successful'])
+
+            if 'Failed' in resp and len(resp['Failed']) > 0:
+                ids = map(lambda f: f['Id'], resp['Failed'])
+                batch = filter(lambda b: b['Id'] in ids, batch)
+                retry -= 1
+                if retry == 0:
+                    raise FailedToSendMessages(batch) # SFN will relaunch the activity
+                continue
+            else:
+                break
 
     return {
         'arn': args['upload_queue'],
-        'count': len(msgs),
+        'count': sent,
     }
 
 def clear_queue(arn):
@@ -111,6 +137,7 @@ def clear_queue(arn):
     session = aws.get_session()
     client = session.client('sqs')
     client.purge_queue(QueueUrl = arn)
+    time.sleep(60)
 
 def create_messages(args):
     """Create all of the tile messages to be enqueued
@@ -163,9 +190,7 @@ def create_messages(args):
                             'tile_key': tile_key,
                         }
 
-                        msgs.append(json.dumps(msg))
-
-    return msgs
+                        yield json.dumps(msg)
 
 def verify_count(args):
     """Verify that the number of messages in a queue is the given number
