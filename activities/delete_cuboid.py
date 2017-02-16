@@ -41,7 +41,7 @@ import pymysql.cursors
 import uuid
 import pprint
 import pymysql.cursors
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
@@ -58,6 +58,41 @@ class DeleteError(Exception):
     DeleteError will be used if an Exception occurs within any of the delete functions.
     """
     pass
+
+
+def get_db_connection(data):
+    """
+    connects to vault to get db information and then makes a pymysql connection
+    Args:
+        data(dict): dictionary containing db key.
+
+    Returns:
+        (pymysql.Connection) connection to pymysql
+    """
+    vault = bossutils.vault.Vault()
+    LOG.debug("get_db_connection(): made connection to Vault")
+
+    # ------ get values from Vault -----------
+    host = data["db"]
+    user = vault.read('secret/endpoint/django/db', 'user')
+    password = vault.read('secret/endpoint/django/db', 'password')
+    db_name = vault.read('secret/endpoint/django/db', 'name')
+    port = int(vault.read('secret/endpoint/django/db', 'port'))
+
+    # ---- debug locally -------
+    # host = "localhost"
+    # user = "testuser"
+    # password = ""
+    # db_name = "boss"
+    # port = 3306
+
+    return pymysql.connect(host=host,
+                           user=user,
+                           password=password,
+                           db=db_name,
+                           port=port,
+                           charset='utf8mb4',
+                           cursorclass=pymysql.cursors.DictCursor)
 
 
 def query_for_deletes(data, session=None):
@@ -82,44 +117,23 @@ def query_for_deletes(data, session=None):
     sfn_client = session.client('stepfunctions')
     LOG.debug("created sfn_client")
 
-    vault = bossutils.vault.Vault()
-    LOG.debug("got vault")
-
-    host = data["db"]
-    user = vault.read('secret/endpoint/django/db', 'user')
-    password = vault.read('secret/endpoint/django/db', 'password')
-    db_name = vault.read('secret/endpoint/django/db', 'name')
-    port = int(vault.read('secret/endpoint/django/db', 'port'))
-
-    ##### debug locally #################
-    # host = "localhost"
-    # user = "testuser"
-    # password = ""
-    # db_name = "boss"
-    # port = 3306
-
-    # Connect to the database
-    connection = pymysql.connect(host=host,
-                                 user=user,
-                                 password=password,
-                                 db=db_name,
-                                 port=port,
-                                 charset='utf8mb4',
-                                 cursorclass=pymysql.cursors.DictCursor)
+    connection = get_db_connection(data)
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as ch_cursor:
-            # Read a single record
-            one_day = timedelta(days=1)
             channel_type = 'annotation'
 
             while True:
                 # this query will find 1 item to be deleted that does not have a delete_status (good for debugging)
-                sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` is not null AND `deleted_status` is null and `type` =%s limit 1"
-                ch_cursor.execute(sql, (channel_type,))
+                # sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` "
+                #        "is not null AND `deleted_status` is null and `type` =%s limit 1")
+                # ch_cursor.execute(sql, (channel_type,))
+
                 # This query version will only find items older than a day.
-                # sql = "SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where `to_be_deleted` > %s AND deleted_status is null and `type` = %s"
-                # cursor.execute(sql, (one_day, channel_type,))
+                one_day = timedelta(days=1)
+                sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `channel` where "
+                       "`to_be_deleted` > %s AND `deleted_status` is null and `type` = %s")
+                ch_cursor.execute(sql, (one_day, channel_type,))
                 row_count = 0
                 for ch_row in ch_cursor:
                     row_count += 1
@@ -133,24 +147,28 @@ def query_for_deletes(data, session=None):
                         cursor.execute(sql, (ch_row['name'],))
                         lookup_key_id = None
                         lookup_key = None
-                        for lookup_row in cursor:  # its possible for two channels to have the same name so we search for the one with the correct channel id.
+                        for lookup_row in cursor:
+                            # its possible for two channels to have the same name so we search for the one with the
+                            # correct channel id.
                             parts = lookup_row['lookup_key'].split("&")
                             if int(parts[2]) == channel_id:
                                 lookup_key_id = lookup_row['id']
                                 lookup_key = lookup_row['lookup_key']
                                 break
                         if lookup_key_id is None:
-                            LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'.format(channel_id))
+                            LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'
+                                        .format(channel_id))
                             client = boto3.client('sns')
                             resp = client.publish(TopicArn=data["notify_topic"],
-                                                  Message="Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
+                                                  Message="Delete Error: channel id {}, has no lookup key in the "
+                                                          "endpoint lookup table.".format(
                                                       channel_id))
                             if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
                                 LOG.error(
-                                    "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}"
-                                    .format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
-                                    "Delete Error: channel id {}, has no lookup key in the endpoint lookup table.".format(
-                                        channel_id))
+                                    "Unable to send to following error to SNS Topic. Received the following "
+                                    "HTTPStatusCode {}".format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
+                                    "Delete Error: channel id {}, has no lookup key in the endpoint lookup table."
+                                    .format(channel_id))
                             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
                             cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
                             connection.commit()
@@ -181,8 +199,9 @@ def query_for_deletes(data, session=None):
 
     finally:
         connection.close()
-
     LOG.debug("leaving query_for_deletes()")
+    return data
+
 
 def delete_metadata(data, session=None):
     """
@@ -194,7 +213,6 @@ def delete_metadata(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    #if "meta-db" not in input:
     LOG.debug("delete_metadata started")
     if session is None:
         session = bossutils.aws.get_session()
@@ -203,7 +221,7 @@ def delete_metadata(data, session=None):
     lookup_key = data["lookup_key"]
     meta_db = data["meta-db"]
     query_params = {'TableName': meta_db,
-                    'KeyConditionExpression':'lookup_key = :lookup_key_value',
+                    'KeyConditionExpression': 'lookup_key = :lookup_key_value',
                     'ExpressionAttributeValues': {":lookup_key_value": {"S": lookup_key}},
                     'ExpressionAttributeNames': {"#bosskey": "key"},
                     'ProjectionExpression': "lookup_key, #bosskey",
@@ -212,7 +230,6 @@ def delete_metadata(data, session=None):
     query_resp = client.query(**query_params)
 
     if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-        #LOG.critical("response is {}, about to raise DeleteError".format(query_resp["ResponseMetadata"]["HTTPStatusCode"]))
         raise DeleteError(
             "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                 query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
@@ -220,8 +237,9 @@ def delete_metadata(data, session=None):
     LOG.debug("finished querying for metadata.")
     count = 0
     while query_resp['Count'] > 0:
+        exclusive_start_key = None
         for meta in query_resp["Items"]:
-            exclusive_start_key=meta
+            exclusive_start_key = meta
             count += 1
             del_params = {'TableName': meta_db,
                           'Key': meta,
@@ -232,8 +250,8 @@ def delete_metadata(data, session=None):
                 LOG.info("response is {}, about to raise DeleteError".format(
                     del_resp["ResponseMetadata"]["HTTPStatusCode"]))
                 raise DeleteError(
-                    "Error deleting from bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
-                        del_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(del_params)))
+                    "Error deleting from bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, "
+                    .format(del_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(del_params)))
         # Keep querying to make sure we have them all.
         query_params['ExclusiveStartKey'] = exclusive_start_key
         query_resp = client.query(**query_params)
@@ -244,7 +262,6 @@ def delete_metadata(data, session=None):
     print("deleted {} metadata items".format(count))
     LOG.debug("Leaving delete_metadata() after deleting {} metadata items.".format(count))
     return data
-
 
 
 def get_channel_key(lookup_key):
@@ -287,20 +304,21 @@ def delete_id_count(data, session=None):
     LOG.debug("finished query id count table")
 
     count = 0
+    exclusive_start_key = None
     while query_resp['Count'] > 0:
-        for id in query_resp["Items"]:
-            exclusive_start_key=id
+        for id_key in query_resp["Items"]:
+            exclusive_start_key = id_key
             count += 1
-            print("deleting: {}".format(id))
+            print("deleting: {}".format(id_key))
             del_params = {'TableName': id_count_table,
-                          'Key': id,
+                          'Key': id_key,
                           'ReturnValues': 'NONE',
                           'ReturnConsumedCapacity': 'NONE'}
             del_resp = client.delete_item(**del_params)
             if del_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
                 raise DeleteError(
-                    "Error deleting from idCount dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
-                        del_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(del_params)))
+                    "Error deleting from idCount dynamoDB table, received HTTPStatusCode: {}, using params: {}"
+                    .format(del_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(del_params)))
         # Keep querying to make sure we have them all.
         query_params['ExclusiveStartKey'] = exclusive_start_key
         query_resp = client.query(**query_params)
@@ -313,8 +331,8 @@ def delete_id_count(data, session=None):
     return data
 
 
-def get_channel_id_key(lookup_key, resolution, id):
-    base_key = '{}&{}&{}'.format(lookup_key, resolution, id)
+def get_channel_id_key(lookup_key, resolution, id_key):
+    base_key = '{}&{}&{}'.format(lookup_key, resolution, id_key)
     hash_str = hashlib.md5(base_key.encode()).hexdigest()
     return '{}&{}'.format(hash_str, base_key)
 
@@ -336,7 +354,6 @@ def delete_id_index(data, session=None):
     lookup_key = data["lookup_key"]
     client = session.client('dynamodb')
     and_lookup_key = "&{}&".format(lookup_key)
-    #and_lookup_key = "45aeef7ae7626d34f32c14512b25b1fa&19&14&16&0&1478"
 
     query_params = {'TableName': id_index_table,
                     # 'ScanFilter': { '"#channel_id_key":': {'AttributeValueList': [{"S": ":channel_id_key_value"}],
@@ -355,17 +372,18 @@ def delete_id_index(data, session=None):
     LOG.debug("delete_id_index: finshed querying id index")
 
     count = 0
+    exclusive_start_key = None
     while scan_resp['Count'] > 0:
-        for id in scan_resp["Items"]:
-            exclusive_start_key=id
+        for id_key in scan_resp["Items"]:
+            exclusive_start_key = id_key
             count += 1
             del_resp = client.delete_item(
                 TableName=id_index_table,
-                Key=id,
+                Key=id_key,
                 ReturnValues='NONE',
                 ReturnConsumedCapacity='NONE')
             if del_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-                del_resp["deleting"] = id
+                del_resp["deleting"] = id_key
                 raise DeleteError(del_resp)
         # Keep querying to make sure we have them all.
         query_params['ExclusiveStartKey'] = exclusive_start_key
@@ -379,29 +397,31 @@ def delete_id_index(data, session=None):
     return data
 
 
-def put_json_in_s3(client, bucket_name, key, object):
+def put_json_in_s3(client, bucket_name, key, py_object):
     """
     takes a python list or dict, converts it to json and pushes it as into s3.
     Args:
         client(boto3.Client): s3 client
         bucket_name: name of the bucket to store the object
         key: Object key
-        object: Python list or dict to be stored
+        py_object: Python list or dict to be stored
 
     Returns:
 
     """
-    json_object = json.dumps(object)
-    response = client.put_object(
+    json_object = json.dumps(py_object)
+    client.put_object(
         Body=json_object.encode("utf-8"),
         Bucket=bucket_name,
         Key=key
     )
 
+
 def get_json_from_s3(client, bucket_name, key):
     """
     pulls the json object from s3 and converts to python
     Args:
+        client(boto3.Client): s3 client
         bucket_name: name of the bucket pull the object from
         key: Object key
 
@@ -416,7 +436,6 @@ def get_json_from_s3(client, bucket_name, key):
     return json_object
 
 
-
 def get_exclusive_key(s3_index_row):
     """
     returns the exclusive key needed to make further queries of the s3Index dynamo table.
@@ -426,9 +445,8 @@ def get_exclusive_key(s3_index_row):
     Returns:
         (dict): exclusive key
     """
-    exclusive = {}
-    exclusive["ingest-job-hash"] = s3_index_row["ingest-job-hash"]
-    exclusive["ingest-job-range"] = s3_index_row["ingest-job-range"]
+    exclusive = {"ingest-job-hash": s3_index_row["ingest-job-hash"],
+                 "ingest-job-range": s3_index_row["ingest-job-range"]}
     return exclusive
 
 
@@ -441,10 +459,10 @@ def get_primary_key(s3_index_row):
     Returns:
         (dict): primary key
     """
-    primary = {}
-    primary["object-key"] = s3_index_row["object-key"]
-    primary["version-node"] = s3_index_row["version-node"]
+    primary = {"object-key": s3_index_row["object-key"],
+               "version-node": s3_index_row["version-node"]}
     return primary
+
 
 def merge_parallel_outputs(data):
     """
@@ -487,10 +505,14 @@ def find_s3_index(data, session=None):
     col, exp, ch = lookup_key.split("&")
     query_params = {'TableName': s3_index_table,
                     'IndexName': S3_INDEX_TABLE_INDEX,
-                    'KeyConditionExpression': '#ingest_job_hash = :ingest_job_hash_value AND begins_with(#ingest_job_range, :ingest_job_range_value)',
-                    'ExpressionAttributeValues': {":ingest_job_hash_value": {"S": col}, ":ingest_job_range_value": {"S": exp+"&"+ch}},
-                    'ExpressionAttributeNames': {"#object_key": "object-key", "#version_node": "version-node",
-                                                 "#ingest_job_hash": "ingest-job-hash", "#ingest_job_range": "ingest-job-range"},
+                    'KeyConditionExpression': '#ingest_job_hash = :ingest_job_hash_value AND '
+                                              'begins_with(#ingest_job_range, :ingest_job_range_value)',
+                    'ExpressionAttributeValues': {":ingest_job_hash_value": {"S": col},
+                                                  ":ingest_job_range_value": {"S": exp+"&"+ch}},
+                    'ExpressionAttributeNames': {"#object_key": "object-key",
+                                                 "#version_node": "version-node",
+                                                 "#ingest_job_hash": "ingest-job-hash",
+                                                 "#ingest_job_range": "ingest-job-range"},
                     'ProjectionExpression': "#object_key, #version_node, #ingest_job_hash, #ingest_job_range",
                     'Limit': 200}
     query_resp = client.query(**query_params)
@@ -502,11 +524,12 @@ def find_s3_index(data, session=None):
     shard_list = []
     shard_count = 0
     count = 0
+    exclusive_start_key = None
     while query_resp['Count'] > 0:
-        for id in query_resp["Items"]:
-            exclusive_start_key=id
+        for id_key in query_resp["Items"]:
+            exclusive_start_key = id_key
             count += 1
-            shard_list.append(get_primary_key(id))
+            shard_list.append(get_primary_key(id_key))
             shard_count += 1
             if shard_count == MAX_ITEMS_PER_SHARD:
                 shard_key = "{}-del".format(uuid.uuid4().hex)
@@ -518,8 +541,8 @@ def find_s3_index(data, session=None):
         query_params['ExclusiveStartKey'] = exclusive_start_key
         query_resp = client.query(**query_params)
         if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-            raise DeleteError("Error querying s3index dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
-                query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
+            raise DeleteError("Error querying s3index dynamoDB table, received HTTPStatusCode: {}, using params: {}"
+                              .format(query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
 
     if shard_list:
         shard_key = "{}-del".format(uuid.uuid4().hex)
@@ -544,7 +567,7 @@ def get_key_list(shard_list):
     delete_objects = []
     for row in shard_list:
         delete_objects.append({'Key': "{}&{}".format(row['object-key']['S'], row['version-node']['N'])})
-    return { 'Objects': delete_objects}
+    return {'Objects': delete_objects}
 
 
 def delete_s3_index(data, session=None):
@@ -564,16 +587,16 @@ def delete_s3_index(data, session=None):
     s3_cuboid_bucket = data["cuboid_bucket"]
     s3_delete_bucket = data["delete_bucket"]
     s3_index_table = data["s3-index-table"]
-    lookup_key = data["lookup_key"]
     delete_shard_index_key = data["delete_shard_index_key"]
 
     shard_index = get_json_from_s3(s3client, s3_delete_bucket, delete_shard_index_key)
     count = 0
     for shard_list_name in shard_index:
-        shard_list =  get_json_from_s3(s3client, s3_delete_bucket, shard_list_name)
-        # TODO SH Can implement delete faster using this method.  It will be sightly more complex to review the errors to avoid deleting DynamoDB entries when corresponding S3 objects failed to delete
-        #key_list = get_key_list(shard_list)
-        #response = cuboid_bucket.delete_objects(Bucket=s3_cuboid_bucket, Delete=key_list)
+        shard_list = get_json_from_s3(s3client, s3_delete_bucket, shard_list_name)
+        # TODO SH Can implement delete faster using this method.  It will be sightly more complex to review the errors
+        #  to avoid deleting DynamoDB entries when corresponding S3 objects failed to delete
+        # key_list = get_key_list(shard_list)
+        # response = cuboid_bucket.delete_objects(Bucket=s3_cuboid_bucket, Delete=key_list)
 
         for row in shard_list:
             s3_key = "{}&{}".format(row['object-key']['S'], row['version-node']['N'])
@@ -583,7 +606,8 @@ def delete_s3_index(data, session=None):
                     s3_key, s3_cuboid_bucket, s3_response["HTTPStatusCode"]))
 
             delete_params = {'TableName': s3_index_table,
-                            'Key': {'object-key': {'S': row["object-key"]["S"]}, 'version-node': {"N": row["version-node"]["N"]}}}
+                             'Key': {'object-key': {'S': row["object-key"]["S"]},
+                                     'version-node': {"N": row["version-node"]["N"]}}}
             count += 1
             query_resp = dynclient.delete_item(**delete_params)
             if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
@@ -607,23 +631,13 @@ def delete_clean_up(data, session=None):
         session = bossutils.aws.get_session()
     s3client = session.client('s3')
 
-    vault = bossutils.vault.Vault()
-    LOG.debug("got vault")
-
-    # Connect to the database
-    connection = pymysql.connect(host=data["db"],
-                                 user=vault.read('secret/endpoint/django/db', 'user'),
-                                 password=vault.read('secret/endpoint/django/db', 'password'),
-                                 db=vault.read('secret/endpoint/django/db', 'name'),
-                                 port=int(vault.read('secret/endpoint/django/db', 'port')),
-                                 charset='utf8mb4',
-                                 cursorclass=pymysql.cursors.DictCursor)
+    connection = get_db_connection(data)
 
     try:
         with connection.cursor() as cursor:
             LOG.debug("Updating deleted_status to finished.")
             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
-            resp = cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["channel_id"]),))
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["channel_id"]),))
             connection.commit()
 
             delete_bucket = data["delete_bucket"]
@@ -635,8 +649,8 @@ def delete_clean_up(data, session=None):
             for shard_list_name in shard_index:
                 s3_response = s3client.delete_object(Bucket=delete_bucket, Key=shard_list_name)
                 if s3_response["ResponseMetadata"]["HTTPStatusCode"] != 204:
-                    raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}".format(
-                        shard_list_name, delete_bucket, s3_response["HTTPStatusCode"]))
+                    raise DeleteError("Error deleting s3 object, {}, from bucket, {}, received HTTPStatusCode: {}"
+                                      .format(shard_list_name, delete_bucket, s3_response["HTTPStatusCode"]))
                 count += 1
 
             s3_response = s3client.delete_object(Bucket=delete_bucket, Key=delete_shard_index_key)
@@ -674,11 +688,6 @@ def delete_clean_up(data, session=None):
 
     return data
 
-def save_and_delete(data, session=None):
-    # if session is None:
-    #     session = bossutils.aws.get_session()
-    print("Need to perform save error here: {}".format(data["error-info"]))
-    return data
 
 def notify_admins(data, session=None):
     if session is None:
@@ -689,47 +698,53 @@ def notify_admins(data, session=None):
         raise DeleteError("Error notifying admins after delete failed.")
     return data
 
-def delete_test_1(input, context=None):
+
+def delete_test_1(data, context=None):
     print("entered fcn delete_test_1")
-    input["dt1"] = True
-    pprint.pprint(input)
-    return input
+    data["dt1"] = True
+    pprint.pprint(data)
+    return data
 
 
-def delete_test_2(input, context=None):
+def delete_test_2(data, context=None):
     print("entered fcn delete_test_2")
-    input["dt2"] = True
-    pprint.pprint(input)
-    return input
+    data["dt2"] = True
+    pprint.pprint(data)
+    return data
 
 
-def delete_test_3(input, context=None):
+def delete_test_3(data, context=None):
     print("entered fcn delete_test_3")
-    pprint.pprint(input)
+    pprint.pprint(data)
     output = {
-        'data': [1,2,3,4],
-        'index': 3 # zero indexed
+        'data': [1, 2, 3, 4],
+        'index': 3  # zero indexed
     }
     pprint.pprint(output)
     return output
 
 
-def delete_test_4(input_):
+def delete_test_4(data):
     print("entered fcn delete_test_4")
-    idx = input_['index']
-    data = input_['data']
+    idx = data['index']
+    data = data['data']
     print("Processing item: {}".format(data[idx]))
-    input_['index'] -= 1
-    return input_
+    data['index'] -= 1
+    return data
 
 
-if __name__ == "__main__":
+def main():
+    """
+    Used for debugging other methods locally running from the command line.
+    Returns:
+
+    """
     input_from_main = {
-        #"lookup_key": "1&1&1",
-        #"channel_id": "1",
-        #"lookup_key_id": "1",
+        # "lookup_key": "1&1&1",
+        # "channel_id": "1",
+        # "lookup_key_id": "1",
+        # "db": "localhost",
         "db": "endpoint-db.hiderrt1.boss",
-        #"db": "localhost",
         "meta-db": "bossmeta.hiderrt1.boss",
         "s3-index-table": "s3index.hiderrt1.boss",
         "id-index-table": "idIndex.hiderrt1.boss",
@@ -741,9 +756,8 @@ if __name__ == "__main__":
         "error":  "test error for SFN",
     }
     session = boto3.session.Session(region_name="us-east-1")
-    s3client = session.client("s3")
 
-    #dict = query_for_deletes(input_from_main, session=session)
+    # dict = query_for_deletes(input_from_main, session=session)
     # dict = delete_metadata(input_from_main, session=session)
     # dict = delete_id_count(dict, session=session)
     # dict = delete_id_index(dict, session=session)
@@ -753,3 +767,7 @@ if __name__ == "__main__":
     # #dict = notify_admins(dict, session=session)
 
     print("done.")
+
+
+if __name__ == "__main__":
+    main()
