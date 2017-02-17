@@ -14,11 +14,20 @@
 
 import hashlib
 import boto3
-from bossutils import aws
+import botocore
+import numpy as np
 from collections import namedtuple
-
+from bossutils import aws
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
+from spdb.imagecube import Cube, ImageCube8, ImageCube16
+from spdb.annocube import AnnotateCube64
+
+np_types = {
+    'uint64': np.uint64,
+    'uint16': np.uint16,
+    'uint8': np.uint8,
+}
 
 # Do an inverted floordiv, works for python bigints
 ceildiv = lambda a, b: -(-a // b)
@@ -43,13 +52,21 @@ class XYZ(namedtuple('XYZ', ['x', 'y', 'z'])):
                    self.z - other.z)
 
 class XYZVolume(list):
-    def __init__(self, xyz):
+    def __init__(self, xyz, default=b''):
         super().__init__()
+        self.default = default
         for x in range(xyz.x):
             ys = []
             for y in range(xyz.y):
-                ys.append([]) # Z dimension
+                ys.append([default for z in range(xyz.z)])
             self.append(ys)
+
+    def __setitem__(self, key, value):
+        if type(key) == XYZ:
+            x, y, z = key
+            self[x][y][z] = value
+        else:
+            super().__setitem__(key, value)
 
     def __getitem__(self, key):
         if type(key) == XYZ:
@@ -104,8 +121,11 @@ class S3Bucket(object):
             raise Exception("Error {} cuboid to/from S3".format(action))
 
     def get(self, key):
-        resp = self.s3.get_object(Key = key,
-                                  Bucket = self.bucket)
+        try:
+            resp = self.s3.get_object(Key = key,
+                                      Bucket = self.bucket)
+        except:
+            raise Exception("No Such Key")
 
         self._check_error(resp, "reading")
 
@@ -192,10 +212,15 @@ def downsample_channel(args):
             experiment_id (int)
             channel_id (int)
             annotation_channel (bool)
+            data_type
 
             s3_bucket
             s3_index
             id_index
+
+            x_start (int)
+            y_start (int)
+            z_start (int)
 
             x_stop (int)
             y_stop (int)
@@ -209,37 +234,45 @@ def downsample_channel(args):
 
     print("Downsampling resolution " + str(args['resolution']))
 
-    x_stop = args['x_stop']
-    y_stop = args['y_stop']
-    z_stop = args['z_stop']
-
     resolution = args['resolution']
 
-    # Assume starting from 0,0,0
     dim = XYZ(*CUBOIDSIZE[resolution])
+    print("Cube dimensions: {}".format(dim))
 
-    cubes = XYZ(ceildiv(x_stop, dim.x),
-                ceildiv(y_stop, dim.y),
-                ceildiv(z_stop, dim.z))
+    cubes_start = XYZ(args['x_start'] // dim.x,
+                      args['y_start'] // dim.y,
+                      args['z_start'] // dim.z)
+
+    cubes_stop = XYZ(ceildiv(args['x_stop'], dim.x),
+                     ceildiv(args['y_stop'], dim.y),
+                     ceildiv(args['z_stop'], dim.z))
 
     step = XYZ(2,2,1) # TODO Base off of downsample type
-    for target in xyz_range(cubes, step=step):
+    for target in xyz_range(cubes_start, cubes_stop, step=step):
         # NOTE Can fan-out these calls
-        downsample_volume(args, target, step)
+        try:
+            downsample_volume(args, target, step, dim)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
 
     # Advance the look and recalculate the conditional
     args['resolution'] = resolution + 1
     args['res_lt_max'] = args['resolution'] < args['resolution_max']
     return args
 
-def downsample_volume(args, target, step):
+def downsample_volume(args, target, step, dim):
+    print("Downsampling {}".format(target))
     # Hard coded values
     version = 0
     t = 0
+    dim_t = 1
 
     col_id = args['collection_id']
     exp_id = args['experiment_id']
     chan_id = args['channel_id']
+    data_type = args['data_type']
     annotation_chan = args['annotation_channel']
 
     resolution = args['resolution']
@@ -250,10 +283,21 @@ def downsample_volume(args, target, step):
 
     # Download all of the cubes that will be downsamples
     volume = XYZVolume(step)
+    empty_count = 0
     # NOTE Could also be xyz_range(step) and offset the result for the morton
     for cube in xyz_range(target, target + step):
-        obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
-        volume[cube - target] = s3.get(obj_key)
+        try:
+            obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
+            volume[cube - target] = s3.get(obj_key)
+        except Exception:
+            empty_count += 1
+            data = np.zeros([dim_t, dim.x, dim.y, dim.z], dtype=np_types[data_type], order='C')
+            data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
+            volume[cube - target] = data
+
+    if empty_count == (step.x * step.y * step.z):
+        print("Completely empty volume, not downsampling")
+        return
 
     # Create downsampled cube
     cube = downsample_cube(volume)
