@@ -5,8 +5,7 @@ import sys
 import json
 import time
 
-from spdb.spatialdb import SpatialDB
-from spdb.spatialdb import Cube
+from spdb.spatialdb import Cube, SpatialDB, SpdbError
 from spdb.project import BossResourceBasic
 from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib.ndlib import XYZMorton
@@ -22,9 +21,9 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 import math
+import boto3
 
 print("$$$ IN INGEST LAMBDA $$$")
-
 # Load settings
 SETTINGS = BossSettings.load()
 
@@ -165,8 +164,22 @@ while run_cnt < 2:
 
             # Update id indices if this is an annotation channel
             if resource.data['channel']['type'] == 'annotation':
-                sp.objectio.update_id_indices(
-                    resource, proj_info.resolution, [object_key], [cube.data])
+                try:
+                    sp.objectio.update_id_indices(
+                        resource, proj_info.resolution, [object_key], [cube.data])
+                except SpdbError as ex:
+                    sns_client = boto3.client('sns')
+                    topic_arn = msg_data['parameters']["OBJECTIO_CONFIG"]["prod_mailing_list"]
+                    msg = 'During ingest:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\n'.format(
+                        ex.message,
+                        resource.data['collection']['name'],
+                        resource.data['experiment']['name'],
+                        resource.data['channel']['name'])
+                    sns_client.publish(
+                        TopicArn=topic_arn,
+                        Subject='Object services misuse',
+                        Message=msg)
+
 
     ingest_queue = IngestQueue(proj_info)
     # Delete Tiles

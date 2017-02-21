@@ -29,8 +29,7 @@ import time
 import boto3
 import botocore
 
-from spdb.spatialdb import SpatialDB
-from spdb.spatialdb import Cube
+from spdb.spatialdb import Cube, SpatialDB, SpdbError
 from spdb.project import BossResourceBasic
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
@@ -171,7 +170,20 @@ while run_cnt < 2:
 
     # Update id indices if this is an annotation channel
     if resource.data['channel']['type'] == 'annotation':
-        sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [uncompressed_cuboid_bytes])
+        try:
+            sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [uncompressed_cuboid_bytes])
+        except SpdbError as ex:
+            sns_client = boto3.client('sns')
+            topic_arn = flush_msg_data["config"]["object_store_config"]["prod_mailing_list"]
+            msg = 'During lambda flush:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\n'.format(
+                ex.message,
+                resource.data['collection']['name'],
+                resource.data['experiment']['name'],
+                resource.data['channel']['name'])
+            sns_client.publish(
+                TopicArn=topic_arn,
+                Subject='Object services misuse',
+                Message=msg)
 
     # Check if cuboid already exists in the cache
     if sp.kvio.cube_exists(cache_key):
