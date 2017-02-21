@@ -15,6 +15,7 @@
 
 import bossutils
 bossutils.utils.set_excepthook()
+log = bossutils.logger.BossLogger().logger
 
 from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
 
@@ -61,10 +62,11 @@ class BossActivityManager(ActivityManager):
             lambda: ActivityProcess('VerifyCount.' + self.domain, dispatch(puq.verify_count)),
 
             # Resolution Hierarchy StepFunction
-            #lambda: ActivityProcess('DownsampleChannel.' + self.domain, dispatch(rh.downsample_channel))
+            lambda: ActivityProcess('DownsampleChannel.' + self.domain, dispatch(rh.downsample_channel))
         ]
 
 if __name__ == '__main__':
     mgr = BossActivityManager()
+    log.info("Starting activity manager server")
     mgr.run()
 
