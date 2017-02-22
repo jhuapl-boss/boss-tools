@@ -100,7 +100,7 @@ def populate_upload_queue(args):
                 batch.append({
                     'Id': str(i),
                     'MessageBody': next(msgs),
-                    'DelaySeconds': queue.delay_seconds
+                    'DelaySeconds': 0
                 })
             except StopIteration:
                 break
