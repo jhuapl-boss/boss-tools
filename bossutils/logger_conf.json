@@ -14,7 +14,13 @@
     "djangooidc": {
       "level": "DEBUG",
       "handlers": ["fileHandler"],
-      "qualname": "boss",
+      "qualname": "djangooidc",
+      "propagate": 0
+    },
+    "heaviside.activities": {
+      "level": "DEBUG",
+      "handlers": ["fileHandler", "criticalHandler"],
+      "qualname": "heaviside.activities",
       "propagate": 0
     }
   },

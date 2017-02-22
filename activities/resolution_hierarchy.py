@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import blosc
 import hashlib
 import boto3
 import botocore
@@ -20,8 +21,8 @@ from collections import namedtuple
 from bossutils import aws
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
-from spdb.imagecube import Cube, ImageCube8, ImageCube16
-from spdb.annocube import AnnotateCube64
+from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
+from spdb.spatialdb.annocube import AnnotateCube64
 
 np_types = {
     'uint64': np.uint64,
@@ -142,7 +143,7 @@ class S3Bucket(object):
 class S3IndexKey(dict):
     def __init__(self, obj_key, version=0, job_hash=None, job_range=None):
         super().__init__()
-        self['object-key'] = {'S': obj_key},
+        self['object-key'] = {'S': obj_key}
         self['version-node'] = {'N': str(version)}
 
         if job_hash is not None:
@@ -283,19 +284,19 @@ def downsample_volume(args, target, step, dim):
 
     # Download all of the cubes that will be downsamples
     volume = XYZVolume(step)
-    empty_count = 0
+    volume_empty = True
     # NOTE Could also be xyz_range(step) and offset the result for the morton
     for cube in xyz_range(target, target + step):
         try:
             obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
             volume[cube - target] = s3.get(obj_key)
+            volume_empty = False
         except Exception:
-            empty_count += 1
             data = np.zeros([dim_t, dim.x, dim.y, dim.z], dtype=np_types[data_type], order='C')
             data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
             volume[cube - target] = data
 
-    if empty_count == (step.x * step.y * step.z):
+    if volume_empty:
         print("Completely empty volume, not downsampling")
         return
 
@@ -307,6 +308,8 @@ def downsample_volume(args, target, step, dim):
     s3.put(obj_key, cube)
 
     # Update indicies
+    # Same key scheme, but without the version
+    obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton)
     # Create S3 Index if it doesn't exist
     idx_key = S3IndexKey(obj_key, version)
     if not s3_index.exists(idx_key):

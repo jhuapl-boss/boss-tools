@@ -135,6 +135,13 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
             self._sp.cache_state.set_project_lock(lookup_key, True)
             self.log.info('Setting write lock for lookup key: {} for {}'.format(lookup_key, info))
 
+            if 'MessageId' in msg:
+                self.log.info("Message id: {}".format(msg['MessageId']))
+            else:
+                self.log.error('Message missing MessageId field.')
+
+            self.log.info('Message body: {}'.format(msg['Body']))
+
             # Send notification that something is wrong!
             self.send_alert(lookup_key, info)
 

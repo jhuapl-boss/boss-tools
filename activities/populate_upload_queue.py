@@ -16,23 +16,22 @@ import json
 import time
 from datetime import datetime
 
-# Need:
-# * ingest-client
-# * ndingest
 from ingest.core.backend import BossBackend
 
 from ndingest.ndqueue.uploadqueue import UploadQueue
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
 
 from bossutils import aws
+from bossutils import logger
+
+log = logger.BossLogger().logger
 
 class FailedToSendMessages(Exception):
     pass
 
-# Max SQS message / batch message size if 256 KB
-# If messages are estimated to be no more than 512 bytes
-# then 512 messages can be batch sent within the 256 KB limit
-SQS_BATCH_SIZE = 500 # + buffer = 512
+# SQS Hardlimit
+SQS_BATCH_SIZE = 10
+SQS_RETRY_TIMEOUT = 15
 
 def populate_upload_queue(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -52,7 +51,7 @@ def populate_upload_queue(args):
 
             'resolution': 0,
             'project_info': [col_id, exp_id, ch_id],
-            
+
             't_start': 0,
             't_stop': 0,
             't_tile_size': 0,
@@ -74,6 +73,7 @@ def populate_upload_queue(args):
         {'arn': Upload queue ARN,
          'count': Number of messages put into the queue}
     """
+    log.debug("Starting to populate upload queue")
 
     # DP NOTE: Could transform create_messages into a generator
     #          and yield after each sendBatchMessages
@@ -100,7 +100,7 @@ def populate_upload_queue(args):
                 batch.append({
                     'Id': str(i),
                     'MessageBody': next(msgs),
-                    'DelaySeconds': queue.delay_seconds
+                    'DelaySeconds': 0
                 })
             except StopIteration:
                 break
@@ -114,10 +114,16 @@ def populate_upload_queue(args):
             sent += len(resp['Successful'])
 
             if 'Failed' in resp and len(resp['Failed']) > 0:
-                ids = map(lambda f: f['Id'], resp['Failed'])
-                batch = filter(lambda b: b['Id'] in ids, batch)
+                log.debug("Batch failed to enqueue messages")
+                log.debug("Retries left: {}".format(retry))
+                log.debug("Boto3 send_messages response: {}".format(resp))
+                time.sleep(SQS_RETRY_TIMEOUT)
+
+                ids = [f['Id'] for f in resp['Failed']]
+                batch = [b for b in batch if b['Id'] in ids]
                 retry -= 1
                 if retry == 0:
+                    log.debug("Exhausted retry count, stopping")
                     raise FailedToSendMessages(batch) # SFN will relaunch the activity
                 continue
             else:
@@ -134,6 +140,7 @@ def clear_queue(arn):
     Args:
         arn (string): SQS ARN of the queue to empty
     """
+    log.debug("Clearing queue {}".format(arn))
     session = aws.get_session()
     client = session.client('sqs')
     client.purge_queue(QueueUrl = arn)
