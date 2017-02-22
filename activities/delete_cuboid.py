@@ -110,7 +110,7 @@ def query_for_deletes(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    LOG.debug("starting query_for_deletes()")
+    LOG.debug("query_for_deletes() entering.")
     if session is None:
         session = bossutils.aws.get_session()
         LOG.debug("created session")
@@ -199,7 +199,7 @@ def query_for_deletes(data, session=None):
 
     finally:
         connection.close()
-    LOG.debug("leaving query_for_deletes()")
+    LOG.debug("query_for_deletes() exiting.")
     return data
 
 
@@ -213,7 +213,7 @@ def delete_metadata(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    LOG.debug("delete_metadata started")
+    LOG.debug("delete_metadata() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -259,8 +259,8 @@ def delete_metadata(data, session=None):
             raise DeleteError(
                 "Error querying bossmeta dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                     query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
-    print("deleted {} metadata items".format(count))
-    LOG.debug("Leaving delete_metadata() after deleting {} metadata items.".format(count))
+    LOG.debug("deleted {} metadata items".format(count))
+    LOG.debug("delete_metadata() exiting.")
     return data
 
 
@@ -280,7 +280,7 @@ def delete_id_count(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    LOG.debug("starting delete_id_count()")
+    LOG.debug("delete_id_count() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -326,8 +326,8 @@ def delete_id_count(data, session=None):
             raise DeleteError(
                 "Error querying idCount dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                     query_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
-    print("deleted {} id_count items".format(count))
-    LOG.debug("Leaving delete_id_count() after deleting {} items".format(count))
+    LOG.debug("deleted {} id_count items".format(count))
+    LOG.debug("delete_id_count() exiting.")
     return data
 
 
@@ -347,7 +347,7 @@ def delete_id_index(data, session=None):
     Returns:
         (Dict): Data dictionary passed in.
     """
-    LOG.debug("entering delete_id_index()")
+    LOG.debug("delete_id_index() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     id_index_table = data["id-index-table"]
@@ -392,8 +392,8 @@ def delete_id_index(data, session=None):
             raise DeleteError(
                 "Error querying idIndex dynamoDB table, received HTTPStatusCode: {}, using params: {}, ".format(
                     scan_resp["ResponseMetadata"]["HTTPStatusCode"], json.dumps(query_params)))
-    print("deleted {} id_index items".format(count))
-    LOG.debug("leaving delete_id_index after deleting {} items".format(count))
+    LOG.debug("deleted {} id_index items".format(count))
+    LOG.debug("delete_id_index() exiting.")
     return data
 
 
@@ -491,7 +491,7 @@ def find_s3_index(data, session=None):
     Returns:
         (Dict): data dictionary passed in
     """
-
+    LOG.debug("find_s3_index() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -550,7 +550,8 @@ def find_s3_index(data, session=None):
         put_json_in_s3(s3client, delete_bucket, shard_key, shard_list)
     put_json_in_s3(s3client, delete_bucket, delete_shard_index_key, shard_index)
     data["delete_shard_index_key"] = delete_shard_index_key
-    print("found {} s3_index items".format(count))
+    LOG.debug("found {} s3_index items".format(count))
+    LOG.debug("find_s3_index() exiting.")
     return data
 
 
@@ -580,6 +581,7 @@ def delete_s3_index(data, session=None):
     Returns:
         (Dict): data dictionary passed in
     """
+    LOG.debug("delete_s3_index() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     dynclient = session.client('dynamodb')
@@ -613,6 +615,7 @@ def delete_s3_index(data, session=None):
             if query_resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
                 raise DeleteError(query_resp)
     print("deleted {} s3 objects and s3_index items".format(count))
+    LOG.debug("delete_s3_index() exiting.")
     return data
 
 
@@ -627,6 +630,7 @@ def delete_clean_up(data, session=None):
     Returns:
         (Dict): data dictionary passed in.
     """
+    LOG.debug("delete_clean_up() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     s3client = session.client('s3')
@@ -685,17 +689,19 @@ def delete_clean_up(data, session=None):
 
     finally:
         connection.close()
-
+    LOG.debug("delete_clean_up() exiting.")
     return data
 
 
 def notify_admins(data, session=None):
+    LOG.debug("notify_admins() entering.")
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('sns')
     resp = client.publish(TopicArn=data["notify_topic"], Message=data["error"])
     if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         raise DeleteError("Error notifying admins after delete failed.")
+    LOG.debug("notify_admins() exiting.")
     return data
 
 
