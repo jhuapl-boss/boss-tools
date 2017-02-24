@@ -410,11 +410,16 @@ def put_json_in_s3(client, bucket_name, key, py_object):
 
     """
     json_object = json.dumps(py_object)
-    client.put_object(
+    resp = client.put_object(
         Body=json_object.encode("utf-8"),
         Bucket=bucket_name,
         Key=key
     )
+    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        error = "Unable to put json object in s3 bucket, {}, put_object received " \
+                "HTTPStatusCode {}".format(bucket_name, resp["ResponseMetadata"]["HTTPStatusCode"])
+        LOG.error(error)
+        raise DeleteError(error)
 
 
 def get_json_from_s3(client, bucket_name, key):
@@ -428,11 +433,16 @@ def get_json_from_s3(client, bucket_name, key):
     Returns:
         (List or Dict): Python list or dict that was in the s3 object
     """
-    response = client.get_object(
+    resp = client.get_object(
         Bucket=bucket_name,
         Key=key
     )
-    json_object = json.loads(response["Body"].read().decode('utf8'))
+    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        error = "Unable to put json object in s3 bucket, {}, put_object received " \
+                "HTTPStatusCode {}".format(bucket_name, resp["ResponseMetadata"]["HTTPStatusCode"])
+        LOG.error(error)
+        raise DeleteError(error)
+    json_object = json.loads(resp["Body"].read().decode('utf8'))
     return json_object
 
 
