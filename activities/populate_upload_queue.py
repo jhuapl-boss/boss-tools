@@ -16,7 +16,7 @@ import json
 import time
 from datetime import datetime
 
-from ingest.core.backend import BossBackend
+from ingestclient.core.backend import BossBackend
 
 from ndingest.ndqueue.uploadqueue import UploadQueue
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
