@@ -33,7 +33,7 @@ bucketLookup = {"endpoint.integration.boss": MIGRATION_BUCKET_PROD,
 
 COMMANDS=["get", "put"]
 
-MIGRATIONS = ["bossobject", "bossingest", "bosstiles", "bosscore", "bossmeta", "sso"]
+MIGRATIONS = ["bossobject", "bossingest", "bosstiles", "bosscore", "bossmeta", "sso", "mgmt"]
 DJANGO_ROOT = "/srv/www/django";
 
 class MigrationManager:
