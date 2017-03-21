@@ -21,7 +21,8 @@ from heaviside.activities import ActivityManager, ActivityProcess, TaskProcess
 
 from delete_cuboid import *
 
-import populate_upload_queue as puq
+#import populate_upload_queue as puq
+import ingest_queue_populate as iqp
 import resolution_hierarchy as rh
 
 class BossActivityManager(ActivityManager):
@@ -29,7 +30,8 @@ class BossActivityManager(ActivityManager):
         super().__init__()
         config = bossutils.configuration.BossConfig()
 
-        self.domain = config['system']['fqdn'].split('.', 1)[1]
+        # DP NOTE: make activity names Lambda compatible
+        self.domain = '-' + config['system']['fqdn'].split('.', 1)[1].replace('.', '-')
 
     def build(self):
         def dispatch(target):
@@ -38,31 +40,32 @@ class BossActivityManager(ActivityManager):
             return wrapped
 
         return [
-            #lambda: ActivityProcess('Name.'+self.domain, dispatch(function))
-            # lambda: ActivityProcess('delete_test_1.' + self.domain, dispatch(delete_test_1)),
-            # lambda: ActivityProcess('delete_test_2.' + self.domain, dispatch(delete_test_2)),
-            # lambda: ActivityProcess('delete_test_3.' + self.domain, dispatch(delete_test_3)),
-            # lambda: ActivityProcess('delete_test_4.' + self.domain, dispatch(delete_test_4)),
+            #lambda: ActivityProcess('Name'+self.domain, dispatch(function))
+            # lambda: ActivityProcess('delete_test_1' + self.domain, dispatch(delete_test_1)),
+            # lambda: ActivityProcess('delete_test_2' + self.domain, dispatch(delete_test_2)),
+            # lambda: ActivityProcess('delete_test_3' + self.domain, dispatch(delete_test_3)),
+            # lambda: ActivityProcess('delete_test_4' + self.domain, dispatch(delete_test_4)),
 
             # Query for Deletes StepFunction
-            lambda: ActivityProcess('query_for_deletes.' + self.domain, dispatch(query_for_deletes)),
+            lambda: ActivityProcess('query_for_deletes' + self.domain, dispatch(query_for_deletes)),
 
             # Delete Cuboid StepFunction
-            lambda: ActivityProcess('delete_metadata.' + self.domain, dispatch(delete_metadata)),
-            lambda: ActivityProcess('delete_id_count.' + self.domain, dispatch(delete_id_count)),
-            lambda: ActivityProcess('delete_id_index.' + self.domain, dispatch(delete_id_index)),
-            lambda: ActivityProcess('merge_parallel_outputs.' + self.domain, dispatch(merge_parallel_outputs)),
-            lambda: ActivityProcess('find_s3_index.' + self.domain, dispatch(find_s3_index)),
-            lambda: ActivityProcess('delete_s3_index.' + self.domain, dispatch(delete_s3_index)),
-            lambda: ActivityProcess('notify_admins.' + self.domain, dispatch(notify_admins)),
-            lambda: ActivityProcess('delete_clean_up.' + self.domain, dispatch(delete_clean_up)),
+            lambda: ActivityProcess('delete_metadata' + self.domain, dispatch(delete_metadata)),
+            lambda: ActivityProcess('delete_id_count' + self.domain, dispatch(delete_id_count)),
+            lambda: ActivityProcess('delete_id_index' + self.domain, dispatch(delete_id_index)),
+            lambda: ActivityProcess('merge_parallel_outputs' + self.domain, dispatch(merge_parallel_outputs)),
+            lambda: ActivityProcess('find_s3_index' + self.domain, dispatch(find_s3_index)),
+            lambda: ActivityProcess('delete_s3_index' + self.domain, dispatch(delete_s3_index)),
+            lambda: ActivityProcess('notify_admins' + self.domain, dispatch(notify_admins)),
+            lambda: ActivityProcess('delete_clean_up' + self.domain, dispatch(delete_clean_up)),
 
             # Populate Upload Queue StepFunction
-            lambda: ActivityProcess('PopulateQueue.' + self.domain, dispatch(puq.populate_upload_queue)),
-            lambda: ActivityProcess('VerifyCount.' + self.domain, dispatch(puq.verify_count)),
+            #lambda: ActivityProcess('PopulateQueue' + self.domain, dispatch(puq.populate_upload_queue)),
+            lambda: ActivityProcess('IngestPopulate' + self.domain, dispatch(iqp.ingest_populate)),
+            lambda: ActivityProcess('VerifyCount' + self.domain, dispatch(iqp.verify_count)),
 
             # Resolution Hierarchy StepFunction
-            lambda: ActivityProcess('DownsampleChannel.' + self.domain, dispatch(rh.downsample_channel))
+            lambda: ActivityProcess('DownsampleChannel' + self.domain, dispatch(rh.downsample_channel))
         ]
 
 if __name__ == '__main__':
