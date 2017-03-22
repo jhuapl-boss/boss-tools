@@ -39,6 +39,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
     def __init__(self, pid_file_name, pid_dir="/var/run"):
         super().__init__(pid_file_name, pid_dir)
         self.config = BossConfig()
+        self.host = self.config['system']['fqdn']
         self.dead_letter_queue = self.config['aws']['s3-flush-deadletter-queue']
         self.sns_write_locked = self.config['aws']['sns-write-locked']
         self.sqs_client = boto3.client('sqs', region_name=get_region())
@@ -157,7 +158,7 @@ class DeadLetterDaemon(daemon_base.DaemonBase):
 
         self.sns_client.publish(
             TopicArn=self.sns_write_locked,
-            Subject='S3 Write-Locked!',
+            Subject='{}: S3 Write-Locked!'.format(self.host),
             Message='Error writing to S3.  This lookup key was just locked: {}.  Was trying to write cuboid to: {}'.format(lookup_key, info)
         )
 

@@ -108,6 +108,18 @@ while run_cnt < 2:
     if exist_keys:  # Cuboid Exists
         # Get cuboid to flush from write buffer
         write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
+        if write_cuboid_bytes is None:
+            # Didn't get any data back.  Assume another lambda already 
+            # served this request.  Remove message and continue.
+            print("No data returned from write buffer, ignoring and deleting message.")
+            sqs_client.delete_message(
+                QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"],
+                ReceiptHandle=rx_handle)
+
+            # Increment run counter
+            run_cnt += 1
+            continue
+
         new_cube = Cube.create_cube(resource, cube_dim)
         new_cube.morton_id = morton
         new_cube.from_blosc(write_cuboid_bytes)
