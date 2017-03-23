@@ -185,6 +185,7 @@ def split_args(args):
 
             args_['z_start'] = z
             args_['z_stop'] = z + args['z_tile_size']
+            args_['final_z_stop'] = args['z_stop']
 
             yield args_
 
