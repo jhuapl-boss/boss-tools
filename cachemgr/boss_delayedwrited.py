@@ -61,7 +61,11 @@ class DelayedWriteDaemon(daemon_base.DaemonBase):
                             pipe.watch(delay_write_key)
                             pipe.multi()
                             pipe.delete(delay_write_key)
+                            pipe.delete("RESOURCE-{}".format(delay_write_key))
                             _ = pipe.execute()
+
+                            # This key no longer exists
+                            continue
 
                         except redis.WatchError as e:
                             # Watch error occurred, try again!
@@ -122,8 +126,11 @@ class DelayedWriteDaemon(daemon_base.DaemonBase):
 
         while True:
             self.log.info("Checking for delayed write operations.")
-            self.process(sp)
-            time.sleep(10)
+            try:
+                self.process(sp)
+                time.sleep(5)
+            except Exception as err:
+                self.log.error("An error occurred running the process() method! \n {}".format(err))
 
 if __name__ == '__main__':
     DelayedWriteDaemon("boss-delayedwrited.pid").main()
