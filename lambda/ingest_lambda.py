@@ -95,7 +95,15 @@ while run_cnt < 2:
     data = []
     num_z_slices = 0
     for tile_key in tile_key_list:
-        image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
+        try:
+            image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
+        except KeyError:
+            print('Key: {} not found in tile bucket, assuming redelivered SQS message and aborting.'.format(
+                tile_key))
+            # Remove message so it's not redelivered.
+            ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+            sys.exit("Aborting due to missing tile in bucket")
+
         tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
         #tile_img = np.swapaxes(tile_img, 0, 1)
         data.append(tile_img)
@@ -181,17 +189,28 @@ while run_cnt < 2:
                         Message=msg)
 
 
-    ingest_queue = IngestQueue(proj_info)
-    # Delete Tiles
-    for tile in tile_key_list:
-        print("Deleting tile: {}".format(tile))
-        tile_bucket.deleteObject(tile)
-
-    # Delete Entry in tile table
-    tile_index_db.deleteCuboid(chunk_key, int(msg_data["ingest_job"]))
-
     # Delete message since it was processed successfully
     ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+
+    # Delete Tiles
+    for tile in tile_key_list:
+        for try_cnt in range(0, 4):
+            try:
+                time.sleep(try_cnt)
+                print("Deleting tile: {}".format(tile))
+                tile_bucket.deleteObject(tile)
+                break
+            except:
+                print("failed")
+
+    # Delete Entry in tile table
+    for try_cnt in range(0, 4):
+        try:
+            time.sleep(try_cnt)
+            tile_index_db.deleteCuboid(chunk_key, int(msg_data["ingest_job"]))
+            break
+        except:
+            print("failed")
 
     # Increment run counter
     run_cnt += 1
