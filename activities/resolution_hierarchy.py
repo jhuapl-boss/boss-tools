@@ -17,10 +17,12 @@ import hashlib
 import boto3
 import botocore
 import numpy as np
+from PIL import Image
 from collections import namedtuple
 from bossutils import aws
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
+from spdb.c_lib.ndlib import isotropicBuild_ctype
 from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
 from spdb.spatialdb.annocube import AnnotateCube64
 
@@ -316,7 +318,7 @@ def downsample_volume(args, target, step, dim, use_iso):
             volume[cube - target] = data
             volume_empty = False
         except Exception:
-            data = np.zeros([dim_t, dim.x, dim.y, dim.z], dtype=np_types[data_type], order='C')
+            data = np.zeros([dim.z, dim.y, dim.x], dtype=np_types[data_type], order='C')
             #data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
             volume[cube - target] = data
 
@@ -324,8 +326,22 @@ def downsample_volume(args, target, step, dim, use_iso):
         print("Completely empty volume, not downsampling")
         return
 
+    # Merge volume into a single data object
+    # DP ???: Only for image volumes?
+    def attr(obj, val):
+        return obj.__getattribute__(val)
+    supercube = np.zeros([dim.z * step.z, dim.y * step.y, dim.x * step.x], dtype=np_types[data_type], order='C')
+    for idx in xyz_range(step):
+        def offset(d):
+            return range(attr(dim, d) * attr(idx, d),
+                         attr(dim, d) * (attr(idx, d) + 1))
+
+        supercube[offset('z'), offset('y'), offset('x')] = volume[idx]
+
     # Create downsampled cube
-    cube = downsample_cube(volume)
+    cube = downsample_cube(supercube, dim, use_iso)
+
+    # Compress the new cube before saving
     cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize * 8))
 
     # Save new cube in S3
@@ -361,10 +377,31 @@ def downsample_volume(args, target, step, dim, use_iso):
                 chan_key = IdIndexKey(idx_key, version)
                 id_index.update_id(chan_key, obj_key)
 
-def downsample_cube(volume):
+def downsample_cube(volume, dim, use_iso):
     """
     Args:
-        volume (XYZVolume) : Multi-dimensional volume of raw numpy cube data
+        volume (np.array) : Multi-dimensional raw numpy cube data
     """
-    pass
 
+    cube =  np.zeros([dim.z, dim.y, dim.x], dtype=volume.dtype)
+
+    for z in range(dim.z):
+        if use_iso:
+            # Take two Z slices and merge them together
+            slice1 = volume[z * 2, :, :]
+            slice2 = volume[z * 2 + 1, :, :]
+            slice = isotropicBuild_ctype(slice1, slice2)
+        else:
+            slice = volume[z, :, :]
+
+        if volume.dtype == np.uint8:
+            image_type = 'L'
+        elif volume.dtype == np.uint16:
+            image_type = 'I;16'
+        else:
+            raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
+
+        image = Image.frombuffer(image_type, (dim.x*2, dim.y*2), slice.flatten(), 'raw', image_type, 0, 1)
+        cube[z, :, :] = np.asarray(image.resize([dim.x, dim.y]))
+
+    return cube
