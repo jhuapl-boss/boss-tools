@@ -634,7 +634,8 @@ def delete_clean_up(data, session=None):
     first sets delete status to finished, then deletes the shard_index and the shard_lists from the delete_bucket,
     finally it deletes the channel and lookup entries.
     Args:
-        data(Dict): Dictionary containing at least the following keys:  delete_bucket, delete_shard_index_key
+        data(Dict): Dictionary containing at least the following keys:  delete_bucket, delete_shard_index_key,
+                    channel_id, db, lookup_key_id
         session(Session): AWS boto3 Session
 
     Returns:
@@ -695,6 +696,130 @@ def delete_clean_up(data, session=None):
             LOG.debug("Deleting channel from channel table")
             sql = "DELETE FROM `channel` where `id`=%s"
             cursor.execute(sql, (str(data["channel_id"]),))
+            connection.commit()
+
+    finally:
+        connection.close()
+    LOG.debug("delete_clean_up() exiting.")
+    return data
+
+
+def delete_experiment(data, session=None):
+    """
+    deletes experiement out of RDS lookup table and RDS experiment table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  experiment_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_experiment() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["experiment_id"]),))
+            connection.commit()
+
+            # delete lookup_key given lookup_id
+            LOG.debug("Deleting lookup_key from lookup table")
+            sql = "DELETE FROM `lookup` where `id`=%s"
+            cursor.execute(sql, (str(data["lookup_key_id"]),))
+            connection.commit()
+
+            # delete experiment given experiment id
+            LOG.debug("Deleting experiment from experiment table")
+            sql = "DELETE FROM `experiment` where `id`=%s"
+            cursor.execute(sql, (str(data["experiment_id"]),))
+            connection.commit()
+
+    finally:
+        connection.close()
+    LOG.debug("delete_clean_up() exiting.")
+    return data
+
+
+def delete_coordinate_frame(data, session=None):
+    """
+    deletes coordinate_frame out of RDS lookup table and RDS coordinate_frame table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  coordinate_frame_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_coordinate_frame() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE coordinate_frame SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["coordinate_frame_id"]),))
+            connection.commit()
+
+            # delete lookup_key given lookup_id
+            LOG.debug("Deleting lookup_key from lookup table")
+            sql = "DELETE FROM `lookup` where `id`=%s"
+            cursor.execute(sql, (str(data["lookup_key_id"]),))
+            connection.commit()
+
+            # delete coordinate_frame given coordinate_frame id
+            LOG.debug("Deleting coordinate_frame from coordinate_frame table")
+            sql = "DELETE FROM `coordinate_frame` where `id`=%s"
+            cursor.execute(sql, (str(data["coordinate_frame_id"]),))
+            connection.commit()
+
+    finally:
+        connection.close()
+    LOG.debug("delete_clean_up() exiting.")
+    return data
+
+
+def delete_collection(data, session=None):
+    """
+    deletes experiement out of RDS lookup table and RDS collection table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  collection_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_collection() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+    s3client = session.client('s3')
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["collection_id"]),))
+            connection.commit()
+
+            # delete lookup_key given lookup_id
+            LOG.debug("Deleting lookup_key from lookup table")
+            sql = "DELETE FROM `lookup` where `id`=%s"
+            cursor.execute(sql, (str(data["lookup_key_id"]),))
+            connection.commit()
+
+            # delete collection given collection id
+            LOG.debug("Deleting collection from collection table")
+            sql = "DELETE FROM `collection` where `id`=%s"
+            cursor.execute(sql, (str(data["collection_id"]),))
             connection.commit()
 
     finally:
