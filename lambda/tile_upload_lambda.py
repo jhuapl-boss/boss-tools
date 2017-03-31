@@ -27,6 +27,8 @@ from ndingest.nddynamo.boss_tileindexdb import BossTileIndexDB
 from ndingest.ndbucket.tilebucket import TileBucket
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
 
+from botocore.exceptions import ClientError
+
 # Load settings
 SETTINGS = BossSettings.load()
 
@@ -74,7 +76,17 @@ if chunk:
 else:
     # First tile in the chunk
     print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
-    tile_index_db.createCuboidEntry(metadata["chunk_key"], int(metadata["ingest_job"]))
+    try:
+        tile_index_db.createCuboidEntry(metadata["chunk_key"], int(metadata["ingest_job"]))
+    except ClientError as err:
+        # Under _exceptional_ circumstances, it's possible for another lambda
+        # to beat the current instance to creating the initial cuboid entry
+        # in the index.
+        error_code = err.response['Error'].get('Code', 'Unknown')
+        if error_code == 'ConditionalCheckFailedException':
+            print('Chunk key entry already created - proceeding.')
+        else:
+            raise
     chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
 
 # ingest the chunk if we have all the tiles
