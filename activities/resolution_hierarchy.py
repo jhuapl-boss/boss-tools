@@ -17,12 +17,16 @@ import hashlib
 import boto3
 import botocore
 import numpy as np
+from PIL import Image
 from collections import namedtuple
-from bossutils import aws
+from bossutils import aws, logger
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
+from spdb.c_lib.ndlib import isotropicBuild_ctype
 from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
 from spdb.spatialdb.annocube import AnnotateCube64
+
+log = logger.BossLogger().logger
 
 np_types = {
     'uint64': np.uint64,
@@ -55,7 +59,7 @@ class XYZ(namedtuple('XYZ', ['x', 'y', 'z'])):
 class XYZVolume(list):
     def __init__(self, xyz, default=b''):
         super().__init__()
-        self.default = default
+        self.xyz = xyz
         for x in range(xyz.x):
             ys = []
             for y in range(xyz.y):
@@ -105,7 +109,7 @@ def HashedKey(*args, version = None):
     Keyword Args:
         version : Optional Object version
     """
-    key = '&'.join(map(str, args))
+    key = '&'.join([str(arg) for arg in args if arg is not None])
     digest = hashlib.md5(key.encode()).hexdigest()
     key = '{}&{}'.format(digest, key)
     if version is not None:
@@ -230,15 +234,22 @@ def downsample_channel(args):
             resolution (int)
             resolution_max (int)
             res_lt_max (bool)
+
+            type (str) 'isotropic' | 'anisotropic' or boolean?
+                       'isotropic' | 'slice'???
+            iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
+                or
+            x/y/z resolution (int) calculate during downsample
+
         }
     """
 
-    print("Downsampling resolution " + str(args['resolution']))
+    log.debug("Downsampling resolution " + str(args['resolution']))
 
     resolution = args['resolution']
 
     dim = XYZ(*CUBOIDSIZE[resolution])
-    print("Cube dimensions: {}".format(dim))
+    log.debug("Cube dimensions: {}".format(dim))
 
     cubes_start = XYZ(args['x_start'] // dim.x,
                       args['y_start'] // dim.y,
@@ -248,27 +259,55 @@ def downsample_channel(args):
                      ceildiv(args['y_stop'], dim.y),
                      ceildiv(args['z_stop'], dim.z))
 
-    step = XYZ(2,2,1) # TODO Base off of downsample type
-    for target in xyz_range(cubes_start, cubes_stop, step=step):
-        # NOTE Can fan-out these calls
-        try:
-            downsample_volume(args, target, step, dim)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise
+    steps = []
+    if args['type'] == 'isotropic':
+        steps.append((XYZ(2,2,2), False))
+    else:
+        steps.append((XYZ(2,2,1), False))
+        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+            steps.append((XYZ(2,2,2), True))
 
-    # Advance the look and recalculate the conditional
+    for step, use_iso in steps:
+        log.debug("Frame corner: {}".format(cubes_start))
+        log.debug("Frame extent: {}".format(cubes_stop))
+        log.debug("Downsample step: {}".format(step))
+        for target in xyz_range(cubes_start, cubes_stop, step=step):
+            # NOTE Can fan-out these calls
+            try:
+                downsample_volume(args, target, step, dim, use_iso)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                raise
+
+
+
+    # Resize the coordinate frame extents as well
+    def resize(var, size):
+        args[var + '_start'] //= size
+        args[var + '_stop'] = ceildiv(args[var + '_stop'], size)
+    resize('x', 2)
+    resize('y', 2)
+    #resize('z', 1)
+
+    # Advance the loop and recalculate the conditional
     args['resolution'] = resolution + 1
     args['res_lt_max'] = args['resolution'] < args['resolution_max']
     return args
 
-def downsample_volume(args, target, step, dim):
-    print("Downsampling {}".format(target))
+def downsample_volume(args, target, step, dim, use_iso_key):
+    log.debug("Downsampling {}".format(target))
     # Hard coded values
     version = 0
     t = 0
     dim_t = 1
+
+    iso = 'ISO' if use_iso_key else None
+
+    # If anisotropic and resolution is when neariso is reached, the first
+    # isotropic downsample needs to use the anisotropic data. Future isotropic
+    # downsamples will use the previous isotropic data.
+    parent_iso = None if args['resolution'] == args['iso_resolution'] else iso
 
     col_id = args['collection_id']
     exp_id = args['experiment_id']
@@ -287,29 +326,53 @@ def downsample_volume(args, target, step, dim):
     volume_empty = True
     # NOTE Could also be xyz_range(step) and offset the result for the morton
     for cube in xyz_range(target, target + step):
+        log.debug("Downloading cube {}".format(cube))
+        # DP TODO: move the logic creating the np 3d array out of the loop and make common
         try:
-            obj_key = HashedKey(col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
-            volume[cube - target] = s3.get(obj_key)
+            obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
+            data = s3.get(obj_key)
+            data = blosc.decompress(data)
+            # DP ???: Check to see if the buffer is all zeros?
+            data = np.frombuffer(data, dtype=np_types[data_type])
+            data.resize([dim.z, dim.y, dim.x])
+            volume[cube - target] = data
             volume_empty = False
         except Exception:
-            data = np.zeros([dim_t, dim.x, dim.y, dim.z], dtype=np_types[data_type], order='C')
-            data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
+            log.debug("Generating empty cube")
+            data = np.zeros([dim.z, dim.y, dim.x], dtype=np_types[data_type], order='C')
+            #data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
             volume[cube - target] = data
 
     if volume_empty:
-        print("Completely empty volume, not downsampling")
+        log.debug("Completely empty volume, not downsampling")
         return
 
+    # Merge volume into a single data object
+    # DP ???: Only for image volumes?
+    def attr(obj, val):
+        return obj.__getattribute__(val)
+    supercube = np.zeros([dim.z * step.z, dim.y * step.y, dim.x * step.x], dtype=np_types[data_type], order='C')
+    for idx in xyz_range(step):
+        def offset(d):
+            return slice(attr(dim, d) * attr(idx, d),
+                         attr(dim, d) * (attr(idx, d) + 1))
+
+        supercube[offset('z'), offset('y'), offset('x')] = volume[idx]
+
     # Create downsampled cube
-    cube = downsample_cube(volume)
+    new_dim = XYZ(*CUBOIDSIZE[resolution + 1])
+    cube = downsample_cube(supercube, (dim.x * step.x, dim.y * step.y), step.z, new_dim)
+
+    # Compress the new cube before saving
+    cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
 
     # Save new cube in S3
-    obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
+    obj_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
     s3.put(obj_key, cube)
 
     # Update indicies
     # Same key scheme, but without the version
-    obj_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, t, target.morton)
+    obj_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, t, target.morton)
     # Create S3 Index if it doesn't exist
     idx_key = S3IndexKey(obj_key, version)
     if not s3_index.exists(idx_key):
@@ -332,12 +395,40 @@ def downsample_volume(args, target, step, dim):
             s3_index.update_ids(idx_key, id_strs)
 
             for id in ids:
-                idx_key = HashedKey(col_id, exp_id, chan_id, resolution + 1, id)
+                idx_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, id)
                 chan_key = IdIndexKey(idx_key, version)
                 id_index.update_id(chan_key, obj_key)
 
-def downsample_cube(volume):
-    #raise NotImplemented()
-    print("Not implemented")
-    return volume[0][0][0]
+def downsample_cube(volume, xy, z_slices, dim):
+    """
+    Args:
+        volume (np.array) : Multi-dimensional raw numpy cube data
+        xy (int, int) : X and Y dimensions of source volume
+        z_slices (int) : number of Z slizes to downsample (1 is slice, 2 is isotropic)
+        dim (XYZ) : Dimensions of the output cube
+    """
 
+    cube =  np.zeros([dim.z, dim.y, dim.x], dtype=volume.dtype)
+
+    log.debug("downsample_cube({}, {}, {}, {})".format(volume.shape, xy, z_slices, dim))
+
+    for z in range(dim.z):
+        if z_slices == 2:
+            # Take two Z slices and merge them together
+            slice1 = volume[z * 2, :, :]
+            slice2 = volume[z * 2 + 1, :, :]
+            slice = isotropicBuild_ctype(slice1, slice2)
+        else:
+            slice = volume[z, :, :]
+
+        if volume.dtype == np.uint8:
+            image_type = 'L'
+        elif volume.dtype == np.uint16:
+            image_type = 'I;16'
+        else:
+            raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
+
+        image = Image.frombuffer(image_type, xy, slice.flatten(), 'raw', image_type, 0, 1)
+        cube[z, :, :] = np.asarray(image.resize([dim.x, dim.y]))
+
+    return cube
