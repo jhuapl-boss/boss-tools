@@ -26,6 +26,9 @@ from spdb.c_lib.ndlib import isotropicBuild_ctype
 from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
 from spdb.spatialdb.annocube import AnnotateCube64
 
+from multidimensional import XYZ, Buffer, XYZVolume, ceildiv
+from multidimensional import range as xyz_range
+
 log = logger.BossLogger().logger
 
 np_types = {
@@ -33,67 +36,6 @@ np_types = {
     'uint16': np.uint16,
     'uint8': np.uint8,
 }
-
-# Do an inverted floordiv, works for python bigints
-ceildiv = lambda a, b: -(-a // b)
-
-# GENERIC 3D utilities
-# DP ???: Create XYZT?
-class XYZ(namedtuple('XYZ', ['x', 'y', 'z'])):
-    __slots__ = ()
-
-    @property
-    def morton(self):
-        return ndlib.XYZMorton(self)
-
-    def __add__(self, other):
-        return XYZ(self.x + other.x,
-                   self.y + other.y,
-                   self.z + other.z)
-
-    def __sub__(self, other):
-        return XYZ(self.x - other.x,
-                   self.y - other.y,
-                   self.z - other.z)
-
-class XYZVolume(list):
-    def __init__(self, xyz, default=b''):
-        super().__init__()
-        self.xyz = xyz
-        for x in range(xyz.x):
-            ys = []
-            for y in range(xyz.y):
-                ys.append([default for z in range(xyz.z)])
-            self.append(ys)
-
-    def __setitem__(self, key, value):
-        if type(key) == XYZ:
-            x, y, z = key
-            self[x][y][z] = value
-        else:
-            super().__setitem__(key, value)
-
-    def __getitem__(self, key):
-        if type(key) == XYZ:
-            x, y, z = key
-            return self[x][y][z]
-        else:
-            return super().__getitem__(key)
-
-def xyz_range(*args, step=None):
-    if len(args) == 2:
-        start, stop = args
-    else:
-        stop, = args
-        start = XYZ(0,0,0)
-
-    if step is None:
-        step = XYZ(1,1,1)
-
-    for x in range(start.x, stop.x, step.x):
-        for y in range(start.y, stop.y, step.y):
-            for z in range(start.z, stop.z, step.z):
-                yield XYZ(x, y, z)
 
 # BOSS Key creation functions / classes
 def HashedKey(*args, version = None):
@@ -267,20 +209,18 @@ def downsample_channel(args):
         if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             steps.append((XYZ(2,2,2), True))
 
-    for step, use_iso in steps:
+    for step, use_iso_flag in steps:
         log.debug("Frame corner: {}".format(cubes_start))
         log.debug("Frame extent: {}".format(cubes_stop))
         log.debug("Downsample step: {}".format(step))
         for target in xyz_range(cubes_start, cubes_stop, step=step):
             # NOTE Can fan-out these calls
             try:
-                downsample_volume(args, target, step, dim, use_iso)
+                downsample_volume(args, target, step, dim, use_iso_flag)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 raise
-
-
 
     # Resize the coordinate frame extents as well
     def resize(var, size):
@@ -322,46 +262,39 @@ def downsample_volume(args, target, step, dim, use_iso_key):
     id_index = DynamoDBTable(args['id_index'])
 
     # Download all of the cubes that will be downsamples
-    volume = XYZVolume(step)
+    volume = Buffer.zeros(dim * step, dtype=np_types[data_type], order='C')
+    volume.dim = dim
+    volume.cubes = step
+
     volume_empty = True
-    # NOTE Could also be xyz_range(step) and offset the result for the morton
-    for cube in xyz_range(target, target + step):
+    for offset in xyz_range(step):
+        cube = target + offset
         log.debug("Downloading cube {}".format(cube))
-        # DP TODO: move the logic creating the np 3d array out of the loop and make common
+
         try:
             obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
             data = s3.get(obj_key)
             data = blosc.decompress(data)
+
             # DP ???: Check to see if the buffer is all zeros?
-            data = np.frombuffer(data, dtype=np_types[data_type])
-            data.resize([dim.z, dim.y, dim.x])
-            volume[cube - target] = data
+            data = Buffer.frombuffer(data, dtype=np_types[data_type]).resize(dim)
+
+            volume[offset * dim: (offset + 1) * dim] = data
             volume_empty = False
         except Exception:
-            log.debug("Generating empty cube")
-            data = np.zeros([dim.z, dim.y, dim.x], dtype=np_types[data_type], order='C')
-            #data = blosc.compress(data, typesize=(np.dtype(data.dtype).itemsize * 8))
-            volume[cube - target] = data
+            log.debug("No cube at {}".format(cube))
 
     if volume_empty:
         log.debug("Completely empty volume, not downsampling")
         return
 
-    # Merge volume into a single data object
-    # DP ???: Only for image volumes?
-    def attr(obj, val):
-        return obj.__getattribute__(val)
-    supercube = np.zeros([dim.z * step.z, dim.y * step.y, dim.x * step.x], dtype=np_types[data_type], order='C')
-    for idx in xyz_range(step):
-        def offset(d):
-            return slice(attr(dim, d) * attr(idx, d),
-                         attr(dim, d) * (attr(idx, d) + 1))
-
-        supercube[offset('z'), offset('y'), offset('x')] = volume[idx]
-
     # Create downsampled cube
     new_dim = XYZ(*CUBOIDSIZE[resolution + 1])
-    cube = downsample_cube(supercube, (dim.x * step.x, dim.y * step.y), step.z, new_dim)
+    cube =  Buffer.zeros(new_dim, dtype=np_types[data_type], order='C')
+    cube.dim = new_dim
+    cube.cubes = XYZ(1,1,1)
+
+    downsample_cube(volume, cube, annotation_chan)
 
     # Compress the new cube before saving
     cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
@@ -399,36 +332,62 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                 chan_key = IdIndexKey(idx_key, version)
                 id_index.update_id(chan_key, obj_key)
 
-def downsample_cube(volume, xy, z_slices, dim):
+def downsample_cube(volume, cube, is_annotation):
     """
+    Note: Both volume and cube both have the following attributes
+        dim (XYZ) : The dimensions of the cubes contained in the Buffer
+        cubes (XYZ) : The number of cubes of size dim contained in the Buffer
+
+        dim * cubes == Buffer.shape
+
     Args:
-        volume (np.array) : Multi-dimensional raw numpy cube data
-        xy (int, int) : X and Y dimensions of source volume
-        z_slices (int) : number of Z slizes to downsample (1 is slice, 2 is isotropic)
-        dim (XYZ) : Dimensions of the output cube
+        volume (Buffer) : Raw numpy array of input cube data
+        cube (Buffer) : Raw numpy array for output data
+        is_annotation (boolean) : If the downsample should be an annotation downsample
     """
+    log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
 
-    cube =  np.zeros([dim.z, dim.y, dim.x], dtype=volume.dtype)
+    def most_occurrences(xs):
+        counts = {}
+        for x in xs:
+            if x not in counts:
+                counts[x] = xs.count(x)
 
-    log.debug("downsample_cube({}, {}, {}, {})".format(volume.shape, xy, z_slices, dim))
+        return max(counts, key=lambda x: counts[x])
 
-    for z in range(dim.z):
-        if z_slices == 2:
-            # Take two Z slices and merge them together
-            slice1 = volume[z * 2, :, :]
-            slice2 = volume[z * 2 + 1, :, :]
-            slice = isotropicBuild_ctype(slice1, slice2)
-        else:
-            slice = volume[z, :, :]
+    if is_annotation:
+        # Foreach output 'pixel', select the source annotation that appears the most
+        # right now code assumes cur_dim == dim, if not need to pass a scale value
+        for xyz in xyz_range(cube.dim):
+            start = xyz * volume.cubes # scale up from output cube to input volume
+            stop = start + volume.cubes # iterate over volume.cubes worth of 'pixels'
 
-        if volume.dtype == np.uint8:
-            image_type = 'L'
-        elif volume.dtype == np.uint16:
-            image_type = 'I;16'
-        else:
-            raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
+            annotations = [volume[idx] for idx in xyz_range(start, stop)]
 
-        image = Image.frombuffer(image_type, xy, slice.flatten(), 'raw', image_type, 0, 1)
-        cube[z, :, :] = np.asarray(image.resize([dim.x, dim.y]))
+            cube[xyz] = most_occurrences(annotations)
+    else:
+        # Foreach output z slice, use Image to shrink the input slize(s)
+        for z in range(cube.dim.z):
+            if volume.cubes.z == 2:
+                # Take two Z slices and merge them together
+                slice1 = volume[z * 2, :, :]
+                slice2 = volume[z * 2 + 1, :, :]
+                slice = isotropicBuild_ctype(slice1, slice2)
+            else:
+                slice = volume[z, :, :]
 
-    return cube
+            if volume.dtype == np.uint8:
+                image_type = 'L'
+            elif volume.dtype == np.uint16:
+                image_type = 'I;16'
+            else:
+                raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
+
+            image = Image.frombuffer(image_type,
+                                     (volume.shape.x, volume.shape.y),
+                                     slice.flatten(),
+                                     'raw',
+                                     image_type,
+                                     0, 1)
+
+            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y)))
