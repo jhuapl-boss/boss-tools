@@ -72,7 +72,8 @@ class SFN(object):
         return SFN.Status(resp)
 
 POLL_DELAY = 5
-MAX_NUM_PROCESSES = 100
+STATUS_DELAY = 1
+MAX_NUM_PROCESSES = 50
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
 
@@ -148,6 +149,8 @@ def ingest_populate(args):
                 total_sent += status.output
             else:
                 arns_.append(arn)
+            time.sleep(STATUS_DELAY)
+
         log.debug("Sub-processes finished: {}".format(len(arns) - len(arns_)))
         log.debug("Sub-processes running: {}".format(len(arns_)))
         arns = arns_
