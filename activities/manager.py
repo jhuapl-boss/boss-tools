@@ -68,8 +68,10 @@ class BossActivityManager(ActivityManager):
             # lambda: ActivityProcess('delete_coordinate_frame' + self.domain, dispatch(delete_coordinate_frame)),
             #
             # # Delete Experiment
-            # lambda: ActivityProcess('delete_metadata' + self.domain, dispatch(delete_metadata)),
-            # lambda: ActivityProcess('delete_experiment' + self.domain, dispatch(delete_experiment)),
+            #lambda: ActivityProcess('delete_metadata' + self.domain, dispatch(delete_metadata)),
+            lambda: ActivityProcess('delete_experiment' + self.domain, dispatch(delete_experiment)),
+            lambda: ActivityProcess('delete_collection' + self.domain, dispatch(delete_collection)),
+            lambda: ActivityProcess('delete_coordinate_frame' + self.domain, dispatch(delete_coordinate_frame)),
 
             # Populate Upload Queue StepFunction
             #lambda: ActivityProcess('PopulateQueue' + self.domain, dispatch(puq.populate_upload_queue)),
