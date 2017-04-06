@@ -135,10 +135,65 @@ def query_for_deletes(data, session=None):
     query_for_deletes_channels(data, session, sfn_client)
     query_for_deletes_experiments(data, session, sfn_client)
     query_for_deletes_collections(data, session, sfn_client)
+    query_for_deletes_coord_frames(data, session, sfn_client)
 
     LOG.debug("query_for_deletes() exiting.")
 
     return data
+
+def query_for_deletes_coord_frames(data, session, sfn_client):
+    """
+    Finds coordinate frames marked for deletion and starts delete step function.
+
+    Note that coordinate frames don't currently support metadata so the
+    lookup table is not checked.
+
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+        sfn_client(StepFunction): AWS step function client
+
+    Returns:
+        (dict): Returns data dictionary that was passed in.
+    """
+    LOG.debug("query_for_deletes_coord_frames() entering.")
+    connection = get_db_connection(data)
+    LOG.debug("created pymysql connection")
+    try:
+        with connection.cursor() as cf_cursor:
+            #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
+            one_day_ago = datetime.now() - timedelta(seconds=12)
+            sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `coordinate_frame` where "
+                   "`to_be_deleted` < %s AND `deleted_status` is null")
+            cf_cursor.execute(sql, (one_day_ago))
+            row_count = 0
+            for cf_row in cf_cursor:
+                row_count += 1
+                LOG.info("found coord frame: " + str(cf_row))
+
+                cf_id = cf_row['id']
+
+                data["coordinate_frame_id"] = cf_id
+
+                sql = "UPDATE `coordinate_frame` SET `deleted_status`=%s WHERE `id`=%s"
+                cf_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
+                connection.commit()
+
+                LOG.debug("about to start coord frame delete step fcn")
+                response = sfn_client.start_execution(
+                    stateMachineArn=data["delete-coord-frame-sfn-arn"],
+                    name="delete-boss-coord-frame-{}".format(uuid.uuid4().hex),
+                    input=json.dumps(data)
+                )
+                LOG.debug(response)
+
+            LOG.debug("found {} coord frames to delete".format(row_count))
+    finally:
+        connection.close()
+
+    LOG.debug("query_for_deletes_coord_frames() exiting.")
+    return data
+
 
 def query_for_deletes_collections(data, session, sfn_client):
     """
@@ -955,11 +1010,12 @@ def delete_coordinate_frame(data, session=None):
             cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["coordinate_frame_id"]),))
             connection.commit()
 
+            # Currently no metadata for coord frames, so no lookup key.
             # delete lookup_key given lookup_id
-            LOG.debug("Deleting lookup_key from lookup table")
-            sql = "DELETE FROM `lookup` where `id`=%s"
-            cursor.execute(sql, (str(data["lookup_key_id"]),))
-            connection.commit()
+            #LOG.debug("Deleting lookup_key from lookup table")
+            #sql = "DELETE FROM `lookup` where `id`=%s"
+            #cursor.execute(sql, (str(data["lookup_key_id"]),))
+            #connection.commit()
 
             # delete coordinate_frame given coordinate_frame id
             LOG.debug("Deleting coordinate_frame from coordinate_frame table")
