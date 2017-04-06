@@ -95,7 +95,7 @@ def get_db_connection(data):
                            cursorclass=pymysql.cursors.DictCursor)
 
 
-def send_sns_alert(topic_arn, message):
+def send_sns_alert(topic_arn, message, session=None):
     """
     Send error message to given SNS topic.
 
@@ -104,14 +104,22 @@ def send_sns_alert(topic_arn, message):
     Args:
         topic_arn (string): SNS topic to use for error message.
         message (string): Error message to send.
+        session (optional[Session]) Boto session.
+
+    Returns:
+        (bool): False if SNS alert failed.
     """
-    session = bossutils.aws.get_session()
+    if session is None:
+        session = bossutils.aws.get_session()
     client = session.client('sns')
     resp = client.publish(TopicArn=topic_arn, Message=message)
     if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         LOG.error(
             "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}: {}".format(
                 resp["ResponseMetadata"]["HTTPStatusCode"], message))
+        return False
+
+    return True
 
 
 def query_for_deletes(data, session=None):
@@ -240,7 +248,7 @@ def query_for_deletes_collections(data, session, sfn_client):
                         LOG.warning('coll_id {} did not have an associated lookup_key in the lookup'
                                     .format(coll_id))
                         send_sns_alert(
-                            data['notify_topic'], 
+                            data['topic-arn'], 
                             'Delete Error: coll id {}, has no lookup key in the endpoint lookup table.'.format(coll_id))
 
                         sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
@@ -318,7 +326,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
                         LOG.warning('exp_id {} did not have an associated lookup_key in the lookup'
                                     .format(exp_id))
                         send_sns_alert(
-                            data['notify_topic'], 
+                            data['topic-arn'], 
                             'Delete Error: exp id {}, has no lookup key in the endpoint lookup table.'.format(exp_id))
 
                         sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
@@ -409,7 +417,7 @@ def query_for_deletes_channels(data, session, sfn_client):
                             LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'
                                         .format(channel_id))
                             send_sns_alert(
-                                    data['notify_topic'],
+                                    data['topic-arn'],
                                     'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(channel_id))
                             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
                             cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
@@ -1074,10 +1082,9 @@ def notify_admins(data, session=None):
     LOG.debug("notify_admins() entering.")
     if session is None:
         session = bossutils.aws.get_session()
-    client = session.client('sns')
-    resp = client.publish(TopicArn=data["notify_topic"], Message=data["error"])
-    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+    if not send_sns_alert(data["topic-arn"], data["error"], session):
         raise DeleteError("Error notifying admins after delete failed.")
+
     LOG.debug("notify_admins() exiting.")
     return data
 
