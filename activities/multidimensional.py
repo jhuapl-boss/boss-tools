@@ -174,13 +174,13 @@ class Buffer(np.ndarray):
         if isvectorslice(key):
             key = tovectorslice(key)
 
-        return super(Buffer, self).__setitem__(key, val)
+        super(Buffer, self).__setitem__(key, val)
 
     def resize(self, new_shape, **kwargs):
         if isvector(new_shape):
             new_shape = new_shape.zyx
 
-        return super(Buffer, self).resize(new_shape, **wargs)
+        super(Buffer, self).resize(new_shape, **kwargs)
 
     # DP TODO: implement setter
     @property
@@ -226,4 +226,3 @@ class XYZVolume(list):
             return self[x][y][z]
         else:
             return super().__getitem__(key)
-

@@ -269,19 +269,20 @@ def downsample_volume(args, target, step, dim, use_iso_key):
     volume_empty = True
     for offset in xyz_range(step):
         cube = target + offset
-        log.debug("Downloading cube {}".format(cube))
-
         try:
             obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
             data = s3.get(obj_key)
             data = blosc.decompress(data)
 
             # DP ???: Check to see if the buffer is all zeros?
-            data = Buffer.frombuffer(data, dtype=np_types[data_type]).resize(dim)
+            data = Buffer.frombuffer(data, dtype=np_types[data_type])
+            data.resize(dim)
 
+            log.debug("Downloaded cube {}".format(cube))
             volume[offset * dim: (offset + 1) * dim] = data
             volume_empty = False
-        except Exception:
+        except Exception as e: # TODO: Create custom exception for S3 download
+            #log.exception("Problem downloading cubes {}".format(cube))
             log.debug("No cube at {}".format(cube))
 
     if volume_empty:
