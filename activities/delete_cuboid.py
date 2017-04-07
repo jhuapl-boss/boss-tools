@@ -115,7 +115,7 @@ def send_sns_alert(topic_arn, message, session=None):
     resp = client.publish(TopicArn=topic_arn, Message=message)
     if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         LOG.error(
-            "Unable to send to following error to SNS Topic. Received the following HTTPStatusCode {}: {}".format(
+            "Unable to send following error to SNS Topic. Received the following HTTPStatusCode {}: {}".format(
                 resp["ResponseMetadata"]["HTTPStatusCode"], message))
         return False
 
@@ -172,8 +172,9 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
             #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             one_day_ago = datetime.now() - timedelta(seconds=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `coordinate_frame` where "
-                   "`to_be_deleted` < %s AND `deleted_status` is null")
-            cf_cursor.execute(sql, (one_day_ago))
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR "
+                   "`deleted_status` = %s")
+            cf_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
             row_count = 0
             for cf_row in cf_cursor:
                 row_count += 1
@@ -183,9 +184,10 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
 
                 data["coordinate_frame_id"] = cf_id
 
-                sql = "UPDATE `coordinate_frame` SET `deleted_status`=%s WHERE `id`=%s"
-                cf_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
-                connection.commit()
+                if cf_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                    sql = "UPDATE `coordinate_frame` SET `deleted_status`=%s WHERE `id`=%s"
+                    cf_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
+                    connection.commit()
 
                 LOG.debug("about to start coord frame delete step fcn")
                 response = sfn_client.start_execution(
@@ -223,8 +225,9 @@ def query_for_deletes_collections(data, session, sfn_client):
             #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             one_day_ago = datetime.now() - timedelta(seconds=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `collection` where "
-                   "`to_be_deleted` < %s AND `deleted_status` is null")
-            coll_cursor.execute(sql, (one_day_ago))
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR " 
+                   "`deleted_status` = %s")
+            coll_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
             row_count = 0
             for coll_row in coll_cursor:
                 row_count += 1
@@ -244,7 +247,10 @@ def query_for_deletes_collections(data, session, sfn_client):
                             lookup_key_id = lookup_row['id']
                             lookup_key = lookup_row['lookup_key']
                             break
-                    if lookup_key_id is None:
+                    if lookup_key_id is None and coll_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                        # If status is finished, first attempt at deleting row
+                        # failed due to a foreign key constraint.
+
                         LOG.warning('coll_id {} did not have an associated lookup_key in the lookup'
                                     .format(coll_id))
                         send_sns_alert(
@@ -260,9 +266,10 @@ def query_for_deletes_collections(data, session, sfn_client):
                         data["lookup_key_id"] = lookup_key_id
                         data["collection_id"] = coll_id
 
-                        sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
-                        coll_cursor.execute(sql, (DELETED_STATUS_START, str(coll_id)))
-                        connection.commit()
+                        if coll_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                            sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
+                            coll_cursor.execute(sql, (DELETED_STATUS_START, str(coll_id)))
+                            connection.commit()
 
                         LOG.debug("about to start collection delete step fcn")
                         response = sfn_client.start_execution(
@@ -300,8 +307,9 @@ def query_for_deletes_experiments(data, session, sfn_client):
             #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             one_day_ago = datetime.now() - timedelta(seconds=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `experiment` where "
-                   "`to_be_deleted` < %s AND `deleted_status` is null")
-            exp_cursor.execute(sql, (one_day_ago))
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR "
+                   "`deleted_status` = %s")
+            exp_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
             row_count = 0
             for exp_row in exp_cursor:
                 row_count += 1
@@ -322,7 +330,10 @@ def query_for_deletes_experiments(data, session, sfn_client):
                             lookup_key_id = lookup_row['id']
                             lookup_key = lookup_row['lookup_key']
                             break
-                    if lookup_key_id is None:
+                    if lookup_key_id is None and exp_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                        # If status is finished, first attempt at deleting row
+                        # failed due to a foreign key constraint.
+
                         LOG.warning('exp_id {} did not have an associated lookup_key in the lookup'
                                     .format(exp_id))
                         send_sns_alert(
@@ -338,9 +349,10 @@ def query_for_deletes_experiments(data, session, sfn_client):
                         data["lookup_key_id"] = lookup_key_id
                         data["experiment_id"] = exp_id
 
-                        sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
-                        exp_cursor.execute(sql, (DELETED_STATUS_START, str(exp_id)))
-                        connection.commit()
+                        if exp_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                            sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
+                            exp_cursor.execute(sql, (DELETED_STATUS_START, str(exp_id)))
+                            connection.commit()
 
                         LOG.debug("about to start experiment delete step fcn")
                         response = sfn_client.start_execution(
@@ -464,6 +476,11 @@ def delete_metadata(data, session=None):
         (Dict): Data dictionary passed in.
     """
     LOG.debug("delete_metadata() entering.")
+
+    if data["lookup_key"] is None:
+        LOG.debug("delete_metadata() exiting - lookup_key is None.")
+        return
+
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -948,6 +965,9 @@ def delete_clean_up(data, session=None):
             cursor.execute(sql, (str(data["channel_id"]),))
             connection.commit()
 
+    except Exception as ex:
+        LOG.error("Error deleting channel: {}".format(ex))
+        raise
     finally:
         connection.close()
     LOG.debug("delete_clean_up() exiting.")
@@ -977,11 +997,14 @@ def delete_experiment(data, session=None):
             cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["experiment_id"]),))
             connection.commit()
 
-            # delete lookup_key given lookup_id
-            LOG.debug("Deleting lookup_key from lookup table")
-            sql = "DELETE FROM `lookup` where `id`=%s"
-            cursor.execute(sql, (str(data["lookup_key_id"]),))
-            connection.commit()
+            # delete lookup_key given lookup_id, might be None if deleting
+            # from the experiment table failed due to a foreign key
+            # constraint
+            if data["lookup_key_id"] is not None:
+                LOG.debug("Deleting lookup_key from lookup table")
+                sql = "DELETE FROM `lookup` where `id`=%s"
+                cursor.execute(sql, (str(data["lookup_key_id"]),))
+                connection.commit()
 
             # delete experiment given experiment id
             LOG.debug("Deleting experiment from experiment table")
@@ -989,6 +1012,9 @@ def delete_experiment(data, session=None):
             cursor.execute(sql, (str(data["experiment_id"]),))
             connection.commit()
 
+    except Exception as ex:
+        LOG.error("Error deleting experiment: {}".format(ex))
+        raise
     finally:
         connection.close()
     LOG.debug("delete_experiment() exiting.")
@@ -1030,7 +1056,9 @@ def delete_coordinate_frame(data, session=None):
             sql = "DELETE FROM `coordinate_frame` where `id`=%s"
             cursor.execute(sql, (str(data["coordinate_frame_id"]),))
             connection.commit()
-
+    except Exception as ex:
+        LOG.error("Error deleting coord frame: {}".format(ex))
+        raise
     finally:
         connection.close()
     LOG.debug("delete_coordinate_frame() exiting.")
@@ -1060,11 +1088,14 @@ def delete_collection(data, session=None):
             cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["collection_id"]),))
             connection.commit()
 
-            # delete lookup_key given lookup_id
-            LOG.debug("Deleting lookup_key from lookup table")
-            sql = "DELETE FROM `lookup` where `id`=%s"
-            cursor.execute(sql, (str(data["lookup_key_id"]),))
-            connection.commit()
+            # delete lookup_key given lookup_id, might be None if deleting
+            # from the experiment table failed due to a foreign key
+            # constraint
+            if data["lookup_key_id"] is not None:
+                LOG.debug("Deleting lookup_key from lookup table")
+                sql = "DELETE FROM `lookup` where `id`=%s"
+                cursor.execute(sql, (str(data["lookup_key_id"]),))
+                connection.commit()
 
             # delete collection given collection id
             LOG.debug("Deleting collection from collection table")
@@ -1072,6 +1103,9 @@ def delete_collection(data, session=None):
             cursor.execute(sql, (str(data["collection_id"]),))
             connection.commit()
 
+    except Exception as ex:
+        LOG.error("Error deleting collection: {}".format(ex))
+        raise
     finally:
         connection.close()
     LOG.debug("delete_collection() exiting.")
@@ -1083,6 +1117,7 @@ def notify_admins(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
     if not send_sns_alert(data["topic-arn"], data["error"], session):
+        LOG.debug("notify_admins() raising DeleteError")
         raise DeleteError("Error notifying admins after delete failed.")
 
     LOG.debug("notify_admins() exiting.")
