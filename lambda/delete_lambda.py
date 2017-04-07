@@ -26,10 +26,56 @@ import boto3
 import uuid
 import logging
 
+def got_all_step_funcs(event, debug=False):
+    """
+    Check if all step function arns found.
+
+    Args:
+        event (dict): Step functions arns are set as they are found.
+        debug (bool): Print debug messages.
+
+    Returns:
+        (bool): True if all step functions found.
+    """
+    if event['delete-sfn-arn'] is None:
+        if debug:
+            print('No delete-sfn')
+        return False
+
+    if event['query-deletes-sfn-arn'] is None:
+        if debug:
+            print('No query-deletes-sfn')
+        return False
+
+    if event["delete-exp-sfn-arn"] is None:
+        if debug:
+            print('No delete-exp-sfn')
+        return False
+
+    if event["delete-coord-frame-sfn-arn"] is None:
+        if debug:
+            print('No delete-coord-frame-sfn')
+        return False
+
+    if event["delete-coll-sfn-arn"] is None:
+        if debug:
+            print('No delete-coll-sfn')
+        return False
+
+    return True
+
 
 # Parse input args passed as a JSON string from the lambda loader
 json_event = sys.argv[1]
 event = json.loads(json_event)
+
+# Initialize new keys for event dict.  These will be populated after getting
+# the list of all state machines.
+event['delete-sfn-arn'] = None
+event['query-deletes-sfn-arn'] = None
+event["delete-exp-sfn-arn"] = None
+event["delete-coord-frame-sfn-arn"] = None
+event["delete-coll-sfn-arn"] = None
 
 #======== for testing locally ================
 # from delete_cuboid import *
@@ -54,24 +100,31 @@ log.setLevel(logging.INFO)
 
 sfn_client = boto3.client('stepfunctions')
 response = sfn_client.list_state_machines(maxResults=1000)
-found_query = False
-found_delete = False
+found_all = False
 while True:
     for sfn in response["stateMachines"]:
         if sfn["name"] == event["query-deletes-sfn-name"]:
             event["query-deletes-sfn-arn"] = sfn["stateMachineArn"]
-            found_query = True
-        if sfn["name"] == event["delete-sfn-name"]:
+        elif sfn["name"] == event["delete-sfn-name"]:
             event["delete-sfn-arn"] = sfn["stateMachineArn"]
-            found_delete = True
-        if found_query and found_delete:
+        elif sfn["name"] == event["delete-exp-sfn-name"]:
+            event["delete-exp-sfn-arn"] = sfn["stateMachineArn"]
+        elif sfn["name"] == event["delete-coord-frame-sfn-name"]:
+            event["delete-coord-frame-sfn-arn"] = sfn["stateMachineArn"]
+        elif sfn["name"] == event["delete-coll-sfn-name"]:
+            event["delete-coll-sfn-arn"] = sfn["stateMachineArn"]
+        if got_all_step_funcs(event, True):
+            found_all = True
             break
-    if found_query and found_delete:
+    if found_all:
         break
     if 'nextToken' in response:
         response = sfn_client.list_state_machines( maxResults=1000, nextToken=response["nextToken"])
     else:
         break
+
+if not found_all:
+    log.error('Did not find all required step functions for delete!')
 
 response = sfn_client.start_execution(
     stateMachineArn=event["query-deletes-sfn-arn"],
