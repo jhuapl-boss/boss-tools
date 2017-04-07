@@ -169,8 +169,7 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as cf_cursor:
-            #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
-            one_day_ago = datetime.now() - timedelta(seconds=12)
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `coordinate_frame` where "
                    "`to_be_deleted` < %s AND `deleted_status` is null OR "
                    "`deleted_status` = %s")
@@ -222,8 +221,7 @@ def query_for_deletes_collections(data, session, sfn_client):
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as coll_cursor:
-            #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
-            one_day_ago = datetime.now() - timedelta(seconds=12)
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `collection` where "
                    "`to_be_deleted` < %s AND `deleted_status` is null OR " 
                    "`deleted_status` = %s")
@@ -304,8 +302,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as exp_cursor:
-            #one_day_ago = datetime.now() - timedelta(days=1, hours=12)
-            one_day_ago = datetime.now() - timedelta(seconds=12)
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
             sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `experiment` where "
                    "`to_be_deleted` < %s AND `deleted_status` is null OR "
                    "`deleted_status` = %s")
