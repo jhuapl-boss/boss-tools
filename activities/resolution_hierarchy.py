@@ -193,13 +193,11 @@ def downsample_channel(args):
     dim = XYZ(*CUBOIDSIZE[resolution])
     log.debug("Cube dimensions: {}".format(dim))
 
-    cubes_start = XYZ(args['x_start'] // dim.x,
-                      args['y_start'] // dim.y,
-                      args['z_start'] // dim.z)
+    frame_start = XYZ(args['x_start'], args['y_start'], args['z_start'])
+    frame_stop = XYZ(args['x_stop'], args['y_stop'], args['z_stop'])
 
-    cubes_stop = XYZ(ceildiv(args['x_stop'], dim.x),
-                     ceildiv(args['y_stop'], dim.y),
-                     ceildiv(args['z_stop'], dim.z))
+    cubes_start = frame_start // dim
+    cubes_stop = ceildiv(frame_stop, dim)
 
     steps = []
     if args['type'] == 'isotropic':
@@ -210,8 +208,10 @@ def downsample_channel(args):
             steps.append((XYZ(2,2,2), True))
 
     for step, use_iso_flag in steps:
-        log.debug("Frame corner: {}".format(cubes_start))
-        log.debug("Frame extent: {}".format(cubes_stop))
+        log.debug("Frame corner: {}".format(frame_start))
+        log.debug("Frame extent: {}".format(frame_stop))
+        log.debug("Cubes corner: {}".format(cubes_start))
+        log.debug("Cubes extent: {}".format(cubes_stop))
         log.debug("Downsample step: {}".format(step))
         for target in xyz_range(cubes_start, cubes_stop, step=step):
             # NOTE Can fan-out these calls
@@ -278,12 +278,13 @@ def downsample_volume(args, target, step, dim, use_iso_key):
             data = Buffer.frombuffer(data, dtype=np_types[data_type])
             data.resize(dim)
 
-            log.debug("Downloaded cube {}".format(cube))
+            #log.debug("Downloaded cube {}".format(cube))
             volume[offset * dim: (offset + 1) * dim] = data
             volume_empty = False
         except Exception as e: # TODO: Create custom exception for S3 download
             #log.exception("Problem downloading cubes {}".format(cube))
-            log.debug("No cube at {}".format(cube))
+            #log.debug("No cube at {}".format(cube))
+            pass
 
     if volume_empty:
         log.debug("Completely empty volume, not downsampling")
@@ -297,8 +298,14 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     downsample_cube(volume, cube, annotation_chan)
 
+    #log.debug("New Cube Far Corner: {}".format(cube[cube.shape-1]))
+
     # Compress the new cube before saving
     cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
+
+    #log.debug("source {} -> destination {}".format(target, target / step))
+
+    target = target / step # scale down the output
 
     # Save new cube in S3
     obj_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
@@ -346,7 +353,7 @@ def downsample_cube(volume, cube, is_annotation):
         cube (Buffer) : Raw numpy array for output data
         is_annotation (boolean) : If the downsample should be an annotation downsample
     """
-    log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
+    #log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
 
     def most_occurrences(xs):
         counts = {}

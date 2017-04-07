@@ -167,12 +167,16 @@ class Buffer(np.ndarray):
     def __getitem__(self, key):
         if isvectorslice(key):
             key = tovectorslice(key)
+        elif isvector(key):
+            key = key.zyx
 
         return super(Buffer, self).__getitem__(key)
 
     def __setitem__(self, key, val):
         if isvectorslice(key):
             key = tovectorslice(key)
+        elif isvector(key):
+            key = key.zyx
 
         super(Buffer, self).__setitem__(key, val)
 
