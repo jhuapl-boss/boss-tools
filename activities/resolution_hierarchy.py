@@ -186,28 +186,53 @@ def downsample_channel(args):
         }
     """
 
-    log.debug("Downsampling resolution " + str(args['resolution']))
+    #log.debug("Downsampling resolution " + str(args['resolution']))
 
     resolution = args['resolution']
 
     dim = XYZ(*CUBOIDSIZE[resolution])
-    log.debug("Cube dimensions: {}".format(dim))
+    #log.debug("Cube dimensions: {}".format(dim))
 
-    frame_start = XYZ(args['x_start'], args['y_start'], args['z_start'])
-    frame_stop = XYZ(args['x_stop'], args['y_stop'], args['z_stop'])
+    def frame(key):
+        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
 
-    cubes_start = frame_start // dim
-    cubes_stop = ceildiv(frame_stop, dim)
-
-    steps = []
+    configs = []
     if args['type'] == 'isotropic':
-        steps.append((XYZ(2,2,2), False))
+        configs.append({
+            'name': 'isotropic',
+            'step': XYZ(2,2,2),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
     else:
-        steps.append((XYZ(2,2,1), False))
-        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
-            steps.append((XYZ(2,2,2), True))
+        configs.append({
+            'name': 'anisotropic',
+            'step': XYZ(2,2,1),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
 
-    for step, use_iso_flag in steps:
+        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+            configs.append({
+                'name': 'isotropic',
+                'step': XYZ(2,2,2),
+                'iso_flag': True,
+                'frame_start_key': 'iso_{}_start',
+                'frame_stop_key': 'iso_{}_stop',
+            })
+
+    for config in configs:
+        frame_start = frame(config['frame_start_key'])
+        frame_stop = frame(config['frame_stop_key'])
+        step = config['step']
+        use_iso_flag = config['iso_flag']
+
+        cubes_start = frame_start // dim
+        cubes_stop = ceildiv(frame_stop, dim)
+
+        log.debug('Downsampling {} resolution {}'.format(config['name'], resolution))
         log.debug("Frame corner: {}".format(frame_start))
         log.debug("Frame extent: {}".format(frame_stop))
         log.debug("Cubes corner: {}".format(cubes_start))
@@ -222,13 +247,24 @@ def downsample_channel(args):
                 traceback.print_exc()
                 raise
 
-    # Resize the coordinate frame extents as well
-    def resize(var, size):
-        args[var + '_start'] //= size
-        args[var + '_stop'] = ceildiv(args[var + '_stop'], size)
-    resize('x', 2)
-    resize('y', 2)
-    #resize('z', 1)
+        # Resize the coordinate frame extents as the data shrinks
+        def resize(var, size):
+            start = config['frame_start_key'].format(var)
+            stop = config['frame_stop_key'].format(var)
+            args[start] //= size
+            args[stop] = ceildiv(args[stop], size)
+        resize('x', step.x)
+        resize('y', step.y)
+        resize('z', step.z)
+
+    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
+    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
+        def copy(var):
+            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+        copy('x')
+        copy('y')
+        copy('z')
 
     # Advance the loop and recalculate the conditional
     args['resolution'] = resolution + 1
