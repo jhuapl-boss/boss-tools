@@ -41,12 +41,12 @@ event = json.loads(json_event)
 run_cnt = 0
 
 while run_cnt < 2:
-    # Get message from SQS flush queue, try for ~10 seconds with backoff
+    # Get message from SQS flush queue
     sqs_client = boto3.client('sqs')
     rx_cnt = 0
     flush_msg_data = None
     rx_handle = ''
-    while rx_cnt < 6:
+    while rx_cnt < 4:
         try:
             flush_msg = sqs_client.receive_message(QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"])
         except botocore.exceptions.ClientError:
@@ -60,8 +60,8 @@ while run_cnt < 2:
             break
         else:
             rx_cnt += 1
-            print("No message found. Try {} of 6".format(rx_cnt))
-            time.sleep(.25)
+            print("No message found. Try {} of 4".format(rx_cnt))
+            time.sleep(.1)
 
     if flush_msg_data:
         # Got a message
@@ -99,10 +99,12 @@ while run_cnt < 2:
     print("object key: {}".format(object_keys[0]))
     print("cache key: {}".format(cache_key))
 
-    resolution = int(write_cuboid_key.split('&')[4])
+    # Get parts of the object_key
+    parts = sp.objectio.get_object_key_parts(object_keys[0])
+    resolution = int(parts.resolution)
     cube_dim = CUBOIDSIZE[resolution]
-    time_sample = int(write_cuboid_key.split('&')[5])
-    morton = int(write_cuboid_key.split('&')[6])
+    time_sample = int(parts.time_sample)
+    morton = int(parts.morton_id)
     write_cuboid_keys_to_remove = [write_cuboid_key]
 
     if exist_keys:  # Cuboid Exists
