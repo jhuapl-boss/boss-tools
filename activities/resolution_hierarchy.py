@@ -22,11 +22,8 @@ from collections import namedtuple
 from bossutils import aws, logger
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
-from spdb.c_lib.ndlib import isotropicBuild_ctype
-from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
-from spdb.spatialdb.annocube import AnnotateCube64
 
-from multidimensional import XYZ, Buffer, XYZVolume, ceildiv
+from multidimensional import XYZ, Buffer, ceildiv
 from multidimensional import range as xyz_range
 
 log = logger.BossLogger().logger
@@ -159,11 +156,11 @@ def downsample_channel(args):
             experiment_id (int)
             channel_id (int)
             annotation_channel (bool)
-            data_type
+            data_type (str) 'uint8' | 'uint16' | 'uint64'
 
-            s3_bucket
-            s3_index
-            id_index
+            s3_bucket (URL)
+            s3_index (URL)
+            id_index (URL)
 
             x_start (int)
             y_start (int)
@@ -177,12 +174,8 @@ def downsample_channel(args):
             resolution_max (int)
             res_lt_max (bool)
 
-            type (str) 'isotropic' | 'anisotropic' or boolean?
-                       'isotropic' | 'slice'???
+            type (str) 'isotropic' | 'anisotropic'
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
-                or
-            x/y/z resolution (int) calculate during downsample
-
         }
     """
 
@@ -394,25 +387,34 @@ def downsample_cube(volume, cube, is_annotation):
         return max(counts, key=lambda x: counts[x])
 
     if is_annotation:
-        # Foreach output 'pixel', select the source annotation that appears the most
-        # right now code assumes cur_dim == dim, if not need to pass a scale value
-        for xyz in xyz_range(cube.dim):
-            start = xyz * volume.cubes # scale up from output cube to input volume
-            stop = start + volume.cubes # iterate over volume.cubes worth of 'pixels'
+        use_c_version = False
+        if use_c_version:
+            # C Version of the below Python code
+            ndlib.addAnnotationData_ctype(volume, cube, volume.cubes, cube.dim)
+        else:
+            # Foreach output 'pixel', select the source annotation that appears the most
+            # right now code assumes cur_dim == dim, if not need to pass a scale value
+            for xyz in xyz_range(cube.dim):
+                start = xyz * volume.cubes # scale up from output cube to input volume
+                stop = start + volume.cubes # iterate over volume.cubes worth of 'pixels'
 
-            annotations = [volume[idx] for idx in xyz_range(start, stop)]
+                annotations = [volume[idx] for idx in xyz_range(start, stop)]
 
-            cube[xyz] = most_occurrences(annotations)
+                cube[xyz] = most_occurrences(annotations)
     else:
         # Foreach output z slice, use Image to shrink the input slize(s)
         for z in range(cube.dim.z):
-            if volume.cubes.z == 2:
-                # Take two Z slices and merge them together
-                slice1 = volume[z * 2, :, :]
-                slice2 = volume[z * 2 + 1, :, :]
-                slice = isotropicBuild_ctype(slice1, slice2)
+            merge_z_slice = False
+            if merge_z_slice:
+                if volume.cubes.z == 2:
+                    # Take two Z slices and merge them together
+                    slice1 = volume[z * 2, :, :]
+                    slice2 = volume[z * 2 + 1, :, :]
+                    slice = ndlib.isotropicBuild_ctype(slice1, slice2)
+                else:
+                    slice = volume[z, :, :]
             else:
-                slice = volume[z, :, :]
+                slice = volume[z * volume.cubes.z, :, :]
 
             if volume.dtype == np.uint8:
                 image_type = 'L'
