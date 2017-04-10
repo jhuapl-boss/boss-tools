@@ -334,18 +334,12 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     downsample_cube(volume, cube, annotation_chan)
 
-    #log.debug("New Cube Far Corner: {}".format(cube[cube.shape-1]))
-
-    # Compress the new cube before saving
-    cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
-
-    #log.debug("source {} -> destination {}".format(target, target / step))
-
     target = target / step # scale down the output
 
     # Save new cube in S3
     obj_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
-    s3.put(obj_key, cube)
+    compressed = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
+    s3.put(obj_key, compressed)
 
     # Update indicies
     # Same key scheme, but without the version
@@ -369,7 +363,7 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
         if len(ids) > 0:
             idx_key = S3IndexKey(obj_key, version)
-            s3_index.update_ids(idx_key, id_strs)
+            s3_index.update_ids(idx_key, ids)
 
             for id in ids:
                 idx_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, id)
