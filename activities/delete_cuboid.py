@@ -95,13 +95,36 @@ def get_db_connection(data):
                            cursorclass=pymysql.cursors.DictCursor)
 
 
+def send_sns_alert(topic_arn, message, session=None):
+    """
+    Send error message to given SNS topic.
+
+    If sending fails, an error will be logged.
+
+    Args:
+        topic_arn (string): SNS topic to use for error message.
+        message (string): Error message to send.
+        session (optional[Session]) Boto session.
+
+    Returns:
+        (bool): False if SNS alert failed.
+    """
+    if session is None:
+        session = bossutils.aws.get_session()
+    client = session.client('sns')
+    resp = client.publish(TopicArn=topic_arn, Message=message)
+    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+        LOG.error(
+            "Unable to send following error to SNS Topic. Received the following HTTPStatusCode {}: {}".format(
+                resp["ResponseMetadata"]["HTTPStatusCode"], message))
+        return False
+
+    return True
+
+
 def query_for_deletes(data, session=None):
     """
-    Queries for data to be deteleted and kicks off delete step function
-    adds the following values to data (values are examples only):
-            "lookup_key": "36&26&31",
-            "channel_id": "1",
-            "lookup_key_id": "1",
+    Queries for data to be deleted and kicks off delete step function
 
     Args:
         data(Dict): Dictionary containing following keys: lookup_key, meta-db
@@ -117,6 +140,250 @@ def query_for_deletes(data, session=None):
     sfn_client = session.client('stepfunctions')
     LOG.debug("created sfn_client")
 
+    query_for_deletes_channels(data, session, sfn_client)
+    query_for_deletes_experiments(data, session, sfn_client)
+    query_for_deletes_collections(data, session, sfn_client)
+    query_for_deletes_coord_frames(data, session, sfn_client)
+
+    LOG.debug("query_for_deletes() exiting.")
+
+    return data
+
+def query_for_deletes_coord_frames(data, session, sfn_client):
+    """
+    Finds coordinate frames marked for deletion and starts delete step function.
+
+    Note that coordinate frames don't currently support metadata so the
+    lookup table is not checked.
+
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+        sfn_client(StepFunction): AWS step function client
+
+    Returns:
+        (dict): Returns data dictionary that was passed in.
+    """
+    LOG.debug("query_for_deletes_coord_frames() entering.")
+    connection = get_db_connection(data)
+    LOG.debug("created pymysql connection")
+    try:
+        with connection.cursor() as cf_cursor:
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
+            sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `coordinate_frame` where "
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR "
+                   "`deleted_status` = %s")
+            cf_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
+            row_count = 0
+            for cf_row in cf_cursor:
+                row_count += 1
+                LOG.info("found coord frame: " + str(cf_row))
+
+                cf_id = cf_row['id']
+
+                data["coordinate_frame_id"] = cf_id
+
+                if cf_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                    sql = "UPDATE `coordinate_frame` SET `deleted_status`=%s WHERE `id`=%s"
+                    cf_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
+                    connection.commit()
+
+                LOG.debug("about to start coord frame delete step fcn")
+                response = sfn_client.start_execution(
+                    stateMachineArn=data["delete-coord-frame-sfn-arn"],
+                    name="delete-boss-coord-frame-{}".format(uuid.uuid4().hex),
+                    input=json.dumps(data)
+                )
+                LOG.debug(response)
+
+            LOG.debug("found {} coord frames to delete".format(row_count))
+    finally:
+        connection.close()
+
+    LOG.debug("query_for_deletes_coord_frames() exiting.")
+    return data
+
+
+def query_for_deletes_collections(data, session, sfn_client):
+    """
+    Finds collections marked for deletion and starts delete step function.
+
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+        sfn_client(StepFunction): AWS step function client
+
+    Returns:
+        (dict): Returns data dictionary that was passed in.
+    """
+    LOG.debug("query_for_deletes_collections() entering.")
+    connection = get_db_connection(data)
+    LOG.debug("created pymysql connection")
+    try:
+        with connection.cursor() as coll_cursor:
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
+            sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `collection` where "
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR " 
+                   "`deleted_status` = %s")
+            coll_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
+            row_count = 0
+            for coll_row in coll_cursor:
+                row_count += 1
+                LOG.info("found collection: " + str(coll_row))
+
+                coll_id = coll_row['id']
+                with connection.cursor() as lookup_cursor:
+                    # get lookup key given collection id and collection name
+                    sql = "SELECT `id`, `collection_name`, `lookup_key` FROM `lookup` where `collection_name`=%s"
+                    lookup_cursor.execute(sql, (coll_row['name'],))
+                    lookup_key_id = None
+                    lookup_key = None
+                    for lookup_row in lookup_cursor:
+                        # its possible for two collections to have the same name so we search for the one with the
+                        # correct collection id.
+                        if int(lookup_row['lookup_key']) == coll_id:
+                            lookup_key_id = lookup_row['id']
+                            lookup_key = lookup_row['lookup_key']
+                            break
+                    if lookup_key_id is None and coll_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                        # If status is finished, first attempt at deleting row
+                        # failed due to a foreign key constraint.
+
+                        LOG.warning('coll_id {} did not have an associated lookup_key in the lookup'
+                                    .format(coll_id))
+                        send_sns_alert(
+                            data['topic-arn'], 
+                            'Delete Error: coll id {}, has no lookup key in the endpoint lookup table.'.format(coll_id))
+
+                        sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
+                        coll_cursor.execute(sql, (DELETED_STATUS_ERROR, str(coll_id)))
+                        connection.commit()
+
+                    else:
+                        data["lookup_key"] = lookup_key
+                        data["lookup_key_id"] = lookup_key_id
+                        data["collection_id"] = coll_id
+
+                        if coll_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                            sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
+                            coll_cursor.execute(sql, (DELETED_STATUS_START, str(coll_id)))
+                            connection.commit()
+
+                        LOG.debug("about to start collection delete step fcn")
+                        response = sfn_client.start_execution(
+                            stateMachineArn=data["delete-coll-sfn-arn"],
+                            name="delete-boss-coll-{}".format(uuid.uuid4().hex),
+                            input=json.dumps(data)
+                        )
+                        LOG.debug(response)
+
+            LOG.debug("found {} collections to delete".format(row_count))
+    finally:
+        connection.close()
+
+    LOG.debug("query_for_deletes_collections() exiting.")
+    return data
+
+
+def query_for_deletes_experiments(data, session, sfn_client):
+    """
+    Finds experiments marked for deletion and starts delete step function.
+
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+        sfn_client(StepFunction): AWS step function client
+
+    Returns:
+        (dict): Returns data dictionary that was passed in.
+    """
+    LOG.debug("query_for_deletes_experiments() entering.")
+    connection = get_db_connection(data)
+    LOG.debug("created pymysql connection")
+    try:
+        with connection.cursor() as exp_cursor:
+            one_day_ago = datetime.now() - timedelta(days=1, hours=12)
+            sql = ("SELECT `id`, `to_be_deleted`, `name`, `deleted_status` FROM `experiment` where "
+                   "`to_be_deleted` < %s AND `deleted_status` is null OR "
+                   "`deleted_status` = %s")
+            exp_cursor.execute(sql, (one_day_ago, DELETED_STATUS_FINISHED))
+            row_count = 0
+            for exp_row in exp_cursor:
+                row_count += 1
+                LOG.info("found experiment: " + str(exp_row))
+
+                exp_id = exp_row['id']
+                with connection.cursor() as lookup_cursor:
+                    # get lookup key given channel id and channel name
+                    sql = "SELECT `id`, `experiment_name`, `lookup_key` FROM `lookup` where `experiment_name`=%s"
+                    lookup_cursor.execute(sql, (exp_row['name'],))
+                    lookup_key_id = None
+                    lookup_key = None
+                    for lookup_row in lookup_cursor:
+                        # its possible for two channels to have the same name so we search for the one with the
+                        # correct channel id.
+                        parts = lookup_row['lookup_key'].split("&")
+                        if int(parts[1]) == exp_id:
+                            lookup_key_id = lookup_row['id']
+                            lookup_key = lookup_row['lookup_key']
+                            break
+                    if lookup_key_id is None and exp_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                        # If status is finished, first attempt at deleting row
+                        # failed due to a foreign key constraint.
+
+                        LOG.warning('exp_id {} did not have an associated lookup_key in the lookup'
+                                    .format(exp_id))
+                        send_sns_alert(
+                            data['topic-arn'], 
+                            'Delete Error: exp id {}, has no lookup key in the endpoint lookup table.'.format(exp_id))
+
+                        sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
+                        exp_cursor.execute(sql, (DELETED_STATUS_ERROR, str(exp_id)))
+                        connection.commit()
+
+                    else:
+                        data["lookup_key"] = lookup_key
+                        data["lookup_key_id"] = lookup_key_id
+                        data["experiment_id"] = exp_id
+
+                        if exp_row['deleted_status'] != DELETED_STATUS_FINISHED:
+                            sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
+                            exp_cursor.execute(sql, (DELETED_STATUS_START, str(exp_id)))
+                            connection.commit()
+
+                        LOG.debug("about to start experiment delete step fcn")
+                        response = sfn_client.start_execution(
+                            stateMachineArn=data["delete-exp-sfn-arn"],
+                            name="delete-boss-exp-{}".format(uuid.uuid4().hex),
+                            input=json.dumps(data)
+                        )
+                        LOG.debug(response)
+
+            LOG.debug("found {} experiments to delete".format(row_count))
+    finally:
+        connection.close()
+
+    LOG.debug("query_for_deletes_experiments() exiting.")
+    return data
+
+
+def query_for_deletes_channels(data, session, sfn_client):
+    """
+    Queries for data to be deleted and kicks off delete step function
+    adds the following values to data (values are examples only):
+            "lookup_key": "36&26&31",
+            "channel_id": "1",
+            "lookup_key_id": "1",
+
+    Args:
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        session(Session): AWS boto3 Session
+        sfn_client(StepFunction): AWS step function client
+
+    Returns:
+        (Dict): Data dictionary passed in.
+    """
+    LOG.debug("query_for_deletes_channels() entering.")
     connection = get_db_connection(data)
     LOG.debug("created pymysql connection")
     try:
@@ -158,17 +425,9 @@ def query_for_deletes(data, session=None):
                         if lookup_key_id is None:
                             LOG.warning('channel_id {} did not have an associated lookup_key in the lookup'
                                         .format(channel_id))
-                            client = boto3.client('sns')
-                            resp = client.publish(TopicArn=data["notify_topic"],
-                                                  Message="Delete Error: channel id {}, has no lookup key in the "
-                                                          "endpoint lookup table.".format(
-                                                      channel_id))
-                            if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
-                                LOG.error(
-                                    "Unable to send to following error to SNS Topic. Received the following "
-                                    "HTTPStatusCode {}".format(resp["ResponseMetadata"]["HTTPStatusCode"]) +
-                                    "Delete Error: channel id {}, has no lookup key in the endpoint lookup table."
-                                    .format(channel_id))
+                            send_sns_alert(
+                                    data['topic-arn'],
+                                    'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(channel_id))
                             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
                             cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
                             connection.commit()
@@ -199,7 +458,7 @@ def query_for_deletes(data, session=None):
 
     finally:
         connection.close()
-    LOG.debug("query_for_deletes() exiting.")
+    LOG.debug("query_for_deletes_channels() exiting.")
     return data
 
 
@@ -214,6 +473,11 @@ def delete_metadata(data, session=None):
         (Dict): Data dictionary passed in.
     """
     LOG.debug("delete_metadata() entering.")
+
+    if data["lookup_key"] is None:
+        LOG.debug("delete_metadata() exiting - lookup_key is None.")
+        return
+
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('dynamodb')
@@ -634,7 +898,8 @@ def delete_clean_up(data, session=None):
     first sets delete status to finished, then deletes the shard_index and the shard_lists from the delete_bucket,
     finally it deletes the channel and lookup entries.
     Args:
-        data(Dict): Dictionary containing at least the following keys:  delete_bucket, delete_shard_index_key
+        data(Dict): Dictionary containing at least the following keys:  delete_bucket, delete_shard_index_key,
+                    channel_id, db, lookup_key_id
         session(Session): AWS boto3 Session
 
     Returns:
@@ -697,9 +962,150 @@ def delete_clean_up(data, session=None):
             cursor.execute(sql, (str(data["channel_id"]),))
             connection.commit()
 
+    except Exception as ex:
+        LOG.error("Error deleting channel: {}".format(ex))
+        raise
     finally:
         connection.close()
     LOG.debug("delete_clean_up() exiting.")
+    return data
+
+
+def delete_experiment(data, session=None):
+    """
+    deletes experiement out of RDS lookup table and RDS experiment table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  experiment_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_experiment() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["experiment_id"]),))
+            connection.commit()
+
+            # delete lookup_key given lookup_id, might be None if deleting
+            # from the experiment table failed due to a foreign key
+            # constraint
+            if data["lookup_key_id"] is not None:
+                LOG.debug("Deleting lookup_key from lookup table")
+                sql = "DELETE FROM `lookup` where `id`=%s"
+                cursor.execute(sql, (str(data["lookup_key_id"]),))
+                connection.commit()
+
+            # delete experiment given experiment id
+            LOG.debug("Deleting experiment from experiment table")
+            sql = "DELETE FROM `experiment` where `id`=%s"
+            cursor.execute(sql, (str(data["experiment_id"]),))
+            connection.commit()
+
+    except Exception as ex:
+        LOG.error("Error deleting experiment: {}".format(ex))
+        raise
+    finally:
+        connection.close()
+    LOG.debug("delete_experiment() exiting.")
+    return data
+
+
+def delete_coordinate_frame(data, session=None):
+    """
+    deletes coordinate_frame out of RDS lookup table and RDS coordinate_frame table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  coordinate_frame_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_coordinate_frame() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE coordinate_frame SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["coordinate_frame_id"]),))
+            connection.commit()
+
+            # Currently no metadata for coord frames, so no lookup key.
+            # delete lookup_key given lookup_id
+            #LOG.debug("Deleting lookup_key from lookup table")
+            #sql = "DELETE FROM `lookup` where `id`=%s"
+            #cursor.execute(sql, (str(data["lookup_key_id"]),))
+            #connection.commit()
+
+            # delete coordinate_frame given coordinate_frame id
+            LOG.debug("Deleting coordinate_frame from coordinate_frame table")
+            sql = "DELETE FROM `coordinate_frame` where `id`=%s"
+            cursor.execute(sql, (str(data["coordinate_frame_id"]),))
+            connection.commit()
+    except Exception as ex:
+        LOG.error("Error deleting coord frame: {}".format(ex))
+        raise
+    finally:
+        connection.close()
+    LOG.debug("delete_coordinate_frame() exiting.")
+    return data
+
+
+def delete_collection(data, session=None):
+    """
+    deletes experiement out of RDS lookup table and RDS collection table.
+    Args:
+        data(Dict): Dictionary containing at least the following keys:  collection_id, db, lookup_key_id
+        session(Session): AWS boto3 Session
+
+    Returns:
+        (Dict): data dictionary passed in.
+    """
+    LOG.debug("delete_collection() entering.")
+    if session is None:
+        session = bossutils.aws.get_session()
+
+    connection = get_db_connection(data)
+
+    try:
+        with connection.cursor() as cursor:
+            LOG.debug("Updating deleted_status to finished.")
+            sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
+            cursor.execute(sql, (DELETED_STATUS_FINISHED, str(data["collection_id"]),))
+            connection.commit()
+
+            # delete lookup_key given lookup_id, might be None if deleting
+            # from the experiment table failed due to a foreign key
+            # constraint
+            if data["lookup_key_id"] is not None:
+                LOG.debug("Deleting lookup_key from lookup table")
+                sql = "DELETE FROM `lookup` where `id`=%s"
+                cursor.execute(sql, (str(data["lookup_key_id"]),))
+                connection.commit()
+
+            # delete collection given collection id
+            LOG.debug("Deleting collection from collection table")
+            sql = "DELETE FROM `collection` where `id`=%s"
+            cursor.execute(sql, (str(data["collection_id"]),))
+            connection.commit()
+
+    except Exception as ex:
+        LOG.error("Error deleting collection: {}".format(ex))
+        raise
+    finally:
+        connection.close()
+    LOG.debug("delete_collection() exiting.")
     return data
 
 
@@ -707,10 +1113,10 @@ def notify_admins(data, session=None):
     LOG.debug("notify_admins() entering.")
     if session is None:
         session = bossutils.aws.get_session()
-    client = session.client('sns')
-    resp = client.publish(TopicArn=data["notify_topic"], Message=data["error"])
-    if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
+    if not send_sns_alert(data["topic-arn"], data["error"], session):
+        LOG.debug("notify_admins() raising DeleteError")
         raise DeleteError("Error notifying admins after delete failed.")
+
     LOG.debug("notify_admins() exiting.")
     return data
 
