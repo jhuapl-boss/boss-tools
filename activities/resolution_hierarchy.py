@@ -170,9 +170,9 @@ def downsample_channel(args):
             y_stop (int)
             z_stop (int)
 
-            resolution (int)
-            resolution_max (int)
-            res_lt_max (bool)
+            resolution (int) The resolution to downsample. Creates resolution + 1
+            resolution_max (int) The maximum resolution to generate
+            res_lt_max (bool) = args['resolution'] < (args['resolution_max'] - 1)
 
             type (str) 'isotropic' | 'anisotropic'
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
@@ -260,8 +260,10 @@ def downsample_channel(args):
         copy('z')
 
     # Advance the loop and recalculate the conditional
+    # Using max - 1 because resolution_max should not be a valid resolution
+    # and res < res_max will end with res = res_max - 1, which generates res_max resolution
     args['resolution'] = resolution + 1
-    args['res_lt_max'] = args['resolution'] < args['resolution_max']
+    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
     return args
 
 def downsample_volume(args, target, step, dim, use_iso_key):
