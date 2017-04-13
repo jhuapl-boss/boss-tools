@@ -18,6 +18,7 @@ import boto3
 import botocore
 import numpy as np
 from PIL import Image
+from scipy.ndimage.interpolation import zoom
 from collections import namedtuple
 from bossutils import aws, logger
 from spdb.c_lib import ndlib
@@ -394,15 +395,21 @@ def downsample_cube(volume, cube, is_annotation):
             # C Version of the below Python code
             ndlib.addAnnotationData_ctype(volume, cube, volume.cubes, cube.dim)
         else:
-            # Foreach output 'pixel', select the source annotation that appears the most
-            # right now code assumes cur_dim == dim, if not need to pass a scale value
-            for xyz in xyz_range(cube.dim):
-                start = xyz * volume.cubes # scale up from output cube to input volume
-                stop = start + volume.cubes # iterate over volume.cubes worth of 'pixels'
+            # Foreach output z slice, use Image to shrink the input slize(s)
+            for z in range(cube.dim.z):
+                merge_z_slice = False
+                if merge_z_slice:
+                    if volume.cubes.z == 2:
+                        # Take two Z slices and merge them together
+                        slice1 = volume[z * 2, :, :]
+                        slice2 = volume[z * 2 + 1, :, :]
+                        slice = ndlib.isotropicBuild_ctype(slice1, slice2)
+                    else:
+                        slice = volume[z, :, :]
+                else:
+                    slice = volume[z * volume.cubes.z, :, :]
 
-                annotations = [volume[idx] for idx in xyz_range(start, stop)]
-
-                cube[xyz] = most_occurrences(annotations)
+                cube[z, :, :] = zoom(slice, 0.5, np.uint64, order=0, mode='nearest')
     else:
         # Foreach output z slice, use Image to shrink the input slize(s)
         for z in range(cube.dim.z):
@@ -432,4 +439,4 @@ def downsample_cube(volume, cube, is_annotation):
                                      image_type,
                                      0, 1)
 
-            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y)))
+            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
