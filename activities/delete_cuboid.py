@@ -52,6 +52,8 @@ DELETED_STATUS_FINISHED = 'finished'
 DELETED_STATUS_START = 'start'
 DELETED_STATUS_ERROR = 'error'
 
+DATA_FOUND = 'data_found'
+
 
 class DeleteError(Exception):
     """
@@ -140,10 +142,13 @@ def query_for_deletes(data, session=None):
     sfn_client = session.client('stepfunctions')
     LOG.debug("created sfn_client")
 
-    query_for_deletes_channels(data, session, sfn_client)
-    query_for_deletes_experiments(data, session, sfn_client)
-    query_for_deletes_collections(data, session, sfn_client)
-    query_for_deletes_coord_frames(data, session, sfn_client)
+    data = query_for_deletes_channels(data, session, sfn_client)
+    if data.pop(DATA_FOUND, None):
+        data = query_for_deletes_experiments(data, session, sfn_client)
+        if data.pop(DATA_FOUND, None):
+            data = query_for_deletes_collections(data, session, sfn_client)
+            if data.pop(DATA_FOUND, None):
+                data = query_for_deletes_coord_frames(data, session, sfn_client)
 
     LOG.debug("query_for_deletes() exiting.")
 
@@ -200,6 +205,7 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
     finally:
         connection.close()
 
+    data[DATA_FOUND] = row_count > 0
     LOG.debug("query_for_deletes_coord_frames() exiting.")
     return data
 
@@ -281,6 +287,7 @@ def query_for_deletes_collections(data, session, sfn_client):
     finally:
         connection.close()
 
+    data[DATA_FOUND] = row_count > 0
     LOG.debug("query_for_deletes_collections() exiting.")
     return data
 
@@ -363,6 +370,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
     finally:
         connection.close()
 
+    data[DATA_FOUND] = row_count > 0
     LOG.debug("query_for_deletes_experiments() exiting.")
     return data
 
@@ -458,6 +466,8 @@ def query_for_deletes_channels(data, session, sfn_client):
 
     finally:
         connection.close()
+
+    data[DATA_FOUND] = row_count > 0
     LOG.debug("query_for_deletes_channels() exiting.")
     return data
 
