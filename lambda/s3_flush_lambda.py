@@ -185,17 +185,21 @@ while run_cnt < 2:
         try:
             sp.objectio.update_id_indices(resource, resolution, [object_keys[0]], [uncompressed_cuboid_bytes])
         except SpdbError as ex:
-            sns_client = boto3.client('sns')
-            topic_arn = flush_msg_data["config"]["object_store_config"]["prod_mailing_list"]
-            msg = 'During lambda flush:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\n'.format(
-                ex.message,
-                resource.data['collection']['name'],
-                resource.data['experiment']['name'],
-                resource.data['channel']['name'])
-            sns_client.publish(
-                TopicArn=topic_arn,
-                Subject='Object services misuse',
-                Message=msg)
+            # Tests don't have this key defined and we don't really want to
+            # send SNS messages during tests.
+            if "prod_mailing_list" in flush_msg_data["config"]["object_store_config"]:
+                sns_client = boto3.client('sns')
+                topic_arn = flush_msg_data["config"]["object_store_config"]["prod_mailing_list"]
+                msg = 'During lambda flush:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\nQueue: {}'.format(
+                    ex.message,
+                    resource.data['collection']['name'],
+                    resource.data['experiment']['name'],
+                    resource.data['channel']['name'],
+                    flush_msg_data['config']['object_store_config']['s3_flush_queue'])
+                sns_client.publish(
+                    TopicArn=topic_arn,
+                    Subject='Object services misuse',
+                    Message=msg)
 
     # Check if cuboid already exists in the cache
     if sp.kvio.cube_exists(cache_key):
