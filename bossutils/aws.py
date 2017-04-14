@@ -132,6 +132,20 @@ def sfn_result(session, arn, wait=10):
         else:
             time.sleep(wait)
 
+def sfn_cancel(session, arn, error="Error", cause="Unknown Cause"):
+    """Cancel the given StepFunction execution
+
+    Args:
+        session (Session): Boto3 session
+        arn (string): ARN of the execution to cancel / stop
+        error (string): Cancellation error type
+        cause (string): Cause for the error
+    """
+    client = session.client('stepfunctions')
+    resp = client.stop_execution(executionArn = arn,
+                                 error = error,
+                                 cause = cause)
+
 class AWSManager:
     """
     Class to manage a pool of AWS boto3 sessions in a thread-safe manner.

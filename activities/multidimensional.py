@@ -186,11 +186,14 @@ class Buffer(np.ndarray):
 
         super(Buffer, self).resize(new_shape, **kwargs)
 
+    # DP ???: How to handle non-3D shapes?
     # DP TODO: implement setter
     @property
     def shape(self):
         s = super(Buffer, self).shape
-        return XYZ(s[2], s[1], s[0]) # convert from ZYX to XYZ
+        if len(s) == 3:
+            s = ZYX(*s) # allow attribute access in addition to index access
+        return s
 
     @classmethod
     def zeros(cls, shape, **kwargs):

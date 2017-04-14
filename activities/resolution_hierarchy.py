@@ -18,15 +18,13 @@ import boto3
 import botocore
 import numpy as np
 from PIL import Image
+from scipy.ndimage.interpolation import zoom
 from collections import namedtuple
 from bossutils import aws, logger
 from spdb.c_lib import ndlib
 from spdb.c_lib.ndtype import CUBOIDSIZE
-from spdb.c_lib.ndlib import isotropicBuild_ctype
-from spdb.spatialdb.imagecube import Cube, ImageCube8, ImageCube16
-from spdb.spatialdb.annocube import AnnotateCube64
 
-from multidimensional import XYZ, Buffer, XYZVolume, ceildiv
+from multidimensional import XYZ, Buffer, ceildiv
 from multidimensional import range as xyz_range
 
 log = logger.BossLogger().logger
@@ -159,11 +157,11 @@ def downsample_channel(args):
             experiment_id (int)
             channel_id (int)
             annotation_channel (bool)
-            data_type
+            data_type (str) 'uint8' | 'uint16' | 'uint64'
 
-            s3_bucket
-            s3_index
-            id_index
+            s3_bucket (URL)
+            s3_index (URL)
+            id_index (URL)
 
             x_start (int)
             y_start (int)
@@ -173,41 +171,62 @@ def downsample_channel(args):
             y_stop (int)
             z_stop (int)
 
-            resolution (int)
-            resolution_max (int)
-            res_lt_max (bool)
+            resolution (int) The resolution to downsample. Creates resolution + 1
+            resolution_max (int) The maximum resolution to generate
+            res_lt_max (bool) = args['resolution'] < (args['resolution_max'] - 1)
 
-            type (str) 'isotropic' | 'anisotropic' or boolean?
-                       'isotropic' | 'slice'???
+            type (str) 'isotropic' | 'anisotropic'
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
-                or
-            x/y/z resolution (int) calculate during downsample
-
         }
     """
 
-    log.debug("Downsampling resolution " + str(args['resolution']))
+    #log.debug("Downsampling resolution " + str(args['resolution']))
 
     resolution = args['resolution']
 
     dim = XYZ(*CUBOIDSIZE[resolution])
-    log.debug("Cube dimensions: {}".format(dim))
+    #log.debug("Cube dimensions: {}".format(dim))
 
-    frame_start = XYZ(args['x_start'], args['y_start'], args['z_start'])
-    frame_stop = XYZ(args['x_stop'], args['y_stop'], args['z_stop'])
+    def frame(key):
+        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
 
-    cubes_start = frame_start // dim
-    cubes_stop = ceildiv(frame_stop, dim)
-
-    steps = []
+    configs = []
     if args['type'] == 'isotropic':
-        steps.append((XYZ(2,2,2), False))
+        configs.append({
+            'name': 'isotropic',
+            'step': XYZ(2,2,2),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
     else:
-        steps.append((XYZ(2,2,1), False))
-        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
-            steps.append((XYZ(2,2,2), True))
+        configs.append({
+            'name': 'anisotropic',
+            'step': XYZ(2,2,1),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
 
-    for step, use_iso_flag in steps:
+        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+            configs.append({
+                'name': 'isotropic',
+                'step': XYZ(2,2,2),
+                'iso_flag': True,
+                'frame_start_key': 'iso_{}_start',
+                'frame_stop_key': 'iso_{}_stop',
+            })
+
+    for config in configs:
+        frame_start = frame(config['frame_start_key'])
+        frame_stop = frame(config['frame_stop_key'])
+        step = config['step']
+        use_iso_flag = config['iso_flag']
+
+        cubes_start = frame_start // dim
+        cubes_stop = ceildiv(frame_stop, dim)
+
+        log.debug('Downsampling {} resolution {}'.format(config['name'], resolution))
         log.debug("Frame corner: {}".format(frame_start))
         log.debug("Frame extent: {}".format(frame_stop))
         log.debug("Cubes corner: {}".format(cubes_start))
@@ -222,17 +241,30 @@ def downsample_channel(args):
                 traceback.print_exc()
                 raise
 
-    # Resize the coordinate frame extents as well
-    def resize(var, size):
-        args[var + '_start'] //= size
-        args[var + '_stop'] = ceildiv(args[var + '_stop'], size)
-    resize('x', 2)
-    resize('y', 2)
-    #resize('z', 1)
+        # Resize the coordinate frame extents as the data shrinks
+        def resize(var, size):
+            start = config['frame_start_key'].format(var)
+            stop = config['frame_stop_key'].format(var)
+            args[start] //= size
+            args[stop] = ceildiv(args[stop], size)
+        resize('x', step.x)
+        resize('y', step.y)
+        resize('z', step.z)
+
+    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
+    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
+        def copy(var):
+            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+        copy('x')
+        copy('y')
+        copy('z')
 
     # Advance the loop and recalculate the conditional
+    # Using max - 1 because resolution_max should not be a valid resolution
+    # and res < res_max will end with res = res_max - 1, which generates res_max resolution
     args['resolution'] = resolution + 1
-    args['res_lt_max'] = args['resolution'] < args['resolution_max']
+    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
     return args
 
 def downsample_volume(args, target, step, dim, use_iso_key):
@@ -298,18 +330,12 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     downsample_cube(volume, cube, annotation_chan)
 
-    #log.debug("New Cube Far Corner: {}".format(cube[cube.shape-1]))
-
-    # Compress the new cube before saving
-    cube = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
-
-    #log.debug("source {} -> destination {}".format(target, target / step))
-
     target = target / step # scale down the output
 
     # Save new cube in S3
     obj_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, t, target.morton, version=version)
-    s3.put(obj_key, cube)
+    compressed = blosc.compress(cube, typesize=(np.dtype(cube.dtype).itemsize))
+    s3.put(obj_key, compressed)
 
     # Update indicies
     # Same key scheme, but without the version
@@ -333,7 +359,7 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
         if len(ids) > 0:
             idx_key = S3IndexKey(obj_key, version)
-            s3_index.update_ids(idx_key, id_strs)
+            s3_index.update_ids(idx_key, ids)
 
             for id in ids:
                 idx_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, id)
@@ -364,25 +390,40 @@ def downsample_cube(volume, cube, is_annotation):
         return max(counts, key=lambda x: counts[x])
 
     if is_annotation:
-        # Foreach output 'pixel', select the source annotation that appears the most
-        # right now code assumes cur_dim == dim, if not need to pass a scale value
-        for xyz in xyz_range(cube.dim):
-            start = xyz * volume.cubes # scale up from output cube to input volume
-            stop = start + volume.cubes # iterate over volume.cubes worth of 'pixels'
+        use_c_version = False
+        if use_c_version:
+            # C Version of the below Python code
+            ndlib.addAnnotationData_ctype(volume, cube, volume.cubes, cube.dim)
+        else:
+            # Foreach output z slice, use Image to shrink the input slize(s)
+            for z in range(cube.dim.z):
+                merge_z_slice = False
+                if merge_z_slice:
+                    if volume.cubes.z == 2:
+                        # Take two Z slices and merge them together
+                        slice1 = volume[z * 2, :, :]
+                        slice2 = volume[z * 2 + 1, :, :]
+                        slice = ndlib.isotropicBuild_ctype(slice1, slice2)
+                    else:
+                        slice = volume[z, :, :]
+                else:
+                    slice = volume[z * volume.cubes.z, :, :]
 
-            annotations = [volume[idx] for idx in xyz_range(start, stop)]
-
-            cube[xyz] = most_occurrences(annotations)
+                cube[z, :, :] = zoom(slice, 0.5, np.uint64, order=0, mode='nearest')
     else:
         # Foreach output z slice, use Image to shrink the input slize(s)
         for z in range(cube.dim.z):
-            if volume.cubes.z == 2:
-                # Take two Z slices and merge them together
-                slice1 = volume[z * 2, :, :]
-                slice2 = volume[z * 2 + 1, :, :]
-                slice = isotropicBuild_ctype(slice1, slice2)
+            merge_z_slice = False
+            if merge_z_slice:
+                if volume.cubes.z == 2:
+                    # Take two Z slices and merge them together
+                    slice1 = volume[z * 2, :, :]
+                    slice2 = volume[z * 2 + 1, :, :]
+                    slice = ndlib.isotropicBuild_ctype(slice1, slice2)
+                else:
+                    slice = volume[z, :, :]
             else:
-                slice = volume[z, :, :]
+                slice = volume[z * volume.cubes.z, :, :]
 
             if volume.dtype == np.uint8:
                 image_type = 'L'
@@ -398,4 +439,4 @@ def downsample_cube(volume, cube, is_annotation):
                                      image_type,
                                      0, 1)
 
-            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y)))
+            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
