@@ -15,6 +15,9 @@
 #   "delete_bucket": "delete.hiderrt1.boss"
 #   "query-deletes-sfn-name": "QueryDeletesHiderrt1Boss"
 #   "delete-sfn-name": "DeleteCuboidHiderrt1Boss",
+#   "delete-exp-sfn-name": "DeleteExperimentHiderrt1Boss",
+#   "delete-coord-frame-sfn-name": "DeleteCoordframeHiderrt1Boss",
+#   "delete-coll-sfn-name": "DeleteCollectionHiderrt1Boss",
 #   "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
 # }
 #
@@ -90,6 +93,9 @@ event["delete-coll-sfn-arn"] = None
 #     "delete_bucket": "delete.hiderrt1.boss",
 #     "query-deletes-sfn-name": "QueryDeletesHiderrt1Boss",
 #     "delete-sfn-name": "DeleteCuboidHiderrt1Boss",
+#     "delete-exp-sfn-name": "DeleteExperimentHiderrt1Boss",
+#     "delete-coord-frame-sfn-name": "DeleteCoordframeHiderrt1Boss",
+#     "delete-coll-sfn-name": "DeleteCollectionHiderrt1Boss",
 #     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
 # }
 #===========================================
