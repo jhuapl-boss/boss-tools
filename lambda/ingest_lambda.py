@@ -89,9 +89,36 @@ while run_cnt < 2:
     tile_key_list = ["&".join(x) for x in tile_key_list]
     print("Sorted Tile Keys: {}".format(tile_key_list))
 
+    # Augment Resource JSON data so it will instantiate properly that was pruned due to S3 metadata size limits
+    resource_dict = msg_data['parameters']['resource']
+    _, exp_name, ch_name = resource_dict["boss_key"].split("&")
+
+    resource_dict["channel"]["name"] = ch_name
+    resource_dict["channel"]["description"] = ""
+    resource_dict["channel"]["sources"] = []
+    resource_dict["channel"]["related"] = []
+    resource_dict["channel"]["default_time_sample"] = 0
+    resource_dict["channel"]["downsample_status"] = "NOT_DOWNSAMPLED"
+
+    resource_dict["experiment"]["name"] = exp_name
+    resource_dict["experiment"]["description"] = ""
+    resource_dict["experiment"]["num_time_samples"] = 1
+    resource_dict["experiment"]["time_step"] = None
+    resource_dict["experiment"]["time_step_unit"] = None
+
+    resource_dict["coord_frame"]["name"] = "cf"
+    resource_dict["coord_frame"]["name"] = ""
+    resource_dict["coord_frame"]["x_start"] = 0
+    resource_dict["coord_frame"]["x_stop"] = 100000
+    resource_dict["coord_frame"]["y_start"] = 0
+    resource_dict["coord_frame"]["y_stop"] = 100000
+    resource_dict["coord_frame"]["z_start"] = 0
+    resource_dict["coord_frame"]["z_stop"] = 100000
+    resource_dict["coord_frame"]["voxel_unit"] = "nanometers"
+
     # Setup the resource
     resource = BossResourceBasic()
-    resource.from_dict(msg_data['parameters']['resource'])
+    resource.from_dict(resource_dict)
     dtype = resource.get_numpy_data_type()
 
     # read all tiles from bucket into a slab
@@ -109,15 +136,12 @@ while run_cnt < 2:
             sys.exit("Aborting due to missing tile in bucket")
 
         tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
-        #tile_img = np.swapaxes(tile_img, 0, 1)
         data.append(tile_img)
         num_z_slices += 1
-        # TODO Make sure data type is correct
 
     # Make 3D array of image data. It should be in XYZ at this point
     chunk_data = np.array(data)
     del data
-    # TODO: Make sure data is not transposed
     tile_dims = chunk_data.shape
 
     # Break into Cube instances
@@ -191,7 +215,6 @@ while run_cnt < 2:
                         TopicArn=topic_arn,
                         Subject='Object services misuse',
                         Message=msg)
-
 
     # Delete message since it was processed successfully
     ingest_queue.deleteMessage(msg_id, msg_rx_handle)
