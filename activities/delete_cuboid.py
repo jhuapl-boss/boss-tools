@@ -29,6 +29,9 @@ data = {
     "delete_bucket": "delete.hiderrt1.boss",
     "find-deletes-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:FindDeletesHiderrt1Boss",
     "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
+    "delete-exp-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteExperimentHiderrt1Boss",
+    "delete-coord-frame-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCoordframeHiderrt1Boss",
+    "delete-coll-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCollectionHiderrt1Boss",
     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
 }
 
@@ -143,11 +146,14 @@ def query_for_deletes(data, session=None):
     LOG.debug("created sfn_client")
 
     data = query_for_deletes_channels(data, session, sfn_client)
-    if data.pop(DATA_FOUND, None):
+    if not data.pop(DATA_FOUND, None):
+        print("no data found after channels")
         data = query_for_deletes_experiments(data, session, sfn_client)
-        if data.pop(DATA_FOUND, None):
+        if not data.pop(DATA_FOUND, None):
+            print("no data found after experiments")
             data = query_for_deletes_collections(data, session, sfn_client)
-            if data.pop(DATA_FOUND, None):
+            if not data.pop(DATA_FOUND, None):
+                print("no data found after collections")
                 data = query_for_deletes_coord_frames(data, session, sfn_client)
 
     LOG.debug("query_for_deletes() exiting.")
