@@ -351,7 +351,10 @@ def downsample_volume(args, target, step, dim, use_iso_key):
         s3_index.put(idx_key)
 
     # Update ID Index if the channel is an annotation channel
-    if annotation_chan:
+    # DMK: Disabling annotation index computation. Will possibly remove completely in the future
+    # Annotation index is now only stored at the base_resolution and Object services will only return results when
+    # the resolution in the cutout args is equal to the base_resolution until the service is updated.
+    if annotation_chan and False:
         ids = ndlib.unique(cube)
 
         # Convert IDs to strings and drop any IDs that equal zero
