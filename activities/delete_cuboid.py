@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2017 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -100,7 +100,7 @@ def get_db_connection(data):
                            cursorclass=pymysql.cursors.DictCursor)
 
 
-def send_sns_alert(topic_arn, message, session=None):
+def send_sns_alert(topic_arn, message, session=None, subject=None):
     """
     Send error message to given SNS topic.
 
@@ -117,7 +117,13 @@ def send_sns_alert(topic_arn, message, session=None):
     if session is None:
         session = bossutils.aws.get_session()
     client = session.client('sns')
-    resp = client.publish(TopicArn=topic_arn, Message=message)
+    args = {
+        "TopicArn": topic_arn,
+        "Message":  message
+    }
+    if subject is not None:
+        args["Subject"] = subject
+    resp = client.publish(**args)
     if resp["ResponseMetadata"]["HTTPStatusCode"] != 200:
         LOG.error(
             "Unable to send following error to SNS Topic. Received the following HTTPStatusCode {}: {}".format(
@@ -146,15 +152,19 @@ def query_for_deletes(data, session=None):
     LOG.debug("created sfn_client")
 
     data = query_for_deletes_channels(data, session, sfn_client)
+    LOG.debug("finished query_for_deletes_channels")
     if not data.pop(DATA_FOUND, None):
-        print("no data found after channels")
+        LOG.debug("no data found after channels")
         data = query_for_deletes_experiments(data, session, sfn_client)
+        LOG.debug("finished query_for_deletes_experiments")
         if not data.pop(DATA_FOUND, None):
-            print("no data found after experiments")
+            LOG.debug("no data found after experiments")
             data = query_for_deletes_collections(data, session, sfn_client)
+            LOG.debug("finished query_for_deletes_collections")
             if not data.pop(DATA_FOUND, None):
-                print("no data found after collections")
+                LOG.debug("no data found after collections")
                 data = query_for_deletes_coord_frames(data, session, sfn_client)
+                LOG.debug("finished query_for_deletes_coord_frames")
 
     LOG.debug("query_for_deletes() exiting.")
 
@@ -264,8 +274,9 @@ def query_for_deletes_collections(data, session, sfn_client):
                         LOG.warning('coll_id {} did not have an associated lookup_key in the lookup'
                                     .format(coll_id))
                         send_sns_alert(
-                            data['topic-arn'], 
-                            'Delete Error: coll id {}, has no lookup key in the endpoint lookup table.'.format(coll_id))
+                            data['topic-arn'],
+                            'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(coll_id),
+                            subject="AWS Notification: BOSS delete error {} no lookup key for coll id {}".format(data['db'], coll_id))
 
                         sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
                         coll_cursor.execute(sql, (DELETED_STATUS_ERROR, str(coll_id)))
@@ -347,8 +358,9 @@ def query_for_deletes_experiments(data, session, sfn_client):
                         LOG.warning('exp_id {} did not have an associated lookup_key in the lookup'
                                     .format(exp_id))
                         send_sns_alert(
-                            data['topic-arn'], 
-                            'Delete Error: exp id {}, has no lookup key in the endpoint lookup table.'.format(exp_id))
+                            data['topic-arn'],
+                            'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(exp_id),
+                            subject="AWS Notification: BOSS delete error {} no lookup key for exp id {}".format(data['db'], exp_id))
 
                         sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
                         exp_cursor.execute(sql, (DELETED_STATUS_ERROR, str(exp_id)))
@@ -441,7 +453,8 @@ def query_for_deletes_channels(data, session, sfn_client):
                                         .format(channel_id))
                             send_sns_alert(
                                     data['topic-arn'],
-                                    'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(channel_id))
+                                    'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(channel_id),
+                                    subject="AWS Notification: BOSS delete error {} no lookup key for ch id {}".format(data['db'], channel_id))
                             sql = "UPDATE channel SET deleted_status=%s WHERE `id`=%s"
                             cursor.execute(sql, (DELETED_STATUS_ERROR, str(channel_id),))
                             connection.commit()
@@ -1182,20 +1195,24 @@ def main():
         # "channel_id": "1",
         # "lookup_key_id": "1",
         # "db": "localhost",
-        "db": "endpoint-db.hiderrt1.boss",
-        "meta-db": "bossmeta.hiderrt1.boss",
-        "s3-index-table": "s3index.hiderrt1.boss",
-        "id-index-table": "idIndex.hiderrt1.boss",
-        "id-count-table": "idCount.hiderrt1.boss",
-        "cuboid_bucket": "cuboids.hiderrt1.boss",
-        "delete_bucket": "delete.hiderrt1.boss",
-        "delete-sfn-arn": "arn:aws:states:us-east-1:256215146792:stateMachine:DeleteCuboidHiderrt1Boss",
-        "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList",
+        "db": "endpoint-db.integration.boss",
+        "meta-db": "bossmeta.integration.boss",
+        "s3-index-table": "s3index.integration.boss",
+        "id-index-table": "idIndex.integration.boss",
+        "id-count-table": "idCount.integration.boss",
+        "cuboid_bucket": "cuboids.integration.boss",
+        "delete_bucket": "delete.integration.boss",
+        "find-deletes-sfn-arn": "arn:aws:states:us-east-1:451493790433:stateMachine:FindDeletesIntegrationBoss",
+        "delete-sfn-arn": "arn:aws:states:us-east-1:451493790433:stateMachine:DeleteCuboidIntegrationBoss",
+        "delete-exp-sfn-arn": "arn:aws:states:us-east-1:451493790433:stateMachine:DeleteExperimentIntegrationBoss",
+        "delete-coord-frame-sfn-arn": "arn:aws:states:us-east-1:451493790433:stateMachine:DeleteCoordframeIntegrationBoss",
+        "delete-coll-sfn-arn": "arn:aws:states:us-east-1:451493790433:stateMachine:DeleteCollectionIntegrationBoss",
+        "topic-arn": "arn:aws:sns:us-east-1:451493790433:ProductionMicronsMailingList",
         "error":  "test error for SFN",
     }
     session = boto3.session.Session(region_name="us-east-1")
 
-    #dict = query_for_deletes(input_from_main, session=session)
+    dict = query_for_deletes(input_from_main, session=session)
     # dict = delete_metadata(input_from_main, session=session)
     # dict = delete_id_count(dict, session=session)
     # dict = delete_id_index(dict, session=session)
