@@ -206,8 +206,9 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
 
                 if cf_row['deleted_status'] != DELETED_STATUS_FINISHED:
                     sql = "UPDATE `coordinate_frame` SET `deleted_status`=%s WHERE `id`=%s"
-                    cf_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
-                    connection.commit()
+                    with connection.cursor() as del_cursor:
+                        del_cursor.execute(sql, (DELETED_STATUS_START, str(cf_id)))
+                        connection.commit()
 
                 LOG.debug("about to start coord frame delete step fcn")
                 response = sfn_client.start_execution(
@@ -256,7 +257,7 @@ def query_for_deletes_collections(data, session, sfn_client):
                 coll_id = coll_row['id']
                 with connection.cursor() as lookup_cursor:
                     # get lookup key given collection id and collection name
-                    sql = "SELECT `id`, `collection_name`, `lookup_key` FROM `lookup` where `collection_name`=%s"
+                    sql = "SELECT `id`, `collection_name`, `lookup_key` FROM `lookup` where `collection_name`=%s AND `experiment_name` IS null AND `channel_name` IS null"
                     lookup_cursor.execute(sql, (coll_row['name'],))
                     lookup_key_id = None
                     lookup_key = None
@@ -279,7 +280,7 @@ def query_for_deletes_collections(data, session, sfn_client):
                             subject="AWS Notification: BOSS delete error {} no lookup key for coll id {}".format(data['db'], coll_id))
 
                         sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
-                        coll_cursor.execute(sql, (DELETED_STATUS_ERROR, str(coll_id)))
+                        lookup_cursor.execute(sql, (DELETED_STATUS_ERROR, str(coll_id)))
                         connection.commit()
 
                     else:
@@ -289,7 +290,7 @@ def query_for_deletes_collections(data, session, sfn_client):
 
                         if coll_row['deleted_status'] != DELETED_STATUS_FINISHED:
                             sql = "UPDATE collection SET deleted_status=%s WHERE `id`=%s"
-                            coll_cursor.execute(sql, (DELETED_STATUS_START, str(coll_id)))
+                            lookup_cursor.execute(sql, (DELETED_STATUS_START, str(coll_id)))
                             connection.commit()
 
                         LOG.debug("about to start collection delete step fcn")
@@ -339,7 +340,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
                 exp_id = exp_row['id']
                 with connection.cursor() as lookup_cursor:
                     # get lookup key given channel id and channel name
-                    sql = "SELECT `id`, `experiment_name`, `lookup_key` FROM `lookup` where `experiment_name`=%s"
+                    sql = "SELECT `id`, `experiment_name`, `lookup_key` FROM `lookup` where `experiment_name`=%s AND `channel_name` IS null"
                     lookup_cursor.execute(sql, (exp_row['name'],))
                     lookup_key_id = None
                     lookup_key = None
@@ -359,11 +360,11 @@ def query_for_deletes_experiments(data, session, sfn_client):
                                     .format(exp_id))
                         send_sns_alert(
                             data['topic-arn'],
-                            'Delete Error: channel id {}, has no lookup key in the endpoint lookup table.'.format(exp_id),
+                            'Delete Error: experiment id {}, has no lookup key in the endpoint lookup table.'.format(exp_id),
                             subject="AWS Notification: BOSS delete error {} no lookup key for exp id {}".format(data['db'], exp_id))
 
                         sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
-                        exp_cursor.execute(sql, (DELETED_STATUS_ERROR, str(exp_id)))
+                        lookup_cursor.execute(sql, (DELETED_STATUS_ERROR, str(exp_id)))
                         connection.commit()
 
                     else:
@@ -373,7 +374,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
 
                         if exp_row['deleted_status'] != DELETED_STATUS_FINISHED:
                             sql = "UPDATE experiment SET deleted_status=%s WHERE `id`=%s"
-                            exp_cursor.execute(sql, (DELETED_STATUS_START, str(exp_id)))
+                            lookup_cursor.execute(sql, (DELETED_STATUS_START, str(exp_id)))
                             connection.commit()
 
                         LOG.debug("about to start experiment delete step fcn")
@@ -505,7 +506,7 @@ def delete_metadata(data, session=None):
 
     if data["lookup_key"] is None:
         LOG.debug("delete_metadata() exiting - lookup_key is None.")
-        return
+        return data
 
     if session is None:
         session = bossutils.aws.get_session()
