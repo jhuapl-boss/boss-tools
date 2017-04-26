@@ -12,64 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import time
-from datetime import datetime
+from functools import reduce
 
 from bossutils import aws
 from bossutils import logger
 
+from heaviside.activities import fanout
+
 log = logger.BossLogger().logger
-
-class UnknownSubprocess(Exception):
-    pass
-
-class FailedToSendMessages(Exception):
-    pass
-
-class SFN(object):
-    class Status(object):
-        __slots__ = ('resp')
-
-        def __init__(self, resp):
-            self.resp = resp
-
-        @property
-        def failed(self):
-            return self.resp['status'] == 'FAILED'
-
-        @property
-        def success(self):
-            return self.resp['status'] == 'SUCCEEDED'
-
-        @property
-        def output(self):
-            return json.loads(self.resp['output']) if 'output' in self.resp else None
-
-    def __init__(self, name):
-        session = aws.get_session()
-        self.client = session.client('stepfunctions')
-        self.arn = None
-
-        resp = self.client.list_state_machines()
-        for machine in resp['stateMachines']:
-            arn = machine['stateMachineArn']
-            if arn.endswith(name):
-                self.arn = arn
-                break
-
-        if self.arn is None:
-            raise UnknownSubprocess("Could not find stepfunction {}".format(name))
-
-    def launch(self, args):
-        resp = self.client.start_execution(stateMachineArn = self.arn,
-                                           name = datetime.now().strftime("%Y%m%d%H%M%s%f"),
-                                           input = json.dumps(args))
-        return resp['executionArn']
-
-    def status(self, arn):
-        resp = self.client.describe_execution(executionArn = arn)
-        return SFN.Status(resp)
 
 POLL_DELAY = 5
 STATUS_DELAY = 1
@@ -119,45 +70,16 @@ def ingest_populate(args):
 
     clear_queue(args['upload_queue'])
 
-    sfn = SFN(args['upload_sfn'])
+    results = fanout(aws.get_session(),
+                     args['upload_sfn'],
+                     split_args(args),
+                     max_concurrent = MAX_NUM_PROCESSES,
+                     rampup_delay = RAMPUP_DELAY,
+                     rampup_backoff = RAMPUP_BACKOFF,
+                     poll_delay = POLL_DELAY,
+                     status_delay = STATUS_DELAY)
 
-    sub_args = split_args(args)
-    arns = []
-    delay = RAMPUP_DELAY
-    started_all = False
-    total_sent = 0
-    while True:
-        try:
-            while not started_all and len(arns) < MAX_NUM_PROCESSES:
-                arns.append(sfn.launch(next(sub_args)))
-                time.sleep(delay)
-                if delay > 0:
-                    delay = int(delay * RAMPUP_BACKOFF)
-        except StopIteration:
-            started_all = True
-            log.debug("Finished launching sub-processes")
-
-        time.sleep(POLL_DELAY)
-
-        arns_ = []
-        for arn in arns:
-            status = sfn.status(arn)
-            if status.failed:
-                log.debug("Sub-process failed, restarting")
-                raise FailedToSendMessages()
-            elif status.success:
-                total_sent += status.output
-            else:
-                arns_.append(arn)
-            time.sleep(STATUS_DELAY)
-
-        log.debug("Sub-processes finished: {}".format(len(arns) - len(arns_)))
-        log.debug("Sub-processes running: {}".format(len(arns_)))
-        arns = arns_
-
-        if started_all and len(arns) == 0:
-            log.debug("Finished")
-            break
+    total_sent = reduce(lambda x, y: x+y, results, 0)
 
     return {
         'arn': args['upload_queue'],
