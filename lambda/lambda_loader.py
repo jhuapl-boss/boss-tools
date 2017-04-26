@@ -14,6 +14,7 @@ lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
                      "ingest": LAMBDA_PATH_PREFIX + "ingest_lambda.py",
                      "upload_enqueue": LAMBDA_PATH_PREFIX + "upload_enqueue_lambda.py",
                      "delete_lambda": LAMBDA_PATH_PREFIX + "delete_lambda.py",
+                     "downsample_volume": LAMBDA_PATH_PREFIX + "downsample_volume.py",
                      "simple_lambda": LAMBDA_PATH_PREFIX + "simple_lambda.py",
                      "test": LAMBDA_PATH_PREFIX + "spdb_lambda.py"}
 
