@@ -283,9 +283,7 @@ def downsample_cube(volume, cube, is_annotation):
 
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
-if __name__ == '__main__':
-    args = json.loads(sys.argv[1])
-
+def handler(args, context):
     def convert(key):
         args[key] = XYZ(*args[key])
 
