@@ -37,7 +37,7 @@ proj_info.job_id = event["ingest_job"]
 
 # Handle up to 2 messages before quitting (helps deal with making sure all messages get processed)
 run_cnt = 0
-while run_cnt < 2:
+while run_cnt < 1:   # TODO SH Adjusted to 1 as lambda is crashing with full memory
     # Get message from SQS flush queue, try for ~2 seconds
     rx_cnt = 0
     msg_data = None
