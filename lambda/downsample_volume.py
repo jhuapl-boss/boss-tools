@@ -293,3 +293,7 @@ def handler(args, context):
 
     downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_key'])
 
+if __name__ == '__main__':
+    args = json.loads(sys.argv[1])
+    handler(args, None)
+
