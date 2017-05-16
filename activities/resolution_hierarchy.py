@@ -32,6 +32,8 @@ def downsample_channel(args):
     """
     Args:
         args {
+            downsample_volume_sfn (ARN)
+
             collection_id (int)
             experiment_id (int)
             channel_id (int)

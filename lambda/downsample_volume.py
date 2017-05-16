@@ -6,7 +6,6 @@ import boto3
 import hashlib
 import numpy as np
 from PIL import Image
-from scipy.ndimage.interpolation import zoom
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
 from multidimensional import XYZ, Buffer
@@ -258,7 +257,7 @@ def downsample_cube(volume, cube, is_annotation):
     #log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
 
     if is_annotation:
-        image_type = None
+        ndlib.addAnnotationData_ctype(volume, cube, volume.cubes, volume.dim)
     else:
         if volume.dtype == np.uint8:
             image_type = 'L'
@@ -267,13 +266,8 @@ def downsample_cube(volume, cube, is_annotation):
         else:
             raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
 
-    for z in range(cube.dim.z):
-        # DP NOTE: For isotropic downsample this skips Z slices, instead of trying to merge them
-        slice = volume[z * volume.cubes.z, :, :]
-
-        if is_annotation:
-            cube[z, :, :] = zoom(slice, 0.5, np.uint64, order=0, mode='nearest')
-        else:
+        for z in range(cube.dim.z):
+            # DP NOTE: For isotropic downsample this skips Z slices, instead of trying to merge them
             image = Image.frombuffer(image_type,
                                      (volume.shape.x, volume.shape.y),
                                      slice.flatten(),
