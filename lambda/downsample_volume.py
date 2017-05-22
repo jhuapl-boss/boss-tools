@@ -7,12 +7,18 @@ import hashlib
 import numpy as np
 from PIL import Image
 from spdb.c_lib.ndtype import CUBOIDSIZE
+from spdb.c_lib import ndlib
 
 from multidimensional import XYZ, Buffer
 from multidimensional import range as xyz_range
 
-log = logging.getLogger()
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+
+log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
+log.addHandler(handler)
+
 
 np_types = {
     'uint64': np.uint64,
@@ -268,6 +274,7 @@ def downsample_cube(volume, cube, is_annotation):
 
         for z in range(cube.dim.z):
             # DP NOTE: For isotropic downsample this skips Z slices, instead of trying to merge them
+            slice = volume[z * volume.cubes.z, :, :]
             image = Image.frombuffer(image_type,
                                      (volume.shape.x, volume.shape.y),
                                      slice.flatten(),
@@ -285,9 +292,10 @@ def handler(args, context):
     convert('step')
     convert('dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_key'])
+    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
 
 if __name__ == '__main__':
+    log.debug("sys.argv[1]: " + sys.argv[1])
     args = json.loads(sys.argv[1])
     handler(args, None)
 
