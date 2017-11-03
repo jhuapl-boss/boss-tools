@@ -88,7 +88,8 @@ while run_cnt < 2:
         resource.from_dict(flush_msg_data["resource"])
     else:
         # Nothing to flush. Exit.
-        sys.exit("No flush message available")
+        print("No flush message available")
+        sys.exit(0)
 
     # Check if cuboid is in S3
     object_keys = sp.objectio.write_cuboid_to_object_keys([write_cuboid_key])
@@ -111,7 +112,7 @@ while run_cnt < 2:
         # Get cuboid to flush from write buffer
         write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
         if write_cuboid_bytes is None:
-            # Didn't get any data back.  Assume another lambda already 
+            # Didn't get any data back.  Assume another lambda already
             # served this request.  Remove message and continue.
             print("No data returned from write buffer, ignoring and deleting message.")
             sqs_client.delete_message(

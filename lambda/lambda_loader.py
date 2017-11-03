@@ -52,4 +52,7 @@ def handler(event, context):
         sys.argv[1] = json_event
     else:
         sys.argv.append(json_event)
-    runpy.run_path(lambda_path)
+    try:
+        runpy.run_path(lambda_path)
+    except SystemExit as ex:
+        print('Script called sys.exit(): {}'.format(ex))
