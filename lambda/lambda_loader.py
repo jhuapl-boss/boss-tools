@@ -1,11 +1,14 @@
 import json
 import os
 import subprocess
+import sys
 import logging
-LAMBDA_PATH_PREFIX = "local/lib/python3.4/site-packages/lambda/"
+import runpy
+
+LAMBDA_PATH_PREFIX = "lambda/"
 
 log = logging.getLogger()
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.ERROR)
 
 # List of supported Lambda functions
 lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
@@ -21,7 +24,6 @@ lambda_dictionary = {"s3_flush": LAMBDA_PATH_PREFIX + "s3_flush_lambda.py",
 def handler(event, context):
     # Check for a "lambda-name" setting
     log.debug("starting lambda_loader -> handler()")
-    #log.debug(event)
 
     if "lambda-name" not in event:
         # Check if this is an S3 event which can be assumed to be ingest uploading
@@ -44,17 +46,13 @@ def handler(event, context):
     log.debug("got lambda path")
     json_event = json.dumps(event)
     print("event: " + json_event)
-    args = ("bin/python3.4", lambda_path, json_event)
 
-    # AWS defines a PYTHONPATH that breaks our Python 3.4 code.  We can't
-    # import concurrent.futures, specifically.
-    env = os.environ
-    if "PYTHONPATH" in env:
-        del env['PYTHONPATH']
-
-    popen = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-    popen.wait()
-    output = popen.stdout.read()
-    err_str = popen.stderr.read()
-    print("output: " + output)
-    print("err: " + err_str)
+    # Pass to lambda function we're about to load.
+    if len(sys.argv) > 1:
+        sys.argv[1] = json_event
+    else:
+        sys.argv.append(json_event)
+    try:
+        runpy.run_path(lambda_path)
+    except SystemExit as ex:
+        print('Script called sys.exit(): {}'.format(ex))
