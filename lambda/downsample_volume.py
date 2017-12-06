@@ -263,7 +263,7 @@ def downsample_cube(volume, cube, is_annotation):
     #log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
 
     if is_annotation:
-        ndlib.addAnnotationData_ctype(volume, cube, volume.cubes, volume.dim)
+        ndlib.addAnnotationData_ctype(volume, cube, volume.cubes.zyx, volume.dim.zyx)
     else:
         if volume.dtype == np.uint8:
             image_type = 'L'
