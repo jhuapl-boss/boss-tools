@@ -15,8 +15,8 @@
 from bossutils import aws, logger
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
-from multidimensional import XYZ, ceildiv
-from multidimensional import range as xyz_range
+from bossutils.multidimensional import XYZ, ceildiv
+from bossutils.multidimensional import range as xyz_range
 
 from heaviside.activities import fanout
 

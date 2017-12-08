@@ -9,8 +9,8 @@ from PIL import Image
 from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib import ndlib
 
-from multidimensional import XYZ, Buffer
-from multidimensional import range as xyz_range
+from bossutils.multidimensional import XYZ, Buffer
+from bossutils.multidimensional import range as xyz_range
 
 handler = logging.StreamHandler()
 handler.setLevel(logging.DEBUG)
