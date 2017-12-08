@@ -294,8 +294,7 @@ def handler(args, context):
 
     downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
 
-if __name__ == '__main__':
-    log.debug("sys.argv[1]: " + sys.argv[1])
-    args = json.loads(sys.argv[1])
-    handler(args, None)
+log.debug("sys.argv[1]: " + sys.argv[1])
+args = json.loads(sys.argv[1])
+handler(args, None)
 
