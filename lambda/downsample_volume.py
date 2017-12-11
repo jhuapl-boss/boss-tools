@@ -26,10 +26,15 @@ np_types = {
     'uint8': np.uint8,
 }
 
-# BOSS Key creation functions / classes
+#### Helper functions and classes ####
+
 def HashedKey(*args, version = None):
-    """
-    Args:
+    """ BOSS Key creation function
+
+    Takes a list of different key string elements, joins them with the '&' char,
+    and prepends the MD5 hash of the key to the key.
+
+    Args (Common usage):
         collection_id
         experiment_id
         channel_id
@@ -38,7 +43,7 @@ def HashedKey(*args, version = None):
         morton (str): Morton ID of cube
 
     Keyword Args:
-        version : Optional Object version
+        version : Optional Object version, not part of the hashed value
     """
     key = '&'.join([str(arg) for arg in args if arg is not None])
     digest = hashlib.md5(key.encode()).hexdigest()
@@ -48,6 +53,10 @@ def HashedKey(*args, version = None):
     return key
 
 class S3Bucket(object):
+    """Wrapper for calls to S3
+
+    Wraps boto3 calls to upload and download data from S3
+    """
     def __init__(self, bucket):
         self.bucket = bucket
         self.s3 = boto3.client('s3')
@@ -76,6 +85,14 @@ class S3Bucket(object):
         self._check_error(resp, "writing")
 
 class S3IndexKey(dict):
+    """Key object for DynamoDB S3 Index table
+
+    Args:
+        obj_key: HashedKey of the stored data
+        version:
+        job_hash:
+        job_range:
+    """
     def __init__(self, obj_key, version=0, job_hash=None, job_range=None):
         super().__init__()
         self['object-key'] = {'S': obj_key}
@@ -88,12 +105,24 @@ class S3IndexKey(dict):
             self['ingest-job-range'] = {'S': job_range}
 
 class IdIndexKey(dict):
+    """Key object for DynamoDB ID Index table
+
+    Args:
+        chan_key: Key for the resource channel
+        version:
+    """
     def __init__(self, chan_key, version=0):
         super().__init__()
         self['channel-id-key'] = {'S': chan_key}
         self['version'] = {'N': str(version)}
 
 class DynamoDBTable(object):
+    """Wrapper for calls to DynamoDB
+
+    Wraps boto3 calls to create and update DynamoDB entries.
+
+    Supports updates for both S3 and ID Index tables
+    """
     def __init__(self, table):
         self.table = table
         self.ddb = boto3.client('dynamodb')
@@ -139,9 +168,15 @@ class DynamoDBTable(object):
 
         return 'Item' in resp
 
-# ACTUAL Lambda method
+
+#### Main lambda logic ####
+
 def downsample_volume(args, target, step, dim, use_iso_key):
-    """
+    """Downsample a volume into a single cube
+
+    Download `step` cubes from S3, downsample them into a single cube, upload
+    to S3 and update the S3 index for the new cube.
+
     Args:
         args {
             collection_id (int)
@@ -195,7 +230,7 @@ def downsample_volume(args, target, step, dim, use_iso_key):
     volume.dim = dim
     volume.cubes = step
 
-    volume_empty = True
+    volume_empty = True # abort if the volume doesn't exist in S3
     for offset in xyz_range(step):
         cube = target + offset
         try:
@@ -213,6 +248,10 @@ def downsample_volume(args, target, step, dim, use_iso_key):
         except Exception as e: # TODO: Create custom exception for S3 download
             #log.exception("Problem downloading cubes {}".format(cube))
             #log.debug("No cube at {}".format(cube))
+
+            # Eat the error, we don't care if the cube doesn't exist
+            # If the cube doesn't exist blank data will be used for downsampling
+            # If all the cubes don't exist, then the downsample is finished
             pass
 
     if volume_empty:
@@ -248,7 +287,8 @@ def downsample_volume(args, target, step, dim, use_iso_key):
         s3_index.put(idx_key)
 
 def downsample_cube(volume, cube, is_annotation):
-    """
+    """Downsample the given Buffer into the target Buffer
+
     Note: Both volume and cube both have the following attributes
         dim (XYZ) : The dimensions of the cubes contained in the Buffer
         cubes (XYZ) : The number of cubes of size dim contained in the Buffer
@@ -263,6 +303,7 @@ def downsample_cube(volume, cube, is_annotation):
     #log.debug("downsample_cube({}, {}, {})".format(volume.shape, cube.shape, is_annotation))
 
     if is_annotation:
+        # Use a C implementation to downsample each value
         ndlib.addAnnotationData_ctype(volume, cube, volume.cubes.zyx, volume.dim.zyx)
     else:
         if volume.dtype == np.uint8:
@@ -285,6 +326,7 @@ def downsample_cube(volume, cube, is_annotation):
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
+    """Convert JSON arguments into the expected internal types"""
     def convert(key):
         args[key] = XYZ(*args[key])
 
@@ -294,6 +336,7 @@ def handler(args, context):
 
     downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
 
+## Entry point for multiLambda ##
 log.debug("sys.argv[1]: " + sys.argv[1])
 args = json.loads(sys.argv[1])
 handler(args, None)

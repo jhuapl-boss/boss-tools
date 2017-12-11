@@ -30,6 +30,13 @@ RAMPUP_BACKOFF = 0.8
 
 def downsample_channel(args):
     """
+    Slice the given channel into chunks of 2x2x2 or 2x2x1 cubes that are then
+    sent to the downsample_volume lambda for downsampling into a 1x1x1 cube at
+    resolution + 1.
+
+    Makes use of the bossutils.multidimensional library for simplified vector
+    math.
+
     Args:
         args {
             downsample_volume_sfn (ARN)
@@ -71,6 +78,8 @@ def downsample_channel(args):
     def frame(key):
         return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
 
+    # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
+    # downsampling. If both are happening, fanout one and then the other in series.
     configs = []
     if args['type'] == 'isotropic':
         configs.append({
@@ -102,8 +111,9 @@ def downsample_channel(args):
         frame_start = frame(config['frame_start_key'])
         frame_stop = frame(config['frame_stop_key'])
         step = config['step']
-        use_iso_flag = config['iso_flag']
+        use_iso_flag = config['iso_flag'] # If the resulting cube should be marked with the ISO flag
 
+        # Round to the furthest full cube from the center of the data
         cubes_start = frame_start // dim
         cubes_stop = ceildiv(frame_stop, dim)
 
@@ -114,6 +124,7 @@ def downsample_channel(args):
         log.debug("Cubes extent: {}".format(cubes_stop))
         log.debug("Downsample step: {}".format(step))
 
+        # Call the downsample_volume lambda to process the data
         fanout(aws.get_session(),
                args['downsample_volume_sfn'],
                make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag),
@@ -124,6 +135,7 @@ def downsample_channel(args):
                status_delay = STATUS_DELAY)
 
         # Resize the coordinate frame extents as the data shrinks
+        # DP NOTE: doesn't currently work correctly with non-zero frame starts
         def resize(var, size):
             start = config['frame_start_key'].format(var)
             stop = config['frame_stop_key'].format(var)
@@ -152,7 +164,7 @@ def downsample_channel(args):
 def make_args(args, start, stop, step, dim, use_iso_flag):
     for target in xyz_range(start, stop, step = step):
         yield {
-            'lambda-name' : 'downsample_volume',
+            'lambda-name' : 'downsample_volume', # name of the function in multiLambda to call
             'args': args,
             'target': target, # XYZ type is automatically handled by JSON.dumps
             'step': step,     # Since it is a subclass of tuple
