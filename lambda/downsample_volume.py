@@ -286,6 +286,21 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
         s3_index.put(idx_key)
 
+    if annotation_chan and False:
+        ids = ndlib.unique(cube)
+
+        # Convert IDs to strings and drop any IDs that equal zero
+        ids = [str(id) for id in ids if id != 0]
+
+        if len(ids) > 0:
+            idx_key = S3IndexKey(obj_key, version)
+            s3_index.update_ids(idx_key, ids)
+
+            for id in ids:
+                idx_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, id)
+                chan_key = IdIndexKey(idx_key, version)
+                id_index.update_id(chan_key, obj_key)
+
 def downsample_cube(volume, cube, is_annotation):
     """Downsample the given Buffer into the target Buffer
 
