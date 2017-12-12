@@ -105,7 +105,7 @@ if __name__ == '__main__':
         # This allows aws roles to be used to create sessions.
         session = boto3.session.Session()
     else:
-        # moved so the script can be independent is not passing credentials
+        # moved so the script can be independent if not passing credentials
         from lambdautils import create_session
         session = create_session(args.aws_credentials)
     upload_to_s3(session, args.zip_file, args.bucket)
