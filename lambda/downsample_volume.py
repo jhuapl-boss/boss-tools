@@ -171,7 +171,7 @@ class DynamoDBTable(object):
 
 #### Main lambda logic ####
 
-def downsample_volume(args, target, step, dim, use_iso_key):
+def downsample_volume(args, target, step, dim, use_iso_key, index_annotations):
     """Downsample a volume into a single cube
 
     Download `step` cubes from S3, downsample them into a single cube, upload
@@ -286,7 +286,7 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
         s3_index.put(idx_key)
 
-    if annotation_chan and False:
+    if annotation_chan and index_annotations:
         ids = ndlib.unique(cube)
 
         # Convert IDs to strings and drop any IDs that equal zero
@@ -349,7 +349,7 @@ def handler(args, context):
     convert('step')
     convert('dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
+    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'], args['index_annotations'])
 
 ## Entry point for multiLambda ##
 log.debug("sys.argv[1]: " + sys.argv[1])
