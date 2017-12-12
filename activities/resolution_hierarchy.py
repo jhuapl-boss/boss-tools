@@ -127,7 +127,7 @@ def downsample_channel(args):
         frame_stop = frame(config['frame_stop_key'])
         step = config['step']
         use_iso_flag = config['iso_flag'] # If the resulting cube should be marked with the ISO flag
-        index_annotations = args['annotation_index_max'] < (args['resolution_max'] - 1)
+        index_annotations = args['resolution'] < (args['annotation_index_max'] - 1)
 
         # Round to the furthest full cube from the center of the data
         cubes_start = frame_start // dim
@@ -139,6 +139,7 @@ def downsample_channel(args):
         log.debug("Cubes corner: {}".format(cubes_start))
         log.debug("Cubes extent: {}".format(cubes_stop))
         log.debug("Downsample step: {}".format(step))
+        log.debug("Indexing Annotations: {}".format(index_annotations))
 
         # Call the downsample_volume lambda to process the data
         fanout(aws.get_session(),
