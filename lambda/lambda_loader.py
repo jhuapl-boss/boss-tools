@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 import sys
 import logging
 import runpy
@@ -57,3 +56,4 @@ def handler(event, context):
         runpy.run_path(lambda_path)
     except SystemExit as ex:
         print('Script called sys.exit(): {}'.format(ex))
+
