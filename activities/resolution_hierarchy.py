@@ -75,6 +75,9 @@ def downsample_channel(args):
             resolution_max (int) The maximum resolution to generate
             res_lt_max (bool) = args['resolution'] < (args['resolution_max'] - 1)
 
+            annotation_index_max (int) The maximum resolution to index annotation channel cubes at
+                                       When annotation_index_max = N, indices will exist for res 0 - (N - 1)
+
             type (str) 'isotropic' | 'anisotropic'
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
         }
@@ -124,6 +127,7 @@ def downsample_channel(args):
         frame_stop = frame(config['frame_stop_key'])
         step = config['step']
         use_iso_flag = config['iso_flag'] # If the resulting cube should be marked with the ISO flag
+        index_annotations = args['resolution'] < (args['annotation_index_max'] - 1)
 
         # Round to the furthest full cube from the center of the data
         cubes_start = frame_start // dim
@@ -135,11 +139,12 @@ def downsample_channel(args):
         log.debug("Cubes corner: {}".format(cubes_start))
         log.debug("Cubes extent: {}".format(cubes_stop))
         log.debug("Downsample step: {}".format(step))
+        log.debug("Indexing Annotations: {}".format(index_annotations))
 
         # Call the downsample_volume lambda to process the data
         fanout(aws.get_session(),
                args['downsample_volume_sfn'],
-               make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag),
+               make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations),
                max_concurrent = MAX_NUM_PROCESSES,
                rampup_delay = RAMPUP_DELAY,
                rampup_backoff = RAMPUP_BACKOFF,
@@ -173,7 +178,7 @@ def downsample_channel(args):
     args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
     return args
 
-def make_args(args, start, stop, step, dim, use_iso_flag):
+def make_args(args, start, stop, step, dim, use_iso_flag, index_annotations):
     for target in xyz_range(start, stop, step = step):
         yield {
             'lambda-name' : 'downsample_volume', # name of the function in multiLambda to call
@@ -181,6 +186,7 @@ def make_args(args, start, stop, step, dim, use_iso_flag):
             'target': target, # XYZ type is automatically handled by JSON.dumps
             'step': step,     # Since it is a subclass of tuple
             'dim': dim,
-            'use_iso_flag': use_iso_flag
+            'use_iso_flag': use_iso_flag,
+            'index_annotations': index_annotations,
         }
 
