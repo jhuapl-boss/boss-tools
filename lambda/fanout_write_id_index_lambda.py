@@ -11,13 +11,36 @@
 #   'cuboid_object_key': '...',
 #   'ids': [...],
 #   'version': '...',
-#   'finished': ... # boolean
+#   'finished': ... # booln
+# }
+#
+# Outputs:
+# {
+#   'finished': bool    # Whether done starting Index.IdWriter step functions.
+#   'ids': [],
+######## Below are inputs to the pass to fanout_nonblocking().
+#   'cuboid_object_key': '...',
+#   'version': '...',
+#   'config': ...
+#   'sub_sfn': ...
+#   'sub_args': [...]
+#   'max_concurrent': ...,
+#   'rampup_delay': ...,
+#   'rampup_backoff': ...,
+#   'status_delay': ...
+#   'running': [...]
+#   'results': [...]
 # }
 
 import copy
 from heaviside.activities import fanout_nonblocking
 
 def handler(event, context):
+
+    # The cuboid had no non-zero ids so nothing to do.
+    if len(event['ids']) == 0:
+        output = {'finished': True}
+        return output
 
     # 'operation' is used to identify what failed when writing to the
     # index deadletter queue.

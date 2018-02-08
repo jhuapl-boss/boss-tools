@@ -8,9 +8,6 @@
 #   'config': {'kv_config': {...}
 #              'state_config': {...},
 #              'object_store_config': {...}},
-#   'cuboid_object_key': '...',
-#   'id': '...',
-#   'version': '...'
 # }
 
 import boto3

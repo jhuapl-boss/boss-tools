@@ -9,6 +9,9 @@
 #   'id_index_step_fcn': '...',
 #   'cuboid_object_key': '...',
 #   'version': '...'
+#
+# Step function should abort on these errors:
+#   NoSuchKey
 # }
 
 import boto3
