@@ -8,13 +8,27 @@
 #              'object_store_config': {...}},
 #   'obj_keys': [{'object-key': {'S': '...'}, 'version-node': {'N', '...'}}, ...],
 #   'batch_enqueue_cuboids_step_fcn': '...',
-#   'finished': ... # boolean
+#   'finished': '...', # boolean
+#   'fanout_params': {
+#       "max_concurrent": int,
+#       "rampup_delay": int,
+#       "rampup_backoff": float,
+#       "status_delay": int
+#   },
+#   "operation": ...                        # (str) Op name for deadletter queue.
 # }
 #
 # Outputs:
 # {
+#   "operation": ...                        # (str) Op name for deadletter queue.
 #   'finished': bool    # Whether done starting Index.EnqueueCuboids step functions.
-#   'obj_keys': []
+#   'obj_keys': [],
+#   'fanout_params': {
+#       "max_concurrent": int,
+#       "rampup_delay": int,
+#       "rampup_backoff": float,
+#       "status_delay": int
+#   }
 ######## Below are inputs to the pass to fanout_nonblocking().
 #   'cuboid_object_key': '...',
 #   'version': '...',
@@ -39,13 +53,25 @@ SQS_MAX_BATCH = 10
 def handler(event, context):
     fanout_args = event
 
+    # 'operation' is used to identify what failed when writing to the
+    # index deadletter queue.
+    fanout_subargs_common = {
+        'operation': 'batch_enqueue_cuboids',
+        'config': event['config'],
+        # Flag to tell step function's choice state that all messages enqueued.
+        'enqueue_done': False
+    }
+
     # Add remaining arguments for fanning out.
+    fanout_args['operation'] = event['operation']
     fanout_args['sub_sfn'] = event['batch_enqueue_cuboids_step_fcn']
+    fanout_args['sub_sfn_is_full_arn'] = True,
+    fanout_args['common_sub_args'] = fanout_subargs_common
     fanout_args['sub_args'] = build_subargs(event)
-    fanout_args['max_concurrent'] = 50
-    fanout_args['rampup_delay'] = 2
-    fanout_args['rampup_backoff'] = 0.1
-    fanout_args['status_delay'] = 1
+    fanout_args['max_concurrent'] = event['fanout_params']['max_concurrent']
+    fanout_args['rampup_delay'] = event['fanout_params']['rampup_delay']
+    fanout_args['rampup_backoff'] = event['fanout_params']['rampup_backoff']
+    fanout_args['status_delay'] = event['fanout_params']['status_delay']
     fanout_args['running'] = []
     fanout_args['results'] = []
     fanout_args['finished'] = False
@@ -67,20 +93,29 @@ def build_subargs(event):
     Returns:
         ([dict]): Array of dictionaries, one per step function to invoke.
     """
+    if len(event['obj_keys']) > 0:
+        return build_subargs_from_obj_keys(event)
 
-    # 'operation' is used to identify what failed when writing to the
-    # index deadletter queue.
-    fanout_subargs_tmpl = {
-        'operation': 'batch_enqueue_cuboids',
-        'config': event['config'],
-        'cuboid_msgs': [],
-        # Flag to tell step function's choice state that all messages enqueued.
-        'enqueue_done': False
-    }
+    # Must be a subsequent invocation after starting fanout.
+    return event['sub_args']
 
+
+def build_subargs_from_obj_keys(event):
+    """
+    Build the array of arguments for each step function that will be spawned
+    during the fanout.  This is called on the first invocation of the lambda
+    function.  Before returning, during the first invocation, 'obj_keys' is 
+    set to the empty list.
+
+    Args:
+        event (dict): Incoming data from the lambda function.
+
+    Returns:
+        ([dict]): Array of dictionaries, one per step function to invoke.
+    """
     fanout_subargs = []
     count = 0
-    args_n = copy.deepcopy(fanout_subargs_tmpl)
+    args_n = {'cuboid_msgs': []}
     for obj_key in event['obj_keys']:
         args_n['cuboid_msgs'].append({
             'Id': str(count),
@@ -88,7 +123,7 @@ def build_subargs(event):
         })
         if count > 0 and (count+1) % SQS_MAX_BATCH == 0:
             fanout_subargs.append(args_n)
-            args_n = copy.deepcopy(fanout_subargs_tmpl)
+            args_n = {'cuboid_msgs': []}
         count += 1
 
     # Save the last set of keys.

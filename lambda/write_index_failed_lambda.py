@@ -17,10 +17,14 @@ def handler(event, context):
     sqs = boto3.client('sqs')
 
     msg_args = {
-        'QueueUrl': event['config']['object_store_config']['index_deadletter_queue'],
         'MessageBody': json.dumps(event),
         'MessageAttributes': {'operation': {'DataType': 'String'}}
     }
+
+    if 'index_deadletter_queue' in event:
+        msg_args['QueueUrl'] = event['index_deadletter_queue']
+    else:
+        msg_args['QueueUrl'] = event['config']['object_store_config']['index_deadletter_queue']
 
     msg_args['MessageAttributes']['operation']['StringValue'] = get_operation(event)
 

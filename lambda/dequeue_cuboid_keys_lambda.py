@@ -47,7 +47,8 @@ def handler(event, context):
     )
 
     if 'Messages' not in resp:
-        raise CorruptSqsResponseError('SQS response missing Messages key')
+        print('Received 0 messages.')
+        return
 
 
     print('Received {} messages.'.format(len(resp['Messages'])))
