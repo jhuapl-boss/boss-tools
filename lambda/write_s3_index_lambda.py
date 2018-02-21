@@ -50,6 +50,7 @@ def handler(event, context):
         'id_index_step_fcn': event['id_index_step_fcn'],
         'cuboid_object_key': event['cuboid_object_key'],
         'version': event['version'],
+        'max_write_id_index_lambdas': event['max_write_id_index_lambdas'],
         'finished': False,
         'ids': ids_list }
 

@@ -16,16 +16,16 @@
 # Since lambda is a reserved word, this allows importing from that folder 
 # without updating scripts responsible for deploying the lambda code.
 
-from lambdafcns.check_for_index_write_throttling_lambda import parse_response
+from lambdafcns.check_for_index_throttling_lambda import parse_throttle_response
 
 import unittest
 
-class TestCheckForIndexWriteThrottlingLambda(unittest.TestCase):
+class TestCheckForIndexThrottlingLambda(unittest.TestCase):
     def test_no_datapoints_key(self):
         event = {}
         resp = {}
 
-        actual = parse_response(event, resp)
+        actual = parse_throttle_response(event, resp, 'write_throttled')
 
         self.assertIn('write_throttled', actual)
         self.assertFalse(actual['write_throttled'])
@@ -34,7 +34,7 @@ class TestCheckForIndexWriteThrottlingLambda(unittest.TestCase):
         event = {}
         resp = {'Datapoints': []}
 
-        actual = parse_response(event, resp)
+        actual = parse_throttle_response(event, resp, 'write_throttled')
 
         self.assertIn('write_throttled', actual)
         self.assertFalse(actual['write_throttled'])
@@ -43,7 +43,7 @@ class TestCheckForIndexWriteThrottlingLambda(unittest.TestCase):
         event = {}
         resp = {'Datapoints': [{'Sum': 1.0}, {'Sum': 2.0}]}
 
-        actual = parse_response(event, resp)
+        actual = parse_throttle_response(event, resp, 'write_throttled')
 
         self.assertIn('write_throttled', actual)
         self.assertTrue(actual['write_throttled'])

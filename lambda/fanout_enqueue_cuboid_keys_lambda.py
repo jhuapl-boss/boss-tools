@@ -76,6 +76,9 @@ def handler(event, context):
     fanout_args['results'] = []
     fanout_args['finished'] = False
 
+    if 'running' in event:
+        fanout_args['running'] = event['running']
+
     # Don't pass object keys on so we don't fanout indefinitely.
     fanout_args['obj_keys'] = []
 

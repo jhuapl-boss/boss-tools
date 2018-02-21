@@ -11,6 +11,7 @@
 #   'cuboid_object_key': '...',
 #   'ids': [...],
 #   'version': '...',
+#   'max_write_id_index_lambdas': int,
 #   'finished': '...', # bool
 #   'fanout_params': {
 #       "max_concurrent": int,
@@ -29,7 +30,8 @@
 #       "rampup_delay": int,
 #       "rampup_backoff": float,
 #       "status_delay": int
-#   }
+#   },
+#   'wait_secs': int    # How long to wait in subsequent wait state.
 ######## Below are inputs to the pass to fanout_nonblocking().
 #   'cuboid_object_key': '...',
 #   'version': '...',
@@ -44,7 +46,11 @@
 #   'results': [...]
 # }
 
+import boto3
+import botocore
+from datetime import datetime, timedelta, timezone
 from heaviside.activities import fanout_nonblocking
+from random import randint
 
 IDS_PER_LAMBDA = 10
 
@@ -74,6 +80,8 @@ def handler(event, context):
     else:
         fanout_subargs = event['sub_args']
 
+    max_execs = int(event['max_write_id_index_lambdas']) 
+
     fanout_args = {
         'operation': event['operation'],
         'cuboid_object_key': event['cuboid_object_key'],
@@ -91,12 +99,64 @@ def handler(event, context):
         'rampup_delay': event['fanout_params']['rampup_delay'],
         'rampup_backoff': event['fanout_params']['rampup_backoff'],
         'status_delay': event['fanout_params']['status_delay'],
+        # Purposely emptying running list.  Limits on checking on running
+        # executions too small for the amount of Index.CuboidSupervisors that 
+        # will be simultaneously calling fanout_nonblocking().
         'running': [],
         'results': [],
-        'finished': False
-        }
+        'finished': False,
+        'max_write_id_index_lambdas': max_execs,
+        'wait_secs': 10
+    }
+
+    num_execs = check_for_lambda_availability()
+    if max_execs - num_execs < len(fanout_subargs) * 2:
+        # Don't fanout during this execution.  Wait for more lambda 
+        # availability.
+        fanout_args['wait_secs'] = 10 + randint(15, 25)
+        print('Too many lambdas, pausing fanout for {} secs.'.format(
+            fanout_args['wait_secs']))
+        return fanout_args
 
     return fanout_nonblocking(fanout_args)
+
+
+def check_for_lambda_availability():
+    """
+    Use CloudWatch to see how many lambdas are currently running (take the
+    average over the last minute).
+
+    Returns:
+        (int): Average number of currently running lambdas.
+    """
+
+    # Assume no concurrent executions if no data found.
+    num_execs = 0
+
+    cw = boto3.client('cloudwatch')
+    utc_zone = timezone(timedelta(hours=0))
+    now = datetime.now()
+    delta = timedelta(minutes=-1)
+
+    try:
+        resp = cw.get_metric_statistics(
+            Namespace='AWS/Lambda',
+            MetricName='ConcurrentExecutions',
+            #Dimensions=[],
+            StartTime=now + delta,
+            EndTime=now,
+            Period=60,
+            Statistics=['Average']
+        )
+    except botocore.ClientError as ex:
+        print(ex)
+        return num_execs
+    
+    if 'Datapoints' in resp and len(resp['Datapoints']) > 0:
+        if 'Average' in resp['Datapoints'][0]:
+            num_execs = resp['Datapoints'][0]['Average']
+
+    return num_execs
 
 
 def pack_ids_for_lambdas(ids):

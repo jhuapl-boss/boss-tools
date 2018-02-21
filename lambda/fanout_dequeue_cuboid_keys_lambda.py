@@ -60,8 +60,11 @@ def handler(event, context):
     queue = event['config']['object_store_config']['index_cuboids_keys_queue']
     num_msgs = event['ApproximateNumberOfMessages']
 
-    max_to_spawn = event['max_cuboid_fanout']
-    sfns_to_spawn = min(ceil(num_msgs/SQS_MAX_RCV), max_to_spawn )
+    # Each Index.DequeueCuboids step function will start SQS_MAX_RCV 
+    # Index.CubiodSupervisors, so divide 'max_cuboid_fanout' by SQS_MAX_RCV.
+    max_to_spawn = ceil(event['max_cuboid_fanout']/SQS_MAX_RCV)
+
+    sfns_to_spawn = min(ceil(num_msgs/SQS_MAX_RCV), max_to_spawn)
     
     fanout_args = event
 
@@ -71,7 +74,8 @@ def handler(event, context):
         'operation': 'start_indexing_cuboid',
         'config': event['config'],
         'id_cuboid_supervisor_step_fcn': event['id_cuboid_supervisor_step_fcn'],
-        'id_index_step_fcn': event['id_index_step_fcn']
+        'id_index_step_fcn': event['id_index_step_fcn'],
+        'max_write_id_index_lambdas': event['max_write_id_index_lambdas']
     }
 
     # Add remaining arguments for fanning out.
@@ -88,6 +92,9 @@ def handler(event, context):
     fanout_args['running'] = []
     fanout_args['results'] = []
     fanout_args['finished'] = False
+
+    if 'running' in event:
+        fanout_args['running'] = event['running']
 
     # Zero this out so we don't infinitely fanout.
     fanout_args['ApproximateNumberOfMessages'] = 0
