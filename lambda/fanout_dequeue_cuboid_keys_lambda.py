@@ -73,8 +73,10 @@ def handler(event, context):
     fanout_subargs_common = {
         'operation': 'start_indexing_cuboid',
         'config': event['config'],
+        'cuboid_ids_bucket': event['cuboid_ids_bucket'],
         'id_cuboid_supervisor_step_fcn': event['id_cuboid_supervisor_step_fcn'],
         'id_index_step_fcn': event['id_index_step_fcn'],
+        'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
         'max_write_id_index_lambdas': event['max_write_id_index_lambdas']
     }
 

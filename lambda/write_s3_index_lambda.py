@@ -6,9 +6,28 @@
 #   'config': {'kv_config': {...}
 #              'state_config': {...},
 #              'object_store_config': {...}},
+#   'cuboid_ids_bucket': '...',
 #   'id_index_step_fcn': '...',
 #   'cuboid_object_key': '...',
+#   'version': '...',
+#   'fanout_id_writers_step_fcn': '...',
+#   'max_write_id_index_lambdas': int
+#
+# Output (additions/modifications):
+# {
+#   'config': {'kv_config': {...}
+#              'state_config': {...},
+#              'object_store_config': {...}},
+#   'id_index_step_fcn': '...',
+#   'fanout_id_writers_step_fcn': '...',        # arn
+#   'cuboid_ids_bucket': '...',
+#   'cuboid_object_key': '...',
 #   'version': '...'
+#   'num_ids': int,                     # Number of unique ids in cuboid.
+#   'ids_s3_key': ...,          # S3 key where ids are stored for this cuboid.
+#   'max_write_id_index_lambdas': int,
+#   'finished': False
+# }
 #
 # Step function should abort on these errors:
 #   NoSuchKey
@@ -45,12 +64,22 @@ def handler(event, context):
     ids_list = obj_ind.write_s3_index(
         event['cuboid_object_key'], event['version'])
 
+    s3 = boto3.client('s3')
+    s3.put_object(
+        Bucket=event['cuboid_ids_bucket'], 
+        Key=event['cuboid_object_key'],
+        Body=json.dumps(ids_list))
+
     return { 
         'config': event['config'],
         'id_index_step_fcn': event['id_index_step_fcn'],
+        'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
+        'cuboid_ids_bucket': event['cuboid_ids_bucket'],
         'cuboid_object_key': event['cuboid_object_key'],
         'version': event['version'],
         'max_write_id_index_lambdas': event['max_write_id_index_lambdas'],
-        'finished': False,
-        'ids': ids_list }
+        'num_ids': len(ids_list),
+        'ids_s3_key': event['cuboid_object_key'],
+        'finished': False
+    }
 

@@ -32,7 +32,7 @@
 #       "status_delay": int
 #   },
 #   'wait_secs': int    # How long to wait in subsequent wait state.
-######## Below are inputs to the pass to fanout_nonblocking().
+######## Below are inputs to pass to fanout_nonblocking().
 #   'cuboid_object_key': '...',
 #   'version': '...',
 #   'config': ...
@@ -46,10 +46,11 @@
 #   'results': [...]
 # }
 
-import boto3
-import botocore
-from datetime import datetime, timedelta, timezone
+#import boto3
+#import botocore
+#from datetime import datetime, timedelta, timezone
 from heaviside.activities import fanout_nonblocking
+from cloudwatchwrapper import get_lambda_execs_in_last_min
 from random import randint
 
 IDS_PER_LAMBDA = 10
@@ -109,7 +110,7 @@ def handler(event, context):
         'wait_secs': 10
     }
 
-    num_execs = check_for_lambda_availability()
+    num_execs = get_lambda_execs_in_last_min()
     if max_execs - num_execs < len(fanout_subargs) * 2:
         # Don't fanout during this execution.  Wait for more lambda 
         # availability.
@@ -121,7 +122,7 @@ def handler(event, context):
     return fanout_nonblocking(fanout_args)
 
 
-def check_for_lambda_availability():
+#def check_for_lambda_availability():
     """
     Use CloudWatch to see how many lambdas are currently running (take the
     average over the last minute).
@@ -130,6 +131,7 @@ def check_for_lambda_availability():
         (int): Average number of currently running lambdas.
     """
 
+"""
     # Assume no concurrent executions if no data found.
     num_execs = 0
 
@@ -157,6 +159,7 @@ def check_for_lambda_availability():
             num_execs = resp['Datapoints'][0]['Average']
 
     return num_execs
+"""
 
 
 def pack_ids_for_lambdas(ids):
