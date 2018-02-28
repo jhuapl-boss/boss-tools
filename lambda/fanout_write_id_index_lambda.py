@@ -74,7 +74,12 @@ def handler(event, context):
         'index_deadletter_queue': event['config']['object_store_config']['index_deadletter_queue'],
         'id_index_new_chunk_threshold': event['config']['object_store_config']['id_index_new_chunk_threshold'],
         'cuboid_object_key': event['cuboid_object_key'],
-        'version': event['version']}
+        'version': event['version'],
+        # Optionally tell the Index.IdWriter to pause at startup.  This can be
+        # used as another way to allow Dynamo to scale up or to reduce the
+        # number of concurrent lambdas.
+        'wait_secs': 0
+    }
 
     if len(event['ids']) > 0:
         fanout_subargs = pack_ids_for_lambdas(event['ids'])
@@ -120,46 +125,6 @@ def handler(event, context):
         return fanout_args
 
     return fanout_nonblocking(fanout_args)
-
-
-#def check_for_lambda_availability():
-    """
-    Use CloudWatch to see how many lambdas are currently running (take the
-    average over the last minute).
-
-    Returns:
-        (int): Average number of currently running lambdas.
-    """
-
-"""
-    # Assume no concurrent executions if no data found.
-    num_execs = 0
-
-    cw = boto3.client('cloudwatch')
-    utc_zone = timezone(timedelta(hours=0))
-    now = datetime.now()
-    delta = timedelta(minutes=-1)
-
-    try:
-        resp = cw.get_metric_statistics(
-            Namespace='AWS/Lambda',
-            MetricName='ConcurrentExecutions',
-            #Dimensions=[],
-            StartTime=now + delta,
-            EndTime=now,
-            Period=60,
-            Statistics=['Average']
-        )
-    except botocore.ClientError as ex:
-        print(ex)
-        return num_execs
-    
-    if 'Datapoints' in resp and len(resp['Datapoints']) > 0:
-        if 'Average' in resp['Datapoints'][0]:
-            num_execs = resp['Datapoints'][0]['Average']
-
-    return num_execs
-"""
 
 
 def pack_ids_for_lambdas(ids):
