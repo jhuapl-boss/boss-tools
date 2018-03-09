@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import time
+import math
 from functools import reduce
 
 from bossutils import aws
@@ -27,6 +28,7 @@ STATUS_DELAY = 1
 MAX_NUM_PROCESSES = 50
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
+MAX_NUM_TILES_PER_LAMBDA = 30000  # this has to match boss-manage/cloud_formation/lambda/ingest_populate/ingest_queue_upload.py
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -67,6 +69,7 @@ def ingest_populate(args):
          'count': Number of messages put into the queue}
     """
     log.debug("Starting to populate upload queue")
+    log.debug("Sandy's new code")
 
     clear_queue(args['upload_queue'])
 
@@ -99,20 +102,18 @@ def clear_queue(arn):
     time.sleep(60)
 
 def split_args(args):
-    range_ = lambda v: range(args[v + '_start'], args[v + '_stop'], args[v + '_tile_size'])
+    # Compute # of tiles in the job
+    tile_size = lambda v: args[v + "_tile_size"]
+    extent = lambda v: args[v + '_stop'] - args[v + '_start']
+    num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
 
-    for t in range_('t'):
-        for z in range_('z'):
-            args_ = args.copy()
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * num_tiles_in('t')
+    offset_count = math.ceil(tile_count / MAX_NUM_TILES_PER_LAMBDA)
 
-            args_['t_start'] = t
-            args_['t_stop'] = t + args['t_tile_size']
-
-            args_['z_start'] = z
-            args_['z_stop'] = z + args['z_tile_size']
-            args_['final_z_stop'] = args['z_stop']
-
-            yield args_
+    for tiles_count_offset in range(offset_count):
+        args_ = args.copy()
+        args_['tiles_to_skip'] = tiles_count_offset * MAX_NUM_TILES_PER_LAMBDA
+        yield args_
 
 def verify_count(args):
     """Verify that the number of messages in a queue is the given number
