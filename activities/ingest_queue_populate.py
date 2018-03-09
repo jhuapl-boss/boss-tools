@@ -61,7 +61,7 @@ def ingest_populate(args):
 
             'z_start': 0,
             'z_stop': 0
-            'z_tile_size': 16,
+            'z_tile_size': 1,
         }
 
     Returns:
@@ -70,6 +70,10 @@ def ingest_populate(args):
     """
     log.debug("Starting to populate upload queue")
     log.debug("Sandy's new code")
+
+    args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_TILES_PER_LAMBDA
+    args['z_chunk_size'] = 16
+    args['z_tile_size'] = 1
 
     clear_queue(args['upload_queue'])
 
@@ -101,13 +105,32 @@ def clear_queue(arn):
     client.purge_queue(QueueUrl = arn)
     time.sleep(60)
 
-def split_args(args):
-    # Compute # of tiles in the job
+
+def get_tile_count(args):
     tile_size = lambda v: args[v + "_tile_size"]
     extent = lambda v: args[v + '_stop'] - args[v + '_start']
     num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
 
-    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * num_tiles_in('t')
+    x_extent = args['x_stop'] - args['x_start']
+    y_extent = args['y_stop'] - args['y_start']
+    z_extent = args['z_stop'] - args['z_start']
+    t_extent = args['t_stop'] - args['t_start']
+    num_tiles_in_x = math.ceil(x_extent / args['x_tile_size'])
+    num_tiles_in_y = math.ceil(y_extent / args['y_tile_size'])
+    num_tiles_in_z = math.ceil(z_extent / args['z_tile_size'])
+    num_tiles_in_t = math.ceil(t_extent / args['t_tile_size'])
+    tile_count = num_tiles_in_x * num_tiles_in_y * num_tiles_in_z * num_tiles_in_t
+
+    # We add the multiple by 16 in the tile_count because the actual z tile_size is 1, not 16.  The z_tile_size of 16 is needed in the lambda code to loop over the range correctly.
+    # tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * 16 * num_tiles_in('t')
+    return tile_count
+
+
+def split_args(args):
+    # Compute # of tiles in the job
+    tile_count = get_tile_count(args)
+    log.debug("Total Tile Count: " + str(tile_count))
+
     offset_count = math.ceil(tile_count / MAX_NUM_TILES_PER_LAMBDA)
 
     for tiles_count_offset in range(offset_count):
