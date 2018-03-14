@@ -51,7 +51,7 @@ def handler(event, context):
         context (Context): Contains runtime info about the lambda.
 
     Returns:
-        (dict): Contains 'lambda-name' and 'ids'.
+        (dict): see Output description at top of file.
     """
 
     id_index_table = event['config']['object_store_config']['id_index_table']
