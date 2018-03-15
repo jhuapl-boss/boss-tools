@@ -1,6 +1,9 @@
 # Lambda to write the morton index of a cuboid object key to the id in the
 # DynamoDB id index table.
 #
+# If there are failures, uses decorrelatd jitter backoff algorithm described in:
+# https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+#
 # It expects to get from events dictionary
 # {
 #   'id_index_table': ...,
@@ -14,7 +17,7 @@
 #   'write_id_index_status': {
 #       'done': False,
 #       'delay': 0,
-#       'retries': 0
+#       'retries_left': int     # How many retries left in case of an error.
 #   }
 # }
 
@@ -26,6 +29,45 @@ from spdb.spatialdb.object_indices import ObjectIndices
 from time import sleep
 
 BASE_DELAY_TIME_SECS = 5
+
+"""
+These derived exceptions of botocore.exceptions.ClientError will be not be 
+retried by the step function that calls this lambda.  Since this lambda 
+controls retries via event['write_id_index_status']['retries_left'] the step 
+function should proceed to its catch handling when it receives one of these
+exceptions.
+
+Derived exceptions of ClientError that are not part of this list get wrapped
+in DynamoClientError to ensure the step function goes to its catch handling
+step.
+
+The error information available to the step function isn't as useful when
+wrapped, so the expected errors are enumerated below and in the step function's
+retry statement.
+"""
+DO_NOT_WRAP_THESE_EXCEPTIONS = [
+    'ClientError', 
+    'ConditionalCheckFailedException',
+    'GlobalTableNotFoundException',
+    'InternalServerError',
+    'ItemCollectionSizeLimitExceededException',
+    'LimitExceededException',
+    'ProvisionedThroughputExceededException',
+    'ReplicaAlreadyExistsException',
+    'ReplicaNotFoundException',
+    'ResourceInUseException',
+    'ResourceNotFoundException',
+    'TableNotFoundException'
+]
+
+class DynamoClientError(Exception):
+    """
+    Wrap boto3 ClientError exceptions so the step function can fail when
+    event['write_id_index_status']['retries_left'] == 0.
+    """
+    def __init__(self, message):
+        super().__init__(message)
+
 
 def handler(event, context):
     id_index_table = event['id_index_table']
@@ -49,9 +91,13 @@ def handler(event, context):
         write_id_index_status['done'] = True
     except botocore.exceptions.ClientError as ex:
         # Probably had a throttle or a ConditionCheckFailed.
-        event['result'] = json.dumps(exception_to_dict(ex))
-        print('ClientError caught')
-        print(event['result'])
+        print('ClientError caught: {}'.format(ex))
+        if int(write_id_index_status['retries_left']) < 1:
+            if get_class_name(ex.__class__) in DO_NOT_WRAP_THESE_EXCEPTIONS:
+                raise
+            msg = '{}: {}'.format(type(ex), ex)
+            raise DynamoClientError(msg) from ex
+        event['result'] = str(ex)
         prep_for_retry(write_id_index_status)
 
     return event
@@ -65,8 +111,8 @@ def prep_for_retry(write_id_index_status):
         write_id_index_status (dict): Update this dict.
     """
     write_id_index_status['done'] = False
-    write_id_index_status['retries'] = (
-        int(write_id_index_status['retries']) + 1)
+    write_id_index_status['retries_left'] = (
+        int(write_id_index_status['retries_left']) - 1)
 
     # Prepare decorrelated jitter backoff delay.
     last_delay = int(write_id_index_status['delay'])
@@ -76,29 +122,17 @@ def prep_for_retry(write_id_index_status):
         random.uniform(BASE_DELAY_TIME_SECS, last_delay * 3))
 
 
-def exception_to_dict(ex):
+def get_class_name(type_):
     """
-    Convert an exception to a dictionary for JSON serialization.
-
-    Adapted from 
-    https://stackoverflow.com/questions/45240549/how-to-serialize-an-exception
+    Get just the class name (w/o module(s) from the type.
 
     Args:
-        ex (Exception): Instance of an exception.
+        type_ (type): Class as a type.
 
     Returns:
-        (dict): Exception prepared for serialization.
+        (str|None): Just the name of the class or None.
     """
-    ex_dict = {'type': ex.__class__.__name__}
-
-    if hasattr(ex, 'message'):
-        ex_dict['message'] = ex.message
-
-    if hasattr(ex, 'errno'):
-        ex_dict['errno'] = ex.errno
-
-    if hasattr(ex, 'strerror'):
-        ex['strerror'] = exception_to_dict(ex.strerror) if isinstance(
-            ex.strerror, Exception) else ex.strerror
-
-    return ex_dict
+    try:
+        return str(type_).rsplit('.', 1)[1].rstrip("'>")
+    except IndexError:
+        return None

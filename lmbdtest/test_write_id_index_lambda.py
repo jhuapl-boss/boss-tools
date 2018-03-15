@@ -15,8 +15,7 @@
 # lambdafcns contains symbolic links to lambda functions in boss-tools/lambda.
 # Since lambda is a reserved word, this allows importing from that folder 
 # without updating scripts responsible for deploying the lambda code.
-from lambdafcns.write_id_index_lambda import (
-        handler, prep_for_retry, exception_to_dict)
+from lambdafcns.write_id_index_lambda import handler, get_class_name
 
 import botocore
 import json
@@ -25,7 +24,7 @@ import unittest
 from unittest.mock import patch
 
 class TestWriteIdIndexLambda(unittest.TestCase):
-    def test_handle_ClientError(self):
+    def test_handler_ClientError(self):
         event = {
             'id_index_table': 'idIndex',
             's3_index_table': 's3Index',
@@ -38,7 +37,7 @@ class TestWriteIdIndexLambda(unittest.TestCase):
             'write_id_index_status': {
                 'done': False,
                 'delay': 0,
-                'retries': 0
+                'retries_left': 2
             }
         }
 
@@ -60,5 +59,55 @@ class TestWriteIdIndexLambda(unittest.TestCase):
 
         self.assertFalse(actual['write_id_index_status']['done'])
         self.assertGreater(actual['write_id_index_status']['delay'], 0)
-        self.assertEqual(1, actual['write_id_index_status']['retries'])
+        self.assertEqual(1, actual['write_id_index_status']['retries_left'])
         self.assertIn('result', actual)
+
+
+    def test_handler_raise_ClientError(self):
+        """
+        Test that error is raised when retries_left == 0.
+        """
+        event = {
+            'id_index_table': 'idIndex',
+            's3_index_table': 's3Index',
+            'id_count_table': 'idCount',
+            'cuboid_bucket': 'cuboidBucket',
+            'id_index_new_chunk_threshold': 100,
+            'cuboid_object_key': 'blah',
+            'id_group': ['1', '2', '3'],
+            'version': 0,
+            'write_id_index_status': {
+                'done': False,
+                'delay': 0,
+                'retries_left': 0
+            }
+        }
+
+        context = None
+        resp = {}
+
+        with patch('lambdafcns.write_id_index_lambda.ObjectIndices') as fake_obj_ind:
+            ex = botocore.exceptions.ClientError(resp, 'UpdateItem')
+            ex.errno = 10
+            ex.message = 'blah'
+            ex.strerror = 'blah'
+            fake_obj_ind.return_value.write_id_index.side_effect = ex
+            with patch(
+                'lambdafcns.write_id_index_lambda.get_region', 
+                return_value='us-east-1'
+            ):
+                with self.assertRaises(botocore.exceptions.ClientError):
+                    # Function under test.
+                    handler(event, context)
+
+
+    def test_get_class_name(self):
+        resp = {}
+        ex = botocore.exceptions.ClientError(resp, 'UpdateItem')
+        actual = get_class_name(ex.__class__)
+        self.assertEqual('ClientError', actual)
+
+
+    def test_get_class_name_no_period(self):
+        actual = get_class_name('foo')
+        self.assertIsNone(actual)
