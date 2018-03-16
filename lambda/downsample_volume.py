@@ -342,14 +342,15 @@ def downsample_cube(volume, cube, is_annotation):
 
 def handler(args, context):
     """Convert JSON arguments into the expected internal types"""
-    def convert(key):
-        args[key] = XYZ(*args[key])
+    def convert(args_, key):
+        args_[key] = XYZ(*args_[key])
 
-    convert('target')
-    convert('step')
-    convert('dim')
+    for arg in args:
+        convert(arg, 'target')
+        convert(arg, 'step')
+        convert(arg, 'dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'], args['index_annotations'])
+        downsample_volume(arg['args'], arg['target'], arg['step'], arg['dim'], arg['use_iso_flag'], arg['index_annotations'])
 
 ## Entry point for multiLambda ##
 log.debug("sys.argv[1]: " + sys.argv[1])
