@@ -24,7 +24,8 @@ log = logger.BossLogger().logger
 
 # Fanout variables, see heaviside.activities.fanout for full details
 # int - seconds: The delay between launch subprocesses and polling for status
-POLL_DELAY = 5
+POLL_DELAY = 0 # DP NOTE: STATUS_DELAY * MAX_NUM_PROCESSES should provide enough delay
+               #          when polling for status
 
 # int - seconds: The inner delay between status queries
 #                Helps limit API speed, so as to not run into throttling issues
@@ -34,11 +35,14 @@ STATUS_DELAY = 1
 MAX_NUM_PROCESSES = 50
 
 # int - seconds: The initial rampup delay to allow AWS resources to scale
-RAMPUP_DELAY = 15
+RAMPUP_DELAY = 0 # DP NOTE: Don't need to rampup for downsample
 
 # float: The backoff value to multiple RAMPUP_DELAY by for each subprocess launch
 #        When RAMPUP_DELAY is zero there is no longer a delay between launched
 RAMPUP_BACKOFF = 0.8
+
+# int: The number of volumes each sub_sfn should downsample with each execution
+BUCKET_SIZE = 10
 
 def downsample_channel(args):
     """
@@ -141,10 +145,12 @@ def downsample_channel(args):
         log.debug("Downsample step: {}".format(step))
         log.debug("Indexing Annotations: {}".format(index_annotations))
 
+        sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations)
+
         # Call the downsample_volume lambda to process the data
         fanout(aws.get_session(),
                args['downsample_volume_sfn'],
-               make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations),
+               bucket(sub_args, BUCKET_SIZE),
                max_concurrent = MAX_NUM_PROCESSES,
                rampup_delay = RAMPUP_DELAY,
                rampup_backoff = RAMPUP_BACKOFF,
@@ -190,3 +196,24 @@ def make_args(args, start, stop, step, dim, use_iso_flag, index_annotations):
             'index_annotations': index_annotations,
         }
 
+def bucket(sub_args, bucket_size):
+    """Take a generator of sub_args and break into multiple lists.
+
+    Args:
+        sub_args (generator): Generator yielding sub_args dictionaries
+        bucket_size (int): Maximum number of sub_arg dictionaries in each
+                           bucket. There may be less if bucket_size doesn't
+                           perfectly divide into the number of sub_args.
+
+    Returns:
+        (generator): Each yield is a list of sub_arg dictionaries
+    """
+    running = True
+    while running:
+        sub_args_bucket = []
+        try:
+            for i in range(bucket_size):
+                sub_args_bucket.append(next(sub_args))
+        except StopIteration:
+            running = False
+        yield sub_args_bucket
