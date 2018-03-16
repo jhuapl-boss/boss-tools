@@ -28,7 +28,7 @@ STATUS_DELAY = 1
 MAX_NUM_PROCESSES = 50
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
-MAX_NUM_TILES_PER_LAMBDA = 30000  # this has to match boss-manage/cloud_formation/lambda/ingest_populate/ingest_queue_upload.py
+MAX_NUM_TILES_PER_LAMBDA = 20000
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
