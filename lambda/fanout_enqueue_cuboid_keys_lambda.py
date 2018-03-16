@@ -1,6 +1,8 @@
 # Lambda that starts a fanout of step functions that batch enqueue cuboid
 # object keys so that they can be indexed.
 #
+# Used by Index.FanoutEnqueueCuboids (index_fanout_enqueue_cuboids.hsd).
+#
 # It expects to get from events dictionary
 # {
 #   'config': {'kv_config': {...}
@@ -51,6 +53,12 @@ from heaviside.activities import fanout_nonblocking
 SQS_MAX_BATCH = 10
 
 def handler(event, context):
+    if 'sub_args' not in event and len(event['obj_keys']) == 0:
+        # Must have gotten bad lookup_key because no obj_keys given on entry
+        # to step function.  On subsequent calls to this lambda, obj_keys will
+        # be empty but sub_args will be present.
+        return {'finished': True}
+
     fanout_args = event
 
     # 'operation' is used to identify what failed when writing to the

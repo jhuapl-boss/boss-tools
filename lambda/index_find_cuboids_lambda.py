@@ -2,6 +2,8 @@
 # S3 index DynamoDB table.  The table's global secondary index allows this
 # retrieval because its primary key is the lookup key.
 #
+# Used by Index.FindCuboids (index_find_cuboids.hsd) step function.
+#
 # The cuboids' S3 object keys are placed in the dictionary returned by the 
 # lambda under the key 'obj_keys'.  The results may be used by the next state
 # of a step function.
@@ -87,34 +89,3 @@ def handler(event, context):
 
     return event
 
-"""
-event = {
-    "config": {
-      "object_store_config": {
-        "id_count_table": "idCount.giontc1.boss",
-        "page_in_lambda_function": "multiLambda-giontc1-boss",
-        "page_out_lambda_function": "multiLambda-giontc1-boss",
-        "cuboid_bucket": "cuboids.giontc1.boss",
-        "s3_index_table": "s3index.giontc1.boss",
-        "id_index_table": "idIndex.giontc1.boss",
-        "s3_flush_queue": "https://queue.amazonaws.com/256215146792/S3flushGiontc1Boss",
-        "id_index_new_chunk_threshold": 100,
-        "index_deadletter_queue": "https://queue.amazonaws.com/256215146792/IndexdeadletterGiontc1Boss"
-      },
-      "kv_config": {
-        "cache_host": "cache.giontc1.boss",
-        "read_timeout": 86400,
-        "cache_db": "0"
-      },
-      "state_config": {
-        "cache_state_db": "0",
-        "cache_state_host": "cache-state.giontc1.boss"
-      }
-    },
-    'max_items':5,
-    'lookup_key':'8&8&21&0',
-    'exclusive_start_key': ''
-}
-context = None
-handler(event, context)
-"""
