@@ -1,6 +1,9 @@
 # Lambda that retrieves cuboids from a particular annotation channel in the
 # S3 index DynamoDB table.  The table's global secondary index allows this
-# retrieval because its primary key is the lookup key.
+# retrieval because its primary key is the lookup key.  Note that a channel's
+# cuboids are spread across spdb.spatialdb.object.LOOKUP_KEY_MAX_N + 1 keys.
+# When the base lookup key is passed in, '#n' is appended to the key where n
+# is [0, LOOKUP_KEY_MAX_N], inclusive.
 #
 # Used by Index.FindCuboids (index_find_cuboids.hsd) step function.
 #
@@ -18,7 +21,11 @@
 #   'fanout_enqueue_cuboids_step_fcn': '...',  # (string): Passed to fanout state.
 #   'lookup_key': ...,            # (str): identifies annotation channel.
 #   'max_items': ...              # (int): max number of items to retrieve.
-#   'exclusive_start_key': ...    # (str): JSON encoded dict representing the last key retrieved.  Empty on the initial call or when there are no items remaining in the index.
+#   'exclusive_start_key': ...    # (str): JSON encoded dict representing the last key retrieved.  Empty when there are no items remaining in the index.
+#   'status': {
+#       'done': bool,
+#       'lookup_key_n': ...     # (int): append this to the lookup_key when querying.  Should be zero, initially.
+#   }
 # }
 #
 # Output (inputs plus changed/added keys):
@@ -31,6 +38,7 @@
 
 import boto3
 import json
+from spdb.spatialdb.object import LOOKUP_KEY_MAX_N
 
 # Attribute names in S3 index table.
 LOOKUP_KEY = 'lookup-key'
@@ -42,7 +50,7 @@ LOOKUP_KEY_INDEX = 'lookup-key-index'
 
 def handler(event, context):
     table = event['config']['object_store_config']['s3_index_table']
-    key = event['lookup_key']
+    key = '{}#{}'.format(event['lookup_key'], event['status']['lookup_key_n'])
     limit = int(event['max_items'])
 
     dynamo = boto3.client('dynamodb')
@@ -62,7 +70,7 @@ def handler(event, context):
     }
 
     if 'exclusive_start_key' in event and event['exclusive_start_key'] != '':
-        query_args['ExclusiveStartKey' ] = json.loads(event['exclusive_start_key'])
+        query_args['ExclusiveStartKey'] = json.loads(event['exclusive_start_key'])
 
 
     resp = dynamo.query(**query_args)
@@ -80,9 +88,12 @@ def handler(event, context):
         event['exclusive_start_key'] = json.dumps(resp['LastEvaluatedKey'])
     else:
         event['exclusive_start_key'] = ''
+        n = int(event['status']['lookup_key_n'])
+        if n < LOOKUP_KEY_MAX_N:
+            event['status']['lookup_key_n'] = n + 1
+        else:
+            event['status']['done'] = True
 
-    # Tell step function that this task state/lambda has executed at least once.
-    event['first_time'] = False
 
     # Give start step function lambda the arn of the step function to run.
     event['sfn_arn'] = event['fanout_enqueue_cuboids_step_fcn']
