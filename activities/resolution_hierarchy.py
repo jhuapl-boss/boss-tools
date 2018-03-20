@@ -216,4 +216,8 @@ def bucket(sub_args, bucket_size):
                 sub_args_bucket.append(next(sub_args))
         except StopIteration:
             running = False
-        yield sub_args_bucket
+        # we have to yield a dict with lambda-name at the first level to work with the multiLambda
+        yield {
+                'lambda-name': 'downsample_volume',  # name of the function in multiLambda to call
+                'bucket_args':  sub_args_bucket  # bucket of args
+              }

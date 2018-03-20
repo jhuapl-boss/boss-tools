@@ -341,11 +341,12 @@ def downsample_cube(volume, cube, is_annotation):
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
+
     """Convert JSON arguments into the expected internal types"""
     def convert(args_, key):
         args_[key] = XYZ(*args_[key])
 
-    for arg in args:
+    for arg in args['bucket_args']:
         convert(arg, 'target')
         convert(arg, 'step')
         convert(arg, 'dim')

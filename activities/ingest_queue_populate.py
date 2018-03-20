@@ -23,12 +23,12 @@ from heaviside.activities import fanout
 
 log = logger.BossLogger().logger
 
-POLL_DELAY = 5
+POLL_DELAY = 0
 STATUS_DELAY = 1
-MAX_NUM_PROCESSES = 50
+MAX_NUM_PROCESSES = 20
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
-MAX_NUM_TILES_PER_LAMBDA = 20000
+MAX_NUM_TILES_PER_LAMBDA = 15000
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -69,7 +69,6 @@ def ingest_populate(args):
          'count': Number of messages put into the queue}
     """
     log.debug("Starting to populate upload queue")
-    log.debug("Sandy's new code")
 
     args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_TILES_PER_LAMBDA
     args['z_chunk_size'] = 16
@@ -120,9 +119,6 @@ def get_tile_count(args):
     num_tiles_in_z = math.ceil(z_extent / args['z_tile_size'])
     num_tiles_in_t = math.ceil(t_extent / args['t_tile_size'])
     tile_count = num_tiles_in_x * num_tiles_in_y * num_tiles_in_z * num_tiles_in_t
-
-    # We add the multiple by 16 in the tile_count because the actual z tile_size is 1, not 16.  The z_tile_size of 16 is needed in the lambda code to loop over the range correctly.
-    # tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * 16 * num_tiles_in('t')
     return tile_count
 
 
