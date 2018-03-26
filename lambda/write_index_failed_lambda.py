@@ -5,6 +5,8 @@
 # It expects to get from events dictionary
 # {
 #   'operation': '...',         # This may be a string or a list.
+#   'index_deadletter_queue': ...
+#           OR
 #   'config': {'kv_config': {...}
 #              'state_config': {...},
 #              'object_store_config': {...}},

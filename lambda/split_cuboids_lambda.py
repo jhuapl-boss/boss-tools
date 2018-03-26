@@ -7,12 +7,10 @@
 #   'config': {'kv_config': {...}
 #              'state_config': {...},
 #              'object_store_config': {...}},
-#   'cuboid_ids_bucket': '...',
 #   'id_index_step_fcn': '...', # arn of step function
 #   'fanout_id_writers_step_fcn': '...',    # step func arn
 #   'cuboid_object_key': '...',
 #   'num_ids': int,             # Number of unique ids in cuboid.
-#   'ids_s3_key': ...,          # S3 key where ids are stored for this cuboid.
 #   'version': '...',
 #   'max_write_id_index_lambdas': int,
 #   'finished': '...', # bool
@@ -98,8 +96,6 @@ def get_fanout_args(event):
     fanout_subargs_common = {
         'operation': 'split_fanout_cuboid_supervisors',
         'config': event['config'],
-        'cuboid_ids_bucket': event['cuboid_ids_bucket'],
-        'ids_s3_key': event['ids_s3_key'],
         'cuboid_object_key': event['cuboid_object_key'],
         'version': event['version'],
         'max_write_id_index_lambdas': max_execs,
