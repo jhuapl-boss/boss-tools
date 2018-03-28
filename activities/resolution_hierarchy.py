@@ -177,7 +177,6 @@ def downsample_channel(args):
 def make_args(args, start, stop, step, dim, use_iso_flag):
     for target in xyz_range(start, stop, step = step):
         yield {
-            'lambda-name' : 'downsample_volume', # name of the function in multiLambda to call
             'args': args,
             'target': target, # XYZ type is automatically handled by JSON.dumps
             'step': step,     # Since it is a subclass of tuple
