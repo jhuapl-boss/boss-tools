@@ -26,6 +26,9 @@ def download_and_save():
     """Download the boss.config file from User-data and save it to CONFIG_FILE"""
     user_data = utils.read_url(utils.USERDATA_URL)
 
+    if not user_data.strip().startswith('['):
+        raise Exception("User Data is not an INI file")
+
     with open(CONFIG_FILE, "w") as fh:
         fh.write(user_data)
 
