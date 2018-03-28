@@ -306,5 +306,5 @@ def handler(args, context):
         convert(arg, 'step')
         convert(arg, 'dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
+        downsample_volume(arg['args'], arg['target'], arg['step'], arg['dim'], arg['use_iso_flag'])
 
