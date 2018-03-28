@@ -58,3 +58,7 @@ target/
 .idea
 .DS_Store
 bossutils/t.py
+
+# Vim
+*.swp
+

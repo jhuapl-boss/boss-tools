@@ -8,16 +8,18 @@ import numpy as np
 from PIL import Image
 from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib import ndlib
+from spdb.spatialdb import AWSObjectStore
+from spdb.spatialdb.object import ObjectIndices
 
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
 
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
+log_handler = logging.StreamHandler()
+log_handler.setLevel(logging.DEBUG)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
-log.addHandler(handler)
+log.addHandler(log_handler)
 
 
 np_types = {
@@ -86,14 +88,17 @@ class S3Bucket(object):
 
 class S3IndexKey(dict):
     """Key object for DynamoDB S3 Index table
+    
+    May also contain optional attributes.
 
-    Args:
-        obj_key: HashedKey of the stored data
-        version:
-        job_hash:
-        job_range:
+    Attributes:
+        obj_key (str): HashedKey of the stored data
+        version (int): Reserved for future use.
+        job_hash: Identifies owning collection.
+        job_range: Identifies experiment, channel, resolution, and ingest job id.
+        lookup_key (str): Identifies owning channel (used by lookup-key-index).
     """
-    def __init__(self, obj_key, version=0, job_hash=None, job_range=None):
+    def __init__(self, obj_key, version=0, job_hash=None, job_range=None, lookup_key=None):
         super().__init__()
         self['object-key'] = {'S': obj_key}
         self['version-node'] = {'N': str(version)}
@@ -104,61 +109,25 @@ class S3IndexKey(dict):
         if job_range is not None:
             self['ingest-job-range'] = {'S': job_range}
 
-class IdIndexKey(dict):
-    """Key object for DynamoDB ID Index table
+        if lookup_key is not None:
+            self['lookup-key'] = {'S': lookup_key}
 
-    Args:
-        chan_key: Key for the resource channel
-        version:
-    """
-    def __init__(self, chan_key, version=0):
-        super().__init__()
-        self['channel-id-key'] = {'S': chan_key}
-        self['version'] = {'N': str(version)}
-
-class DynamoDBTable(object):
+class S3DynamoDBTable(object):
     """Wrapper for calls to DynamoDB
 
     Wraps boto3 calls to create and update DynamoDB entries.
 
-    Supports updates for both S3 and ID Index tables
+    Supports updates for S3 Index tables
     """
-    def __init__(self, table):
+    def __init__(self, table, region):
         self.table = table
-        self.ddb = boto3.client('dynamodb')
-
-    def _check_error(self, resp, action):
-        if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
-            raise Exception("Error {} index information to/from/in DynamoDB".format(action))
+        self.ddb = boto3.client('dynamodb', region_name=region)
 
     def put(self, item):
-        try:
             self.ddb.put_item(TableName = self.table,
                               Item = item,
                               ReturnConsumedCapacity = 'NONE',
                               ReturnItemCollectionMetrics = 'NONE')
-        except:
-            raise Exception("Error adding item to DynamoDB Table")
-
-    def update_ids(self, key, ids):
-        resp = self.ddb.update_item(TableName = self.table,
-                                    Key = key,
-                                    UpdateExpression='ADD #idset :ids',
-                                    ExpressionAttributeNames={'#idset': 'id-set'},
-                                    ExpressionAttributeValues={':ids': {'NS': ids}},
-                                    ReturnConsumedCapacity='NONE')
-
-        self._check_error(resp, 'updating')
-
-    def update_id(self, key, obj_key):
-        resp = self.ddb.update_item(TableName = self.table,
-                                    Key = key,
-                                    UpdateExpression='ADD #cuboidset :objkey',
-                                    ExpressionAttributeNames={'#cuboidset': 'cuboid-set'},
-                                    ExpressionAttributeValues={':objkey': {'SS': [obj_key]}},
-                                    ReturnConsumedCapacity='NONE')
-
-        self._check_error(resp, 'updating')
 
     def exists(self, key):
         resp = self.ddb.get_item(TableName = self.table,
@@ -171,7 +140,7 @@ class DynamoDBTable(object):
 
 #### Main lambda logic ####
 
-def downsample_volume(args, target, step, dim, use_iso_key, index_annotations):
+def downsample_volume(args, target, step, dim, use_iso_key):
     """Downsample a volume into a single cube
 
     Download `step` cubes from S3, downsample them into a single cube, upload
@@ -186,13 +155,14 @@ def downsample_volume(args, target, step, dim, use_iso_key, index_annotations):
             data_type (str) 'uint8' | 'uint16' | 'uint64'
 
             s3_bucket (URL)
-            s3_index (URL)
-            id_index (URL)
+            s3_index (str)
 
             resolution (int) The resolution to downsample. Creates resolution + 1
 
             type (str) 'isotropic' | 'anisotropic'
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
+
+            aws_region (str) AWS region to run in such as us-east-1
         }
 
         target (XYZ) : Corner of volume to downsample
@@ -222,8 +192,7 @@ def downsample_volume(args, target, step, dim, use_iso_key, index_annotations):
     resolution = args['resolution']
 
     s3 = S3Bucket(args['s3_bucket'])
-    s3_index = DynamoDBTable(args['s3_index'])
-    id_index = DynamoDBTable(args['id_index'])
+    s3_index = S3DynamoDBTable(args['s3_index'], args['aws_region'])
 
     # Download all of the cubes that will be downsamples
     volume = Buffer.zeros(dim * step, dtype=np_types[data_type], order='C')
@@ -283,23 +252,9 @@ def downsample_volume(args, target, step, dim, use_iso_key, index_annotations):
         idx_key = S3IndexKey(obj_key,
                              version,
                              col_id,
-                             '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job))
+                             '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job),
+                             AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1))
         s3_index.put(idx_key)
-
-    if annotation_chan and index_annotations:
-        ids = ndlib.unique(cube)
-
-        # Convert IDs to strings and drop any IDs that equal zero
-        ids = [str(id) for id in ids if id != 0]
-
-        if len(ids) > 0:
-            idx_key = S3IndexKey(obj_key, version)
-            s3_index.update_ids(idx_key, ids)
-
-            for id in ids:
-                idx_key = HashedKey(iso, col_id, exp_id, chan_id, resolution + 1, id)
-                chan_key = IdIndexKey(idx_key, version)
-                id_index.update_id(chan_key, obj_key)
 
 def downsample_cube(volume, cube, is_annotation):
     """Downsample the given Buffer into the target Buffer
@@ -349,10 +304,5 @@ def handler(args, context):
     convert('step')
     convert('dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'], args['index_annotations'])
-
-## Entry point for multiLambda ##
-log.debug("sys.argv[1]: " + sys.argv[1])
-args = json.loads(sys.argv[1])
-handler(args, None)
+    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
 

@@ -1,0 +1,1 @@
+../lambda/fanout_write_id_index_lambda.py
