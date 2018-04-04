@@ -12,13 +12,12 @@ from spdb.c_lib import ndlib
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
 
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
+#handler = logging.StreamHandler()
+#handler.setLevel(logging.DEBUG)
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
-log.addHandler(handler)
-
+#log.addHandler(handler)
 
 np_types = {
     'uint64': np.uint64,
