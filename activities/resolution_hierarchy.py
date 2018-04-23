@@ -18,31 +18,36 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 from bossutils.multidimensional import XYZ, ceildiv
 from bossutils.multidimensional import range as xyz_range
 
-from heaviside.activities import fanout
+import time
+import random
 
 log = logger.BossLogger().logger
 
-# Fanout variables, see heaviside.activities.fanout for full details
-# int - seconds: The delay between launch subprocesses and polling for status
-POLL_DELAY = 0 # DP NOTE: STATUS_DELAY * MAX_NUM_PROCESSES should provide enough delay
-               #          when polling for status
-
-# int - seconds: The inner delay between status queries
-#                Helps limit API speed, so as to not run into throttling issues
-STATUS_DELAY = 1
-
-# int: Maximum number of concurrent subprocess executions to have running
-MAX_NUM_PROCESSES = 50
-
-# int - seconds: The initial rampup delay to allow AWS resources to scale
-RAMPUP_DELAY = 0 # DP NOTE: Don't need to rampup for downsample
-
-# float: The backoff value to multiple RAMPUP_DELAY by for each subprocess launch
-#        When RAMPUP_DELAY is zero there is no longer a delay between launched
-RAMPUP_BACKOFF = 0.8
+# int: Approximent maximum number of concurrent lambda executions to have running
+#      Zero (0) means no limit
+MAX_NUM_PROCESSES = 0
 
 # int: The number of volumes each sub_sfn should downsample with each execution
-BUCKET_SIZE = 10
+BUCKET_SIZE = 1
+
+# int: The number of retries for launching a lambda before givin up and failing
+#      This only applies to throttling / resource related exceptions
+#      Zero (0) means no limit
+RETRY_LIMIT = 0
+
+# int - seconds: The number of seconds between polling for the count in the status table
+DYNAMODB_POLL = 1
+
+class LambdaLaunchError(Exception):
+    pass
+
+class LambdaRetryLimitExceededError(Exception):
+    def __init__(self):
+        msg = "Number of a throttle lambda retries exceeded limit of {}"
+        super().__init__(msg.format(RETRY_LIMIT))
+
+class DynamoDBStatusError(Exception):
+    pass
 
 def downsample_channel(args):
     """
@@ -55,7 +60,9 @@ def downsample_channel(args):
 
     Args:
         args {
-            downsample_volume_sfn (ARN)
+            downsample_id (str) (Optional, one will be generated if not provided)
+            downsample_volume_lambda (ARN | lambda name)
+            downsample_status_table (ARN | table name)
 
             collection_id (int)
             experiment_id (int)
@@ -86,6 +93,10 @@ def downsample_channel(args):
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
         }
     """
+
+    if 'downsample_id' not in args:
+        # NOTE: Right now assume that this will not produce two ids that would be executing at the same time
+        args['downsample_id'] = str(random.random())
 
     #log.debug("Downsampling resolution " + str(args['resolution']))
 
@@ -146,16 +157,12 @@ def downsample_channel(args):
         log.debug("Indexing Annotations: {}".format(index_annotations))
 
         sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations)
+        sub_buckets = bucket(sub_args, BUCKET_SIZE)
 
-        # Call the downsample_volume lambda to process the data
-        fanout(aws.get_session(),
-               args['downsample_volume_sfn'],
-               bucket(sub_args, BUCKET_SIZE),
-               max_concurrent = MAX_NUM_PROCESSES,
-               rampup_delay = RAMPUP_DELAY,
-               rampup_backoff = RAMPUP_BACKOFF,
-               poll_delay = POLL_DELAY,
-               status_delay = STATUS_DELAY)
+        launch_lambda(args['downsample_volume_lambda'],
+                      args['downsample_status_table'],
+                      args['downsample_id'],
+                      sub_buckets)
 
         # Resize the coordinate frame extents as the data shrinks
         # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -221,3 +228,102 @@ def bucket(sub_args, bucket_size):
                 'lambda-name': 'downsample_volume',  # name of the function in multiLambda to call
                 'bucket_args':  sub_args_bucket  # bucket of args
               }
+
+def launch_lambda(lambda_arn, status_table, downsample_id, buckets):
+    session = aws.get_session();
+    lambda_ = session.client('lambda')
+    ddb = session.client('dynamodb')
+
+    slowdown = 0
+    for bucket in buckets:
+        if MAX_NUM_PROCESSES > 0:
+            # NOTE: Not currently accounting for DLQ messages, as if there is a message
+            #       then the whole downsample has failed, due to AWS automatically retrying
+            #       lambdas for us (if we figure out that the AWS auto-retry abilities
+            #       don't work for us then this has to be revisited)
+            while status_count(status_table, downsample_id) > MAX_NUM_PROCESSES:
+                time.sleep(DYNAMODB_POLL)
+
+        retry = 0
+
+        keys = []
+        try:
+            for sub_arg in bucket:
+                item = {'downsample_id': {'S': downsample_id},
+                        'cube_morton': {'N': sub_args.target.morton}}
+                ddb.put_item(TableName = status_table, Item = item)
+                keys.append(item)
+        except Exception as ex: # XXX: more specific errors?
+            for key in keys:
+                try:
+                    ddb.delete_item(TableName = status_table, Key = key)
+                except:
+                    log.exception("Could not delete key '{}' from downsample status table".format(key))
+
+            raise DynamoDBStatusError("Problem creating state entries: {}".format(ex))
+        else:
+            try: 
+                while True:
+                    try:
+                        time.sleep(slowdown)
+                        lambda_.invoke(FunctionName = lambda_arn,
+                                       InvocationType = 'Event', # Async execution
+                                       Payload = json.dumps(bucket).encode('UTF8'))
+                    except lambda_.RequestTooLargeException:
+                        # Cannot handle these requests
+                        raise LambdaLaunchError("Lambda payload is too large, unable to launch")
+                    except (lambda_.TooManyRequestsException,
+                            lambda_.SubnetIPAddressLimitReachedException,
+                            lambda_.ENILimitReachedException):
+                        # Need to wait until some executions has finished
+                        log.debug("Unavailable resources, waiting for some lambdas to finish")
+                        if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
+                            raise LambdaRetryLimitExceededError()
+                        retry += 1
+
+                        # busy loop until the number of cubes is less than the current value
+                        starting = status_count(status_table, downsample_id)
+                        while True:
+                            time.sleep(DYNAMODB_POLL)
+                            current = status_count(status_table, downsample_id)
+                            if current < starting:
+                                break
+                    except (lambda_.EC2ThrottledException,):
+                        # Need to slow down
+                        log.debug("Throttled, slowing down")
+                        if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
+                            raise LambdaRetryLimitExceededError()
+                        retry += 1
+                        slowdown += 1 # XXX: is there a better value?
+                                      # XXX: how to handle decrementing slowdown value?
+                                      #      maybe remove 1 after a successful launch?
+            except:
+                # Remove keys that were created but no lambda could be launched for
+                for key in keys:
+                    try:
+                        ddb.delete_item(TableName = status_table, Key = key)
+                    except:
+                        log.exception("Could not delete key '{}' from downsample status table".format(key))
+
+                raise
+
+def status_count(status_table, downsample_id):
+    session = aws.get_session()
+    ddb = session.client('dynamodb')
+
+    slowdown = 0
+    while True:
+        try:
+            time.sleep(slowdown)
+            resp = ddb.query(TableName = status_table,
+                             Select = 'COUNT',
+                             KeyConditionExpression = "downsample_id = :id",
+                             ExpressionAttributeValues = {
+                                 ":id": {'S': downsample_id}
+                             })
+            return resp['Count']
+        except ddb.ProvisionedThroughputExceededException:
+            log.debug("Status check throttled, slowing down")
+            slowdown += 1 # XXX: is there a better value?
+        except Exception as ex:
+            raise DynamoDBStatusError("Could not query status table count: {}".format(ex))
