@@ -20,6 +20,7 @@ from bossutils.multidimensional import range as xyz_range
 
 import time
 import random
+from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
 
@@ -38,6 +39,11 @@ RETRY_LIMIT = 0
 # int - seconds: The number of seconds between polling for the count in the status table
 DYNAMODB_POLL = 1
 
+# datetime.delta: The maximum amount of time to wait for lambdas to finish after launching
+#                 all of them. This guards against waiting forever if there was a problem
+#                 delivering the DLQ message
+MAX_LAMBDA_TIME = timedelta(hours=1)
+
 class LambdaLaunchError(Exception):
     pass
 
@@ -45,6 +51,11 @@ class LambdaRetryLimitExceededError(Exception):
     def __init__(self):
         msg = "Number of a throttle lambda retries exceeded limit of {}"
         super().__init__(msg.format(RETRY_LIMIT))
+
+class FailedLambdaError(Exception):
+    def __init__(self):
+        msg = "A Lambda failed execution"
+        super().__init__(msg)
 
 class DynamoDBStatusError(Exception):
     pass
@@ -94,102 +105,111 @@ def downsample_channel(args):
         }
     """
 
+    # TODO: load downsample_status_table from boss config
+    # TODO: load downsample_volume_lambda from boss config
+
     if 'downsample_id' not in args:
         # NOTE: Right now assume that this will not produce two ids that would be executing at the same time
         args['downsample_id'] = str(random.random())
 
-    #log.debug("Downsampling resolution " + str(args['resolution']))
+    args['downsample_queue'] = create_queue(args['downsample_id'])
 
-    resolution = args['resolution']
+    try:
+        #log.debug("Downsampling resolution " + str(args['resolution']))
 
-    dim = XYZ(*CUBOIDSIZE[resolution])
-    #log.debug("Cube dimensions: {}".format(dim))
+        resolution = args['resolution']
 
-    def frame(key):
-        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
+        dim = XYZ(*CUBOIDSIZE[resolution])
+        #log.debug("Cube dimensions: {}".format(dim))
 
-    # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
-    # downsampling. If both are happening, fanout one and then the other in series.
-    configs = []
-    if args['type'] == 'isotropic':
-        configs.append({
-            'name': 'isotropic',
-            'step': XYZ(2,2,2),
-            'iso_flag': False,
-            'frame_start_key': '{}_start',
-            'frame_stop_key': '{}_stop',
-        })
-    else:
-        configs.append({
-            'name': 'anisotropic',
-            'step': XYZ(2,2,1),
-            'iso_flag': False,
-            'frame_start_key': '{}_start',
-            'frame_stop_key': '{}_stop',
-        })
+        def frame(key):
+            return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
 
-        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+        # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
+        # downsampling. If both are happening, fanout one and then the other in series.
+        configs = []
+        if args['type'] == 'isotropic':
             configs.append({
                 'name': 'isotropic',
                 'step': XYZ(2,2,2),
-                'iso_flag': True,
-                'frame_start_key': 'iso_{}_start',
-                'frame_stop_key': 'iso_{}_stop',
+                'iso_flag': False,
+                'frame_start_key': '{}_start',
+                'frame_stop_key': '{}_stop',
+            })
+        else:
+            configs.append({
+                'name': 'anisotropic',
+                'step': XYZ(2,2,1),
+                'iso_flag': False,
+                'frame_start_key': '{}_start',
+                'frame_stop_key': '{}_stop',
             })
 
-    for config in configs:
-        frame_start = frame(config['frame_start_key'])
-        frame_stop = frame(config['frame_stop_key'])
-        step = config['step']
-        use_iso_flag = config['iso_flag'] # If the resulting cube should be marked with the ISO flag
-        index_annotations = args['resolution'] < (args['annotation_index_max'] - 1)
+            if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+                configs.append({
+                    'name': 'isotropic',
+                    'step': XYZ(2,2,2),
+                    'iso_flag': True,
+                    'frame_start_key': 'iso_{}_start',
+                    'frame_stop_key': 'iso_{}_stop',
+                })
 
-        # Round to the furthest full cube from the center of the data
-        cubes_start = frame_start // dim
-        cubes_stop = ceildiv(frame_stop, dim)
+        for config in configs:
+            frame_start = frame(config['frame_start_key'])
+            frame_stop = frame(config['frame_stop_key'])
+            step = config['step']
+            use_iso_flag = config['iso_flag'] # If the resulting cube should be marked with the ISO flag
+            index_annotations = args['resolution'] < (args['annotation_index_max'] - 1)
 
-        log.debug('Downsampling {} resolution {}'.format(config['name'], resolution))
-        log.debug("Frame corner: {}".format(frame_start))
-        log.debug("Frame extent: {}".format(frame_stop))
-        log.debug("Cubes corner: {}".format(cubes_start))
-        log.debug("Cubes extent: {}".format(cubes_stop))
-        log.debug("Downsample step: {}".format(step))
-        log.debug("Indexing Annotations: {}".format(index_annotations))
+            # Round to the furthest full cube from the center of the data
+            cubes_start = frame_start // dim
+            cubes_stop = ceildiv(frame_stop, dim)
 
-        sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations)
-        sub_buckets = bucket(sub_args, BUCKET_SIZE)
+            log.debug('Downsampling {} resolution {}'.format(config['name'], resolution))
+            log.debug("Frame corner: {}".format(frame_start))
+            log.debug("Frame extent: {}".format(frame_stop))
+            log.debug("Cubes corner: {}".format(cubes_start))
+            log.debug("Cubes extent: {}".format(cubes_stop))
+            log.debug("Downsample step: {}".format(step))
+            log.debug("Indexing Annotations: {}".format(index_annotations))
 
-        launch_lambda(args['downsample_volume_lambda'],
-                      args['downsample_status_table'],
-                      args['downsample_id'],
-                      sub_buckets)
+            sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag, index_annotations)
+            sub_buckets = bucket(sub_args, BUCKET_SIZE)
 
-        # Resize the coordinate frame extents as the data shrinks
-        # DP NOTE: doesn't currently work correctly with non-zero frame starts
-        def resize(var, size):
-            start = config['frame_start_key'].format(var)
-            stop = config['frame_stop_key'].format(var)
-            args[start] //= size
-            args[stop] = ceildiv(args[stop], size)
-        resize('x', step.x)
-        resize('y', step.y)
-        resize('z', step.z)
+            launch_lambda(args['downsample_volume_lambda'],
+                          args['downsample_queue'],
+                          args['downsample_status_table'],
+                          args['downsample_id'],
+                          sub_buckets)
 
-    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
-    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
-        def copy(var):
-            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
-        copy('x')
-        copy('y')
-        copy('z')
+            # Resize the coordinate frame extents as the data shrinks
+            # DP NOTE: doesn't currently work correctly with non-zero frame starts
+            def resize(var, size):
+                start = config['frame_start_key'].format(var)
+                stop = config['frame_stop_key'].format(var)
+                args[start] //= size
+                args[stop] = ceildiv(args[stop], size)
+            resize('x', step.x)
+            resize('y', step.y)
+            resize('z', step.z)
 
-    # Advance the loop and recalculate the conditional
-    # Using max - 1 because resolution_max should not be a valid resolution
-    # and res < res_max will end with res = res_max - 1, which generates res_max resolution
-    args['resolution'] = resolution + 1
-    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
-    return args
+        # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
+        if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
+            def copy(var):
+                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+            copy('x')
+            copy('y')
+            copy('z')
+
+        # Advance the loop and recalculate the conditional
+        # Using max - 1 because resolution_max should not be a valid resolution
+        # and res < res_max will end with res = res_max - 1, which generates res_max resolution
+        args['resolution'] = resolution + 1
+        args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
+        return args
+    finally:
+        delete_queue(args['downsample_queue'])
 
 def make_args(args, start, stop, step, dim, use_iso_flag, index_annotations):
     for target in xyz_range(start, stop, step = step):
@@ -229,7 +249,7 @@ def bucket(sub_args, bucket_size):
                 'bucket_args':  sub_args_bucket  # bucket of args
               }
 
-def launch_lambda(lambda_arn, status_table, downsample_id, buckets):
+def launch_lambda(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     session = aws.get_session();
     lambda_ = session.client('lambda')
     ddb = session.client('dynamodb')
@@ -250,7 +270,7 @@ def launch_lambda(lambda_arn, status_table, downsample_id, buckets):
         try:
             for sub_arg in bucket:
                 item = {'downsample_id': {'S': downsample_id},
-                        'cube_morton': {'N': sub_args.target.morton}}
+                        'cube_morton': {'N': sub_args['target'].morton}}
                 ddb.put_item(TableName = status_table, Item = item)
                 keys.append(item)
         except Exception as ex: # XXX: more specific errors?
@@ -260,7 +280,8 @@ def launch_lambda(lambda_arn, status_table, downsample_id, buckets):
                 except:
                     log.exception("Could not delete key '{}' from downsample status table".format(key))
 
-            raise DynamoDBStatusError("Problem creating state entries: {}".format(ex))
+            ex = DynamoDBStatusError("Problem creating state entries: {}".format(ex))
+            error_state(status_table, queue_arn, downsample_id, ex=ex)
         else:
             try: 
                 while True:
@@ -305,7 +326,33 @@ def launch_lambda(lambda_arn, status_table, downsample_id, buckets):
                     except:
                         log.exception("Could not delete key '{}' from downsample status table".format(key))
 
-                raise
+                error_state(status_table, queue_arn, downsample_id)
+            else:
+                # Check for errors after launching each lambda
+                msgs = check_queue(queue_arn)
+                if msgs > 0:
+                    # Error state
+                    error_state(status_table, queue_arn, downsample_id)
+
+    # Finished launching lambdas, need to wait for all to finish
+    log.info("Finished launching lambdas")
+
+    starting = datetime.now()
+    while True:
+        time.sleep(DYNAMODB_POLL)
+
+        if status_count(status_table, downsample_id) == 0:
+            log.info("Lambdas all finished")
+            break
+
+        if check_queue(queue_arn) > 0:
+            error_state(status_table, queue_arn, downsample_id)
+
+        # An extra check to make sure we don't run forever
+        current = datetime.now()
+        if (current - starting) > MAX_LAMBDA_TIME:
+            error_state(status_table, queue_arn, downsample_id)
+
 
 def status_count(status_table, downsample_id):
     session = aws.get_session()
@@ -327,3 +374,51 @@ def status_count(status_table, downsample_id):
             slowdown += 1 # XXX: is there a better value?
         except Exception as ex:
             raise DynamoDBStatusError("Could not query status table count: {}".format(ex))
+
+def create_queue(downsample_id):
+    session = aws.get_session()
+    sqs = session.client('sqs')
+
+    name = "downsample-{}".format(downsample_id)
+    resp = sqs.create_queue(QueueName = name)
+    url = resp['QueueUrl']
+    return url
+
+def delete_queue(queue_arn):
+    session = aws.get_session()
+    sqs = session.client('sqs')
+
+    try:
+        sqs.delete_queue(QueueUrl = queue_arn)
+    except:
+        log.exception("Could not delete status queue '{}'".format(queue_arn))
+
+def check_queue(queue_arn):
+    # NOTE: Right now assuming that AWS Lambda retries mean that we don't have to 
+    #       implement our own retry logic
+
+    session = aws.get_session()
+    sqs = session.client('sqs')
+
+    resp = sqs.get_queue_attributes(QueueUrl = queue_arn,
+                                    AttributeNames = ['ApproximateNumberOfMessages'])
+
+    message_count int(resp['Attributes']['ApproximateNumberOfMessages'])
+    return message_count
+
+def error_state(status_table, queue_arn, downsample_id, ex=None):
+    log.info("DLQ message detected, error mode")
+
+    while True:
+        try:
+            if status_count(status_table, downsample_id) - check_queue(queue_arn) == 0:
+                break
+        except:
+            log.exception("Problem polling state while waiting for lambdas to end")
+
+        time.sleep(DYNAMODB_POLL)
+
+    if ex:
+        raise ex
+    else:
+        raise FailedLambdaError()
