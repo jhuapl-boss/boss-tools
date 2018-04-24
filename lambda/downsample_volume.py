@@ -137,6 +137,12 @@ class S3DynamoDBTable(object):
 
         return 'Item' in resp
 
+def DeleteStatusKey(region, status_table, downsample_id, morton_id):
+    ddb = boto3.client('dynamodb', region_name=region)
+    key = {'downsample_id': {'S': downsample_id},
+           'cube_morton': {'N': morton_id}}
+    ddb.delete_item(TableName = status_table, Key = key)
+
 
 #### Main lambda logic ####
 
@@ -148,6 +154,9 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     Args:
         args {
+            downsample_id (str)
+            downsample_status_table (ARN)
+
             collection_id (int)
             experiment_id (int)
             channel_id (int)
@@ -225,6 +234,7 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     if volume_empty:
         log.debug("Completely empty volume, not downsampling")
+        DeleteStatusKey(args['aws_region'], args['downsample_status_table'], args['downsample_id'], target.morton)
         return
 
     # Create downsampled cube
@@ -255,6 +265,8 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job),
                              AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1))
         s3_index.put(idx_key)
+
+    DeleteStatusKey(args['aws_region'], args['downsample_status_table'], args['downsample_id'], target.morton)
 
 def downsample_cube(volume, cube, is_annotation):
     """Downsample the given Buffer into the target Buffer
