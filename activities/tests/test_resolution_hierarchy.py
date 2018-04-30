@@ -90,15 +90,12 @@ Test isotropic normal
 Test anisotropic normal
 Test anisotropic at the isotropic split
 Test anisotropic after the isotropic split
+Test non even frame size (frame size is not an even multiple of cube size)
+Test non zero frame start
+Test resolution / resolution_max logic so it doesn't change
 
 Test passing in downsample_id
 Always create / delete the queue or create it when creating the downsample_id and delete when res_lt_max is False?
-Test non even frame size (frame size is not an even multiple of cube size)
-Test non zero frame start (should fail, want to make sure we understand the problem and it doesn't change)
-Test resolution / resolution_max logic so it doesn't change
-
-
-
 """
 
 @patch.object(rh, 'delete_queue')
@@ -233,9 +230,6 @@ class TestDownsampleChannel(unittest.TestCase):
 
         args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
-        for call in mMakeArgs.mock_calls:
-            print(call)
-
         expected = call(args1,
                         md.XYZ(0,0,0),
                         md.XYZ(2,2,2),
@@ -256,7 +250,80 @@ class TestDownsampleChannel(unittest.TestCase):
 
         self.assertEqual(args2['iso_x_stop'], 512)
         self.assertEqual(args2['iso_y_stop'], 512)
-        self.assertEqual(args2['iso_z_stop'], 32)
+        self.assertEqual(args2['iso_z_stop'], 16)
+
+    def test_downsample_channel_not_even(self, mRandom, mCreateQueue, mMakeArgs, mBucket, mLaunchLambda, mDeleteQueue):
+        args1 = self.get_args(type='isotropic', scale=2.5)
+
+        args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
+
+        expected = call(args1,
+                        md.XYZ(0,0,0),
+                        md.XYZ(3,3,3), # Scaled up from 2.5 to 3 cubes that will be downsampled
+                        md.XYZ(2,2,2),
+                        md.XYZ(512, 512, 16),
+                        False)
+        self.assertEqual(mMakeArgs.mock_calls, [expected])
+
+        self.assertEqual(args2['x_stop'], 640) # 640 = 512 * 2.5 / 2 (scaled up volume and then downsampled)
+        self.assertEqual(args2['y_stop'], 640)
+        self.assertEqual(args2['z_stop'], 20) # 20 = 16 * 2.5 / 2
+
+    def test_downsample_channel_non_zero_start(self, mRandom, mCreateQueue, mMakeArgs, mBucket, mLaunchLambda, mDeleteQueue):
+        ###### NOTES ######
+        # Derek: I believe that downsampling a non-zero start frame actually downsamples the data correctly
+        #        the problem that we run into is that the frame start shrinks towards zero. This presents an
+        #        issue when the Channel's Frame starts at the initial offset and downsampling shrinks the frame
+        #        for lower resolutions beyond the lower extent of the Channel's Frame, makng that data unavailable.
+        args1 = self.get_args(type='isotropic', scale=3,
+                              x_start=512, y_start=512, z_start=16) # Really two cubes offset by one cube
+
+        args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
+
+        expected = call(args1,
+                        md.XYZ(1,1,1),
+                        md.XYZ(3,3,3),
+                        md.XYZ(2,2,2),
+                        md.XYZ(512, 512, 16),
+                        False)
+        self.assertEqual(mMakeArgs.mock_calls, [expected])
+
+        self.assertEqual(args2['x_start'], 256) # 512 / 2
+        self.assertEqual(args2['y_start'], 256)
+        self.assertEqual(args2['z_start'], 8) # 16 / 2
+
+        self.assertEqual(args2['x_stop'], 768) # 512 * 3 / 2
+        self.assertEqual(args2['y_stop'], 768)
+        self.assertEqual(args2['z_stop'], 24) # 16 * 3 / 2
+
+    def test_downsample_channel_before_stop(self, mRandom, mCreateQueue, mMakeArgs, mBucket, mLaunchLambda, mDeleteQueue):
+        args1 = self.get_args(type='isotropic',
+                              resolution = 0, resolution_max = 3)
+
+        args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
+
+        self.assertEqual(args2['resolution'], 1)
+        self.assertTrue(args2['res_lt_max'])
+
+    def test_downsample_channel_at_stop(self, mRandom, mCreateQueue, mMakeArgs, mBucket, mLaunchLambda, mDeleteQueue):
+        args1 = self.get_args(type='isotropic',
+                              resolution = 1, resolution_max = 3)
+
+        args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
+
+        self.assertEqual(args2['resolution'], 2)
+        self.assertFalse(args2['res_lt_max'])
+
+    def test_downsample_channel_after_stop(self, mRandom, mCreateQueue, mMakeArgs, mBucket, mLaunchLambda, mDeleteQueue):
+        ###### NOTES ######
+        # Derek: Not a real world call, as the input arguments are no longer valid
+        args1 = self.get_args(type='isotropic',
+                              resolution = 2, resolution_max = 3)
+
+        args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
+
+        self.assertEqual(args2['resolution'], 3)
+        self.assertFalse(args2['res_lt_max'])
 
 
 
