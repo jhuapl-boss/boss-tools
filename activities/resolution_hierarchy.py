@@ -108,9 +108,9 @@ def downsample_channel(args):
     # TODO: load downsample_status_table from boss config
     # TODO: load downsample_volume_lambda from boss config
 
-    if 'downsample_id' not in args:
-        # NOTE: Right now assume that this will not produce two ids that would be executing at the same time
-        args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
+    # Different ID and queue for each resolution, as it takes 60 seconds
+    # to delete a queue
+    args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
 
     args['downsample_queue'] = create_queue(args['downsample_id'])
 
