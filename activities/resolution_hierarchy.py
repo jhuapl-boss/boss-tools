@@ -110,7 +110,7 @@ def downsample_channel(args):
 
     if 'downsample_id' not in args:
         # NOTE: Right now assume that this will not produce two ids that would be executing at the same time
-        args['downsample_id'] = str(random.random())
+        args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
 
     args['downsample_queue'] = create_queue(args['downsample_id'])
 
@@ -252,8 +252,16 @@ def launch_lambda(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     lambda_ = session.client('lambda')
     #ddb = session.client('dynamodb')
 
+    buckets = list(buckets)
+    log.info("Launcing {} lambdas".format(len(buckets)))
+
     slowdown = 0
+    count = 0
     for bucket in buckets:
+        count += 1
+        if count % 500 == 0:
+            log.debug("Launched {} lambdas".format(count))
+
         if MAX_NUM_PROCESSES > 0:
             # NOTE: Not currently accounting for DLQ messages, as if there is a message
             #       then the whole downsample has failed, due to AWS automatically retrying
