@@ -18,6 +18,7 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 from bossutils.multidimensional import XYZ, ceildiv
 from bossutils.multidimensional import range as xyz_range
 
+import types
 import json
 import time
 import random
@@ -174,29 +175,12 @@ def downsample_channel(args):
 
             sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag)
             sub_buckets = bucket(sub_args, BUCKET_SIZE)
-            num_lambdas = len(list(sub_buckets))
-            if num_lambdas > 1000000: # > 1 million
-                pool_size = 100
-                chunk_size = 10000
-            elif num_lambdas > 10000: # > 10 thousand
-                pool_size = 10
-                chunk_size = 1000
-            else:
-                pool_size = 10
-                chunk_size = 1
 
-            print("Pool size: {}".format(pool_size))
-            print("Launching {} lambdas in chunks of {}".format(num_lambdas, chunk_size))
-
-            # XXX: What happens to the other processes when one throws an exception?
-
-            with Pool(pool_size) as pool:
-                pool.map(launch_lambda_pool, sub_buckets, chunk_size)
-            #launch_lambda(args['downsample_volume_lambda'],
-            #              args['downsample_queue'],
-            #              args['downsample_status_table'],
-            #              args['downsample_id'],
-            #              sub_buckets)
+            launch_lambda_pool(args['downsample_volume_lambda'],
+                               args['downsample_queue'],
+                               args['downsample_status_table'],
+                               args['downsample_id'],
+                               sub_buckets)
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -265,15 +249,66 @@ def bucket(sub_args, bucket_size):
                 'bucket_args':  sub_args_bucket  # bucket of args
               }
 
-def launch_lambda_pool(buckets):
-    args = buckets['bucket_args'][0]['args']
-    launch_lambda(args['downsample_volume_lambda'],
-                  args['downsample_queue'],
-                  args['downsample_status_table'],
-                  args['downsample_id'],
-                  buckets)
+def bucket_(xs, size):
+    if type(xs) == types.GeneratorType:
+        running = True
+        while running:
+            ys = []
+            try:
+                for i in range(size):
+                    ys.append(next(xs))
+            except StopIteration:
+                running = False
+                if len(ys) == 0:
+                    return
 
-def launch_lambda(lambda_arn, queue_arn, status_table, downsample_id, buckets):
+            yield ys
+    else:
+        ys = []
+        for x in xs:
+            ys.append(xs)
+            if len(ys) == size:
+                yield ys
+                ys = []
+        if len(ys) > 0:
+            yield ys
+
+def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, buckets):
+    buckets = list(buckets)
+    num_lambdas = len(buckets)
+
+    if num_lambdas > 1000000: # > 1 million
+        pool_size = 100
+        chunk_size = 10000
+    elif num_lambdas > 10000: # > 10 thousand
+        pool_size = 10
+        chunk_size = 1000
+    else:
+        pool_size = 10
+        chunk_size = 1
+
+    chunks = ((lambda_arn, queue_arn, status_table, downsample_id, buckets_)
+              for buckets_ in bucket_(buckets, chunk_size))
+
+    log.debug("Launching {} lambdas in chunks of {} using {} processes".format(num_lambdas/chunk_size, chunk_size, pool_size))
+
+    start = datetime.now()
+    with Pool(pool_size) as pool:
+        pool.starmap(launch_lambdas, chunks)
+    stop = datetime.now()
+    log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
+
+    # Finished launching lambdas, need to wait for all to finish
+    log.info("Finished launching lambdas")
+
+    time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last launched lambda to finish
+    if check_queue(queue_arn) > 0:
+        error_state(status_table, queue_arn, downsample_id)
+
+
+def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
+    log = logger.BossLogger().logger
+
     session = aws.get_session();
     lambda_ = session.client('lambda')
     #ddb = session.client('dynamodb')
@@ -288,120 +323,51 @@ def launch_lambda(lambda_arn, queue_arn, status_table, downsample_id, buckets):
         if count % 500 == 0:
             log.debug("Launched {} lambdas".format(count))
 
-        if MAX_NUM_PROCESSES > 0:
-            # NOTE: Not currently accounting for DLQ messages, as if there is a message
-            #       then the whole downsample has failed, due to AWS automatically retrying
-            #       lambdas for us (if we figure out that the AWS auto-retry abilities
-            #       don't work for us then this has to be revisited)
-
-            pass
-            # DISABLED
-            #while status_count(status_table, downsample_id) > MAX_NUM_PROCESSES:
-            #    time.sleep(DYNAMODB_POLL)
-
         retry = 0
 
         keys = []
-        try:
-            pass
-            # DISABLED
-            #for sub_arg in bucket:
-            #    item = {'downsample_id': {'S': downsample_id},
-            #            'cube_morton': {'N': sub_args['target'].morton}}
-            #    ddb.put_item(TableName = status_table, Item = item)
-            #    keys.append(item)
-        except Exception as ex: # XXX: more specific errors?
-            for key in keys:
+        try: 
+            while True:
+                time.sleep(slowdown)
                 try:
-                    ddb.delete_item(TableName = status_table, Key = key)
-                except:
-                    log.exception("Could not delete key '{}' from downsample status table".format(key))
+                    lambda_.invoke(FunctionName = lambda_arn,
+                                   InvocationType = 'Event', # Async execution
+                                   Payload = json.dumps(bucket).encode('UTF8'))
+                except lambda_.exceptions.RequestTooLargeException:
+                    # Cannot handle these requests
+                    raise LambdaLaunchError("Lambda payload is too large, unable to launch")
+                except (lambda_.exceptions.TooManyRequestsException,):
+                    # Need to wait until some executions has finished
+                    log.debug("Unavailable resources, waiting for some lambdas to finish")
+                    if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
+                        raise LambdaRetryLimitExceededError()
+                    retry += 1
 
-            ex = DynamoDBStatusError("Problem creating state entries: {}".format(ex))
+                    # Wait for some of the launched lambdas to finish
+                    time.sleep(MAX_LAMBDA_TIME.seconds/2)
+                except (lambda_.exceptions.EC2ThrottledException,):
+                    # Need to slow down
+                    log.debug("Throttled, slowing down")
+                    if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
+                        raise LambdaRetryLimitExceededError()
+                    retry += 1
+                    slowdown += 1 # XXX: is there a better value?
+                                  # XXX: how to handle decrementing slowdown value?
+                                  #      maybe remove 1 after a successful launch?
+                else:
+                    # Successfully launched lambda
+                    break
+        except ResolutionHierarchyError as ex:
             error_state(status_table, queue_arn, downsample_id, ex=ex)
+        except Exception as ex:
+            log.debug(ex)
+            error_state(status_table, queue_arn, downsample_id)
         else:
-            try: 
-                while True:
-                    time.sleep(slowdown)
-                    try:
-                        lambda_.invoke(FunctionName = lambda_arn,
-                                       InvocationType = 'Event', # Async execution
-                                       Payload = json.dumps(bucket).encode('UTF8'))
-                    except lambda_.exceptions.RequestTooLargeException:
-                        # Cannot handle these requests
-                        raise LambdaLaunchError("Lambda payload is too large, unable to launch")
-                    except (lambda_.exceptions.TooManyRequestsException,):
-                        # Need to wait until some executions has finished
-                        log.debug("Unavailable resources, waiting for some lambdas to finish")
-                        if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
-                            raise LambdaRetryLimitExceededError()
-                        retry += 1
-
-                        # DISABLED
-                        # busy loop until the number of cubes is less than the current value
-                        #starting = status_count(status_table, downsample_id)
-                        #while True:
-                        #    time.sleep(DYNAMODB_POLL)
-                        #    current = status_count(status_table, downsample_id)
-                        #    if current < starting:
-                        #        break
-                        
-                        # Wait for some of the launched lambdas to finish
-                        time.sleep(MAX_LAMBDA_TIME.seconds/2)
-                    except (lambda_.exceptions.EC2ThrottledException,):
-                        # Need to slow down
-                        log.debug("Throttled, slowing down")
-                        if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
-                            raise LambdaRetryLimitExceededError()
-                        retry += 1
-                        slowdown += 1 # XXX: is there a better value?
-                                      # XXX: how to handle decrementing slowdown value?
-                                      #      maybe remove 1 after a successful launch?
-                    else:
-                        # Successfully launched lambda
-                        break
-            except ResolutionHierarchyError as ex:
-                error_state(status_table, queue_arn, downsample_id, ex=ex)
-            except Exception as ex:
-                print(ex)
-                # DISABLED
-                # Remove keys that were created but no lambda could be launched for
-                #for key in keys:
-                #    try:
-                #        ddb.delete_item(TableName = status_table, Key = key)
-                #    except:
-                #        log.exception("Could not delete key '{}' from downsample status table".format(key))
-
+            # Check for errors after launching each lambda
+            msgs = check_queue(queue_arn)
+            if msgs > 0:
+                # Error state
                 error_state(status_table, queue_arn, downsample_id)
-            else:
-                # Check for errors after launching each lambda
-                msgs = check_queue(queue_arn)
-                if msgs > 0:
-                    # Error state
-                    error_state(status_table, queue_arn, downsample_id)
-
-    # Finished launching lambdas, need to wait for all to finish
-    log.info("Finished launching lambdas")
-
-# DISABLED
-#    starting = datetime.now()
-#    while True:
-#        time.sleep(DYNAMODB_POLL)
-#
-#        if status_count(status_table, downsample_id) == 0:
-#            log.info("Lambdas all finished")
-#            break
-#
-#        if check_queue(queue_arn) > 0:
-#            error_state(status_table, queue_arn, downsample_id)
-#
-#        # An extra check to make sure we don't run forever
-#        current = datetime.now()
-#        if (current - starting) > MAX_LAMBDA_TIME:
-#            error_state(status_table, queue_arn, downsample_id)
-    time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last launched lambda to finish
-    if check_queue(queue_arn) > 0:
-        error_state(status_table, queue_arn, downsample_id)
 
 
 def status_count(status_table, downsample_id):
