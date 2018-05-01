@@ -21,6 +21,7 @@ from bossutils.multidimensional import range as xyz_range
 import json
 import time
 import random
+from multiprocessing import Pool
 from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
@@ -173,12 +174,29 @@ def downsample_channel(args):
 
             sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag)
             sub_buckets = bucket(sub_args, BUCKET_SIZE)
+            num_lambdas = len(list(sub_buckets))
+            if num_lambdas > 1000000: # > 1 million
+                pool_size = 100
+                chuck_size = 10000
+            elif num_lambdas > 10000: # > 10 thousand
+                pool_size = 10
+                chuck_size = 1000
+            else:
+                pool_size = 10
+                chunk_size = 1
 
-            launch_lambda(args['downsample_volume_lambda'],
-                          args['downsample_queue'],
-                          args['downsample_status_table'],
-                          args['downsample_id'],
-                          sub_buckets)
+            print("Pool size: {}".format(pool_size))
+            print("Launching {} lambdas in chunks of {}".format(num_lambdas, chunk_size))
+
+            # XXX: What happens to the other processes when one throws an exception?
+
+            with Pool(pool_size) as pool:
+                pool.map(launch_lambda_pool, sub_buckets, chunk_size))
+            #launch_lambda(args['downsample_volume_lambda'],
+            #              args['downsample_queue'],
+            #              args['downsample_status_table'],
+            #              args['downsample_id'],
+            #              sub_buckets)
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -246,6 +264,14 @@ def bucket(sub_args, bucket_size):
                 'lambda-name': 'downsample_volume',  # name of the function in multiLambda to call
                 'bucket_args':  sub_args_bucket  # bucket of args
               }
+
+def launch_lambda_pool(buckets):
+    args = buckets['bucket_args'][0]['args']
+    launch_lambda(args['downsample_volume_lambda'],
+                  args['downsample_queue'],
+                  args['downsample_status_table'],
+                  args['downsample_id'],
+                  buckets)
 
 def launch_lambda(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     session = aws.get_session();
