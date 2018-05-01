@@ -177,10 +177,10 @@ def downsample_channel(args):
             num_lambdas = len(list(sub_buckets))
             if num_lambdas > 1000000: # > 1 million
                 pool_size = 100
-                chuck_size = 10000
+                chunk_size = 10000
             elif num_lambdas > 10000: # > 10 thousand
                 pool_size = 10
-                chuck_size = 1000
+                chunk_size = 1000
             else:
                 pool_size = 10
                 chunk_size = 1
