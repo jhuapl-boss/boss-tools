@@ -191,7 +191,7 @@ def downsample_channel(args):
             # XXX: What happens to the other processes when one throws an exception?
 
             with Pool(pool_size) as pool:
-                pool.map(launch_lambda_pool, sub_buckets, chunk_size))
+                pool.map(launch_lambda_pool, sub_buckets, chunk_size)
             #launch_lambda(args['downsample_volume_lambda'],
             #              args['downsample_queue'],
             #              args['downsample_status_table'],
