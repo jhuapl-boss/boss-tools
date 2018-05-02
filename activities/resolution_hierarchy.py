@@ -294,7 +294,10 @@ def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, bucke
 
     start = datetime.now()
     with Pool(pool_size) as pool:
-        pool.starmap(launch_lambdas, chunks)
+        try:
+            pool.starmap(launch_lambdas, chunks)
+        except:
+            log.exception("Error encountered when launching lambdas")
     stop = datetime.now()
     log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
 
@@ -322,6 +325,9 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
         count += 1
         if count % 500 == 0:
             log.debug("Launched {} lambdas".format(count))
+
+        if count == 1:
+            log.debug("bucket: {} {}".format(len(json.dumps(bucket)), bucket))
 
         retry = 0
 
