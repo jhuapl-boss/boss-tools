@@ -32,7 +32,7 @@ log = logger.BossLogger().logger
 MAX_NUM_PROCESSES = 0
 
 # int: The number of volumes each sub_sfn should downsample with each execution
-BUCKET_SIZE = 1
+BUCKET_SIZE = 8
 
 # int: The number of retries for launching a lambda before givin up and failing
 #      This only applies to throttling / resource related exceptions
@@ -250,28 +250,14 @@ def bucket(sub_args, bucket_size):
               }
 
 def bucket_(xs, size):
-    if type(xs) == types.GeneratorType:
-        running = True
-        while running:
+    ys = []
+    for x in xs:
+        ys.append(x)
+        if len(ys) == size:
+            yield ys
             ys = []
-            try:
-                for i in range(size):
-                    ys.append(next(xs))
-            except StopIteration:
-                running = False
-                if len(ys) == 0:
-                    return
-
-            yield ys
-    else:
-        ys = []
-        for x in xs:
-            ys.append(xs)
-            if len(ys) == size:
-                yield ys
-                ys = []
-        if len(ys) > 0:
-            yield ys
+    if len(ys) > 0:
+        yield ys
 
 def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     buckets = list(buckets)
@@ -279,25 +265,32 @@ def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, bucke
 
     if num_lambdas > 1000000: # > 1 million
         pool_size = 100
-        chunk_size = 10000
+        chunk_size = 1#10000
     elif num_lambdas > 10000: # > 10 thousand
         pool_size = 10
-        chunk_size = 1000
+        chunk_size = 1#1000
     else:
         pool_size = 10
         chunk_size = 1
 
-    chunks = ((lambda_arn, queue_arn, status_table, downsample_id, buckets_)
-              for buckets_ in bucket_(buckets, chunk_size))
+    pool_size = 5
+    chunk_size = ceildiv(num_lambdas, pool_size)
 
-    log.debug("Launching {} lambdas in chunks of {} using {} processes".format(num_lambdas/chunk_size, chunk_size, pool_size))
+    chunks = ((lambda_arn, queue_arn, status_table, downsample_id, chunk)
+              for chunk in bucket_(buckets, chunk_size))
+              #for buckets_ in bucket_(buckets, chunk_size))
+
+    log.debug("Launching {} lambdas in chunks of {} using {} processes".format(num_lambdas, chunk_size, pool_size))
 
     start = datetime.now()
     with Pool(pool_size) as pool:
         try:
-            pool.starmap(launch_lambdas, chunks)
+            pool.starmap(launch_lambdas_, chunks)
         except:
-            log.exception("Error encountered when launching lambdas")
+            log.error("Error encountered when launching lambdas")
+            log.debug("Waiting for existing executions to finish")
+            time.sleep(MAX_LAMBDA_TIME.seconds)
+            raise
     stop = datetime.now()
     log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
 
@@ -308,6 +301,14 @@ def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, bucke
     if check_queue(queue_arn) > 0:
         error_state(status_table, queue_arn, downsample_id)
 
+def launch_lambdas_(*args):
+    try:
+        launch_lambdas(*args)
+    except Exception as ex:
+        log = logger.BossLogger().logger
+        log.exception("Error caught in process, raising to controller")
+        #raise Exception("Error caught")
+        raise ResolutionHierarchyError(str(ex))
 
 def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     log = logger.BossLogger().logger
@@ -316,7 +317,6 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
     lambda_ = session.client('lambda')
     #ddb = session.client('dynamodb')
 
-    buckets = list(buckets)
     log.info("Launcing {} lambdas".format(len(buckets)))
 
     slowdown = 0
@@ -326,8 +326,8 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
         if count % 500 == 0:
             log.debug("Launched {} lambdas".format(count))
 
-        if count == 1:
-            log.debug("bucket: {} {}".format(len(json.dumps(bucket)), bucket))
+        #if count == 1:
+        #    log.debug("bucket: {} {}".format(len(json.dumps(bucket)), bucket))
 
         retry = 0
 
@@ -339,9 +339,6 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
                     lambda_.invoke(FunctionName = lambda_arn,
                                    InvocationType = 'Event', # Async execution
                                    Payload = json.dumps(bucket).encode('UTF8'))
-                except lambda_.exceptions.RequestTooLargeException:
-                    # Cannot handle these requests
-                    raise LambdaLaunchError("Lambda payload is too large, unable to launch")
                 except (lambda_.exceptions.TooManyRequestsException,):
                     # Need to wait until some executions has finished
                     log.debug("Unavailable resources, waiting for some lambdas to finish")
@@ -364,10 +361,12 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
                     # Successfully launched lambda
                     break
         except ResolutionHierarchyError as ex:
-            error_state(status_table, queue_arn, downsample_id, ex=ex)
+            raise
+            #error_state(status_table, queue_arn, downsample_id, ex=ex)
         except Exception as ex:
-            log.debug(ex)
-            error_state(status_table, queue_arn, downsample_id)
+            log.warn(ex)
+            raise
+            #error_state(status_table, queue_arn, downsample_id)
         else:
             # Check for errors after launching each lambda
             msgs = check_queue(queue_arn)
@@ -444,7 +443,7 @@ def error_state(status_table, queue_arn, downsample_id, ex=None):
     #        log.exception("Problem polling state while waiting for lambdas to end")
 
     #    time.sleep(DYNAMODB_POLL)
-    time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last lambda launched to finish
+    #time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last lambda launched to finish
 
     if ex:
         raise ex
