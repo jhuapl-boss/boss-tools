@@ -22,7 +22,7 @@ import types
 import json
 import time
 import random
-from multiprocessing import Pool
+from multiprocessing import Pool, Value, cpu_count
 from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
@@ -45,6 +45,9 @@ DYNAMODB_POLL = 1
 # datetime.delta: The runtime of the downsample_volume lambda
 MAX_LAMBDA_TIME = timedelta(seconds=120)
 
+# datetime.delta: The maximum wait time after launching all lambdas
+MAX_WAIT_TIME = timedelta(hours=1)
+
 class ResolutionHierarchyError(Exception):
     pass
 
@@ -60,6 +63,9 @@ class FailedLambdaError(ResolutionHierarchyError):
     def __init__(self):
         msg = "A Lambda failed execution"
         super().__init__(msg)
+
+class LambdaWaitError(ResolutionHierarchyError):
+    pass
 
 class DynamoDBStatusError(ResolutionHierarchyError):
     pass
@@ -114,7 +120,8 @@ def downsample_channel(args):
     # to delete a queue
     args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
 
-    args['downsample_queue'] = create_queue(args['downsample_id'])
+    args['downsample_dlq'] = create_queue('downsample-dlq-' + args['downsample_id'])
+    args['downsample_status'] = create_queue('downsample-status-' + args['downsample_id'])
 
     try:
         #log.debug("Downsampling resolution " + str(args['resolution']))
@@ -177,9 +184,8 @@ def downsample_channel(args):
             sub_buckets = bucket(sub_args, BUCKET_SIZE)
 
             launch_lambda_pool(args['downsample_volume_lambda'],
-                               args['downsample_queue'],
-                               args['downsample_status_table'],
-                               args['downsample_id'],
+                               args['downsample_dlq'],
+                               args['downsample_status'],
                                sub_buckets)
 
             # Resize the coordinate frame extents as the data shrinks
@@ -209,13 +215,15 @@ def downsample_channel(args):
         args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
         return args
     finally:
-        delete_queue(args['downsample_queue'])
+        delete_queue(args['downsample_dlq'])
+        delete_queue(args['downsample_status'])
 
 def make_args(args, start, stop, step, dim, use_iso_flag):
+    target_ = XYZ(0,0,0)
     for target in xyz_range(start, stop, step = step):
         yield {
             'args': args,
-            'target': target, # XYZ type is automatically handled by JSON.dumps
+            'target': target_, # XYZ type is automatically handled by JSON.dumps
             'step': step,     # Since it is a subclass of tuple
             'dim': dim,
             'use_iso_flag': use_iso_flag,
@@ -259,7 +267,7 @@ def bucket_(xs, size):
     if len(ys) > 0:
         yield ys
 
-def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, buckets):
+def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
     buckets = list(buckets)
     num_lambdas = len(buckets)
 
@@ -273,12 +281,11 @@ def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, bucke
         pool_size = 10
         chunk_size = 1
 
-    pool_size = 5
+    pool_size = int(cpu_count() * 2.5)
     chunk_size = ceildiv(num_lambdas, pool_size)
 
-    chunks = ((lambda_arn, queue_arn, status_table, downsample_id, chunk)
+    chunks = ((lambda_arn, dlq_arn, status_arn, chunk)
               for chunk in bucket_(buckets, chunk_size))
-              #for buckets_ in bucket_(buckets, chunk_size))
 
     log.debug("Launching {} lambdas in chunks of {} using {} processes".format(num_lambdas, chunk_size, pool_size))
 
@@ -288,18 +295,34 @@ def launch_lambda_pool(lambda_arn, queue_arn, status_table, downsample_id, bucke
             pool.starmap(launch_lambdas_, chunks)
         except:
             log.error("Error encountered when launching lambdas")
-            log.debug("Waiting for existing executions to finish")
-            time.sleep(MAX_LAMBDA_TIME.seconds)
             raise
+            #log.debug("Waiting for existing executions to finish")
+            #time.sleep(MAX_LAMBDA_TIME.seconds)
     stop = datetime.now()
     log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
 
     # Finished launching lambdas, need to wait for all to finish
     log.info("Finished launching lambdas")
 
-    time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last launched lambda to finish
-    if check_queue(queue_arn) > 0:
-        error_state(status_table, queue_arn, downsample_id)
+    start = datetime.now()
+    while True:
+        try:
+            count = check_queue(status_arn)
+            log.debug("Status polling - count {}".format(count))
+            if count == num_lambdas:
+                break
+        except:
+            log.exception("Problem polling state while waiting for lambdas to end")
+
+        if check_queue(dlq_arn) > 0:
+            raise FailedLambdaError()
+
+        current = datetime.now()
+        if current - start > MAX_WAIT_TIME:
+            log.error("Exceeded maximum wait time for lambdas to finish downsampling")
+            raise LambdaWaitError()
+        
+        time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def launch_lambdas_(*args):
     try:
@@ -310,7 +333,7 @@ def launch_lambdas_(*args):
         #raise Exception("Error caught")
         raise ResolutionHierarchyError(str(ex))
 
-def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
+def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
     log = logger.BossLogger().logger
 
     session = aws.get_session();
@@ -362,17 +385,14 @@ def launch_lambdas(lambda_arn, queue_arn, status_table, downsample_id, buckets):
                     break
         except ResolutionHierarchyError as ex:
             raise
-            #error_state(status_table, queue_arn, downsample_id, ex=ex)
         except Exception as ex:
             log.warn(ex)
             raise
-            #error_state(status_table, queue_arn, downsample_id)
         else:
             # Check for errors after launching each lambda
-            msgs = check_queue(queue_arn)
+            msgs = check_queue(dlq_arn)
             if msgs > 0:
-                # Error state
-                error_state(status_table, queue_arn, downsample_id)
+                raise FailedLambdaError()
 
 
 def status_count(status_table, downsample_id):
@@ -397,12 +417,11 @@ def status_count(status_table, downsample_id):
         except Exception as ex:
             raise DynamoDBStatusError("Could not query status table count: {}".format(ex))
 
-def create_queue(downsample_id):
+def create_queue(queue_name):
     session = aws.get_session()
     sqs = session.client('sqs')
 
-    name = "downsample-{}".format(downsample_id)
-    resp = sqs.create_queue(QueueName = name)
+    resp = sqs.create_queue(QueueName = queue_name)
     url = resp['QueueUrl']
     return url
 
@@ -431,21 +450,3 @@ def check_queue(queue_arn):
     else:
         message_count = int(resp['Attributes']['ApproximateNumberOfMessages'])
         return message_count
-
-def error_state(status_table, queue_arn, downsample_id, ex=None):
-    log.info("DLQ message detected, error mode")
-
-    #while True:
-    #    try:
-    #        if status_count(status_table, downsample_id) - check_queue(queue_arn) == 0:
-    #            break
-    #    except:
-    #        log.exception("Problem polling state while waiting for lambdas to end")
-
-    #    time.sleep(DYNAMODB_POLL)
-    #time.sleep(MAX_LAMBDA_TIME.seconds) # wait for the last lambda launched to finish
-
-    if ex:
-        raise ex
-    else:
-        raise FailedLambdaError()
