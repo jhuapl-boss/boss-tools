@@ -308,8 +308,16 @@ def downsample_cube(volume, cube, is_annotation):
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
+    sqs = boto3.resource('sqs')
+    status_arn = args['bucket_args'][0]['args']['downsample_status']
 
-    """Convert JSON arguments into the expected internal types"""
+    try:
+        queue = sqs.Queue(status_arn)
+    except Exception as ex:
+        log.error("Could not verify downsample status queue: {}".format(str(ex)))
+        log.info("Exiting early")
+        return
+
     def convert(args_, key):
         args_[key] = XYZ(*args_[key])
 
@@ -320,3 +328,12 @@ def handler(args, context):
 
         downsample_volume(arg['args'], arg['target'], arg['step'], arg['dim'], arg['use_iso_flag'])
 
+    try:
+        queue = sqs.Queue(status_arn)
+    except Exception as ex:
+        log.error("Could not get downsample status queue: {}".format(str(ex)))
+        log.info("Exiting without error")
+        return
+
+    # Notify Activity that volume(s) were downsample successfully
+    queue.send_message(MessageBody = json.dumps(args))
