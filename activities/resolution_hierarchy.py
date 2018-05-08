@@ -27,10 +27,6 @@ from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
 
-# int: Approximent maximum number of concurrent lambda executions to have running
-#      Zero (0) means no limit
-MAX_NUM_PROCESSES = 0
-
 # int: The number of volumes each sub_sfn should downsample with each execution
 BUCKET_SIZE = 8
 
@@ -38,9 +34,6 @@ BUCKET_SIZE = 8
 #      This only applies to throttling / resource related exceptions
 #      Zero (0) means no limit
 RETRY_LIMIT = 0
-
-# int - seconds: The number of seconds between polling for the count in the status table
-DYNAMODB_POLL = 1
 
 # datetime.delta: The runtime of the downsample_volume lambda
 MAX_LAMBDA_TIME = timedelta(seconds=120)
@@ -67,9 +60,6 @@ class FailedLambdaError(ResolutionHierarchyError):
 class LambdaWaitError(ResolutionHierarchyError):
     pass
 
-class DynamoDBStatusError(ResolutionHierarchyError):
-    pass
-
 def downsample_channel(args):
     """
     Slice the given channel into chunks of 2x2x2 or 2x2x1 cubes that are then
@@ -81,9 +71,7 @@ def downsample_channel(args):
 
     Args:
         args {
-            downsample_id (str) (Optional, one will be generated if not provided)
             downsample_volume_lambda (ARN | lambda name)
-            downsample_status_table (ARN | table name)
 
             collection_id (int)
             experiment_id (int)
@@ -113,13 +101,11 @@ def downsample_channel(args):
         }
     """
 
-    # TODO: load downsample_status_table from boss config
     # TODO: load downsample_volume_lambda from boss config
 
     # Different ID and queue for each resolution, as it takes 60 seconds
     # to delete a queue
     args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
-
     args['downsample_dlq'] = create_queue('downsample-dlq-' + args['downsample_id'])
     args['downsample_status'] = create_queue('downsample-status-' + args['downsample_id'])
 
@@ -268,21 +254,11 @@ def bucket_(xs, size):
         yield ys
 
 def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
-    buckets = list(buckets)
+    buckets = list(buckets) # convert from generator to list for length
     num_lambdas = len(buckets)
 
-    if num_lambdas > 1000000: # > 1 million
-        pool_size = 100
-        chunk_size = 1#10000
-    elif num_lambdas > 10000: # > 10 thousand
-        pool_size = 10
-        chunk_size = 1#1000
-    else:
-        pool_size = 10
-        chunk_size = 1
-
     pool_size = int(cpu_count() * 2.5)
-    chunk_size = ceildiv(num_lambdas, pool_size)
+    chunk_size = ceildiv(num_lambdas, pool_size) # divide lambdas between pool processes
 
     chunks = ((lambda_arn, dlq_arn, status_arn, chunk)
               for chunk in bucket_(buckets, chunk_size))
@@ -296,8 +272,6 @@ def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
         except:
             log.error("Error encountered when launching lambdas")
             raise
-            #log.debug("Waiting for existing executions to finish")
-            #time.sleep(MAX_LAMBDA_TIME.seconds)
     stop = datetime.now()
     log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
 
@@ -306,13 +280,10 @@ def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
 
     start = datetime.now()
     while True:
-        try:
-            count = check_queue(status_arn)
-            log.debug("Status polling - count {}".format(count))
-            if count == num_lambdas:
-                break
-        except:
-            log.exception("Problem polling state while waiting for lambdas to end")
+        count = check_queue(status_arn)
+        log.debug("Status polling - count {}".format(count))
+        if count == num_lambdas:
+            break
 
         if check_queue(dlq_arn) > 0:
             raise FailedLambdaError()
@@ -325,12 +296,16 @@ def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
         time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def launch_lambdas_(*args):
+    """
+    For whatever reason the exceptions raised by launch_lambdas were not
+    propogating correctly to the parent process. If a new exception is raised
+    then it is propogated, not sure why. This wrapper works around this problem.
+    """
     try:
         launch_lambdas(*args)
     except Exception as ex:
         log = logger.BossLogger().logger
         log.exception("Error caught in process, raising to controller")
-        #raise Exception("Error caught")
         raise ResolutionHierarchyError(str(ex))
 
 def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
@@ -338,7 +313,6 @@ def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
 
     session = aws.get_session();
     lambda_ = session.client('lambda')
-    #ddb = session.client('dynamodb')
 
     log.info("Launcing {} lambdas".format(len(buckets)))
 
@@ -348,9 +322,6 @@ def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
         count += 1
         if count % 500 == 0:
             log.debug("Launched {} lambdas".format(count))
-
-        #if count == 1:
-        #    log.debug("bucket: {} {}".format(len(json.dumps(bucket)), bucket))
 
         retry = 0
 
@@ -394,29 +365,6 @@ def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
             if msgs > 0:
                 raise FailedLambdaError()
 
-
-def status_count(status_table, downsample_id):
-    raise Exception('disabled')
-    session = aws.get_session()
-    ddb = session.client('dynamodb')
-
-    slowdown = 0
-    while True:
-        try:
-            time.sleep(slowdown)
-            resp = ddb.query(TableName = status_table,
-                             Select = 'COUNT',
-                             KeyConditionExpression = "downsample_id = :id",
-                             ExpressionAttributeValues = {
-                                 ":id": {'S': downsample_id}
-                             })
-            return resp['Count']
-        except ddb.ProvisionedThroughputExceededException:
-            log.debug("Status check throttled, slowing down")
-            slowdown += 1 # XXX: is there a better value?
-        except Exception as ex:
-            raise DynamoDBStatusError("Could not query status table count: {}".format(ex))
-
 def create_queue(queue_name):
     session = aws.get_session()
     sqs = session.client('sqs')
@@ -435,9 +383,6 @@ def delete_queue(queue_arn):
         log.exception("Could not delete status queue '{}'".format(queue_arn))
 
 def check_queue(queue_arn):
-    # NOTE: Right now assuming that AWS Lambda retries mean that we don't have to 
-    #       implement our own retry logic
-
     session = aws.get_session()
     sqs = session.client('sqs')
 
