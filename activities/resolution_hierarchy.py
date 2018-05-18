@@ -27,6 +27,20 @@ from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
 
+######################################################
+### Configure Remote Debugging via SIGUSR1 trigger ###
+def sigusr_handler(sig, frame):
+    try:
+        import rpdb2
+        rpdb2.start_embedded_debugger('password')
+    except:
+        log.exception("SIGUSR1 caught but embedded debugger could not be started")
+
+def enable_debug_handler():
+    import signal
+    signal.signal(signal.SIGUSR1, sigusr_handler)
+######################################################
+
 # int: The number of volumes each sub_sfn should downsample with each execution
 BUCKET_SIZE = 8
 
@@ -40,6 +54,10 @@ MAX_LAMBDA_TIME = timedelta(seconds=120)
 
 # datetime.delta: The maximum wait time after launching all lambdas
 MAX_WAIT_TIME = timedelta(hours=1)
+
+# int: The number of status queue counts that have to be the same for
+#      an exception to be raised (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
+UNCHANGING_MAX = 10
 
 class ResolutionHierarchyError(Exception):
     pass
@@ -107,7 +125,7 @@ def downsample_channel(args):
     # to delete a queue
     args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
     args['downsample_dlq'] = create_queue('downsample-dlq-' + args['downsample_id'])
-    args['downsample_status'] = create_queue('downsample-status-' + args['downsample_id'])
+    args['downsample_status'] = create_queue('downsample-status-' + args['downsample_id'], fifo=True)
 
     try:
         #log.debug("Downsampling resolution " + str(args['resolution']))
@@ -205,11 +223,10 @@ def downsample_channel(args):
         delete_queue(args['downsample_status'])
 
 def make_args(args, start, stop, step, dim, use_iso_flag):
-    target_ = XYZ(0,0,0)
     for target in xyz_range(start, stop, step = step):
         yield {
             'args': args,
-            'target': target_, # XYZ type is automatically handled by JSON.dumps
+            'target': target, # XYZ type is automatically handled by JSON.dumps
             'step': step,     # Since it is a subclass of tuple
             'dim': dim,
             'use_iso_flag': use_iso_flag,
@@ -257,7 +274,7 @@ def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
     buckets = list(buckets) # convert from generator to list for length
     num_lambdas = len(buckets)
 
-    pool_size = int(cpu_count() * 2.5)
+    pool_size = int(cpu_count() * 2)
     chunk_size = ceildiv(num_lambdas, pool_size) # divide lambdas between pool processes
 
     chunks = ((lambda_arn, dlq_arn, status_arn, chunk)
@@ -279,14 +296,29 @@ def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
     log.info("Finished launching lambdas")
 
     start = datetime.now()
+    previous_count = 0
+    count_count = 1
     while True:
+        if check_queue(dlq_arn) > 0:
+            raise FailedLambdaError()
+
         count = check_queue(status_arn)
         log.debug("Status polling - count {}".format(count))
+
+        if count == previous_count:
+            count_count += 1
+            if count_count == UNCHANGING_MAX:
+                raise ResolutionHierarchyError("Status count not changing")
+        else:
+            previous_count = count
+            count_count = 1
+
         if count == num_lambdas:
             break
 
-        if check_queue(dlq_arn) > 0:
-            raise FailedLambdaError()
+        if count > num_lambdas:
+            log.warning("More status messages than expected, exiting: {} > {}".format(count, num_lambdas))
+            break
 
         current = datetime.now()
         if current - start > MAX_WAIT_TIME:
@@ -301,6 +333,8 @@ def launch_lambdas_(*args):
     propogating correctly to the parent process. If a new exception is raised
     then it is propogated, not sure why. This wrapper works around this problem.
     """
+    enable_debug_handler()
+
     try:
         launch_lambdas(*args)
     except Exception as ex:
@@ -365,11 +399,20 @@ def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
             if msgs > 0:
                 raise FailedLambdaError()
 
-def create_queue(queue_name):
+def create_queue(queue_name, fifo=False):
     session = aws.get_session()
     sqs = session.client('sqs')
+    attributes = {}
 
-    resp = sqs.create_queue(QueueName = queue_name)
+    if fifo:
+        queue_name += '.fifo'
+        attributes = {
+            'FifoQueue': 'true',
+            'ContentBasedDeduplication': 'true',
+        }
+
+    resp = sqs.create_queue(QueueName = queue_name,
+                            Attributes = attributes)
     url = resp['QueueUrl']
     return url
 
@@ -394,4 +437,12 @@ def check_queue(queue_arn):
         return 0
     else:
         message_count = int(resp['Attributes']['ApproximateNumberOfMessages'])
+        if message_count > 0 and not queue_arn.endswith('.fifo'):
+            try:
+                resp = sqs.receive_message(QueueUrl = queue_arn)
+                for msg in resp['Messages']:
+                    error = msg['Body']['Records'][0]['Sns']['MessageAttributes']['ErrorMessage']['Value']
+                    log.debug("DLQ Error: {}".format(error))
+            except:
+                log.exception("Problem gettting DLQ error message")
         return message_count

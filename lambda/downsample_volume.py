@@ -137,12 +137,6 @@ class S3DynamoDBTable(object):
 
         return 'Item' in resp
 
-#def DeleteStatusKey(region, status_table, downsample_id, morton_id):
-#    ddb = boto3.client('dynamodb', region_name=region)
-#    key = {'downsample_id': {'S': downsample_id},
-#           'cube_morton': {'N': morton_id}}
-#    ddb.delete_item(TableName = status_table, Key = key)
-
 
 #### Main lambda logic ####
 
@@ -210,7 +204,15 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     volume_empty = True # abort if the volume doesn't exist in S3
     for offset in xyz_range(step):
-        cube = target + offset
+        if args.get('test'):
+            # Enable Test Mode
+            # This is where the cubes downsamples are all taken from 0/0/0
+            # so that the entire frame doesn't have to be populated to test
+            # the code paths that downsample cubes
+            cube = offset # use target 0/0/0
+        else:
+            cube = target + offset
+
         try:
             obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
             data = s3.get(obj_key)
@@ -234,7 +236,6 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     if volume_empty:
         log.debug("Completely empty volume, not downsampling")
-        #DeleteStatusKey(args['aws_region'], args['downsample_status_table'], args['downsample_id'], target.morton)
         return
 
     # Create downsampled cube
@@ -266,7 +267,6 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1))
         s3_index.put(idx_key)
 
-    #DeleteStatusKey(args['aws_region'], args['downsample_status_table'], args['downsample_id'], target.morton)
 
 def downsample_cube(volume, cube, is_annotation):
     """Downsample the given Buffer into the target Buffer
@@ -313,6 +313,7 @@ def handler(args, context):
 
     try:
         queue = sqs.Queue(status_arn)
+        queue.load()
     except Exception as ex:
         log.error("Could not verify downsample status queue: {}".format(str(ex)))
         log.info("Exiting early")
@@ -330,10 +331,12 @@ def handler(args, context):
 
     try:
         queue = sqs.Queue(status_arn)
+        queue.load()
     except Exception as ex:
         log.error("Could not get downsample status queue: {}".format(str(ex)))
         log.info("Exiting without error")
         return
 
     # Notify Activity that volume(s) were downsample successfully
-    queue.send_message(MessageBody = json.dumps(args))
+    queue.send_message(MessageBody = json.dumps(args),
+                       MessageGroupId = 'downsample')
