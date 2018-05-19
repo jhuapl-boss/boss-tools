@@ -441,7 +441,8 @@ def check_queue(queue_arn):
             try:
                 resp = sqs.receive_message(QueueUrl = queue_arn)
                 for msg in resp['Messages']:
-                    error = msg['Body']['Records'][0]['Sns']['MessageAttributes']['ErrorMessage']['Value']
+                    body = json.loads(msg['Body'])
+                    error = body['Records'][0]['Sns']['MessageAttributes']['ErrorMessage']['Value']
                     log.debug("DLQ Error: {}".format(error))
             except:
                 log.exception("Problem gettting DLQ error message")
