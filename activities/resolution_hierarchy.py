@@ -203,7 +203,8 @@ def downsample_channel(args):
             launch_lambdas(lambda_count,
                            args['downsample_volume_laambda'],
                            json.dumps(lambda_args).encode('UTF8'),
-                           dlq_arn)
+                           dlq_arn,
+                           cubes_arn)
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -264,8 +265,11 @@ def populate_cubes(queue_arn, start, stop, step):
 
     log.debug("Enqueueing {} cubes in chunks of {} using {} processes".format(count, enqueue_size, POOL_SIZE))
 
+    start = datetime.now()
     with Pool(POOL_SIZE) as pool:
         pool.starmap(enqueue_cubes, args)
+    stop = datetime.now()
+    log.info("Enqueued {} cubes in {}".format(count, stop - start))
 
     return count
 
@@ -290,7 +294,7 @@ def enqueue_cubes(queue_arn, cubes):
         log.exception("Error caught in process, raising to controller")
         raise ResolutionHierarchyError(str(ex))
 
-def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn):
+def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
     per_lambda = ceildiv(total_count, POOL_SIZE)
     d,m = divmod(total_count, per_lambda)
     counts = [per_lambda] * d + [m]
@@ -302,8 +306,42 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn):
     args = ((count, lambda_arn, lambda_args, dlq_arn)
             for count in counts)
 
+    start = datetime.now()
     with Pool(POOL_SIZE) as pool:
         pool.starmap(invoke_lambdas, args)
+    stop = datetime.now()
+    log.info("Launched {} lambdas in {}".format(total_count, stop - start))
+
+    # Finished launching lambdas, need to wait for all to finish
+    log.info("Finished launching lambdas")
+
+    start = datetime.now()
+    previous_count = 0
+    count_count = 1
+    while True:
+        if check_queue(dlq_arn) > 0:
+            raise FailedLambdaError()
+
+        count = check_queue(cubes_arn)
+        log.debug("Status polling - count {}".format(count))
+
+        if count == previous_count:
+            count_count += 1
+            if count_count == UNCHANGING_MAX:
+                raise ResolutionHierarchyError("Status count not changing")
+        else:
+            previous_count = count
+            count_count = 1
+
+        if count == 0:
+            break
+
+        current = datetime.now()
+        if current - start > MAX_WAIT_TIME:
+            log.error("Exceeded maximum wait time for lambdas to finish downsampling")
+            raise LambdaWaitError()
+
+        time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
     try:
@@ -501,6 +539,7 @@ def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
             msgs = check_queue(dlq_arn)
             if msgs > 0:
                 raise FailedLambdaError()
+'''
 
 def create_queue(queue_name, fifo=False):
     session = aws.get_session()
@@ -540,7 +579,7 @@ def check_queue(queue_arn):
         return 0
     else:
         message_count = int(resp['Attributes']['ApproximateNumberOfMessages'])
-        if message_count > 0 and not queue_arn.endswith('.fifo'):
+        if message_count > 0 and 'dlq' in queue_arn:
             try:
                 resp = sqs.receive_message(QueueUrl = queue_arn)
                 for msg in resp['Messages']:
@@ -550,4 +589,3 @@ def check_queue(queue_arn):
             except:
                 log.exception("Problem gettting DLQ error message")
         return message_count
-'''
