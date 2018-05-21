@@ -57,7 +57,7 @@ MAX_WAIT_TIME = timedelta(hours=1)
 
 # int: The number of status queue counts that have to be the same for
 #      an exception to be raised (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
-UNCHANGING_MAX = 10
+UNCHANGING_MAX = 3
 
 # int: The number of multiprocessing pool workers to use
 POOL_SIZE = int(cpu_count() * 2)
@@ -197,11 +197,12 @@ def downsample_channel(args):
                 'step': step,
                 'dim': dim,
                 'use_iso_flag': use_iso_flag,
+                'dlq_arn': dlq_arn,
                 'cubes_arn': cubes_arn,
             }
 
             launch_lambdas(lambda_count,
-                           args['downsample_volume_laambda'],
+                           args['downsample_volume_lambda'],
                            json.dumps(lambda_args).encode('UTF8'),
                            dlq_arn,
                            cubes_arn)
@@ -248,7 +249,7 @@ def chunk(xs, size):
 
 def num_cubes(start, stop, step):
     extents = (stop - start) / step
-    return extents.x * extents.y * extents.z
+    return int(extents.x * extents.y * extents.z)
 
 def make_cubes(start, stop, step):
     for target in xyz_range(start, stop, step = step):
@@ -279,7 +280,7 @@ def enqueue_cubes(queue_arn, cubes):
         queue = sqs.Queue(queue_arn)
         count = 0
 
-        msgs = ({'Id': id(cube),
+        msgs = ({'Id': str(id(cube)),
                  'MessageBody': json.dumps(cube)}
                 for cube in cubes)
 
@@ -328,7 +329,13 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         if count == previous_count:
             count_count += 1
             if count_count == UNCHANGING_MAX:
-                raise ResolutionHierarchyError("Status count not changing")
+                needed = ceildiv(count, BUCKET_SIZE)
+                log.debug("Launching {} more lambdas".format(needed))
+
+                start_ = datetime.now()
+                invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
+                stop_ = datetime.now()
+                log.debug("Launched {} lambdas in {}".format(needed, stop_ - start_))
         else:
             previous_count = count
             count_count = 1
