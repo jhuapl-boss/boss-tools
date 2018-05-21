@@ -1,0 +1,1 @@
+../lambda/delete_tile_objs_lambda.py
