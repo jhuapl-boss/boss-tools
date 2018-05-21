@@ -25,10 +25,11 @@ log = logger.BossLogger().logger
 
 POLL_DELAY = 0
 STATUS_DELAY = 1
-MAX_NUM_PROCESSES = 20
+MAX_NUM_PROCESSES = 120
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
-MAX_NUM_TILES_PER_LAMBDA = 15000
+MAX_NUM_TILES_PER_LAMBDA = 45000
+
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -85,12 +86,19 @@ def ingest_populate(args):
                      poll_delay = POLL_DELAY,
                      status_delay = STATUS_DELAY)
 
-    total_sent = reduce(lambda x, y: x+y, results, 0)
+    tile_count = get_tile_count(args)
+
+    lambdas_should_have_fired = math.ceil(tile_count/MAX_NUM_TILES_PER_LAMBDA)
+    lambdas_fired = reduce(lambda x, y: x+y, results, 0)
+    if lambdas_should_have_fired != lambdas_fired:
+        log.debug("Warning not enough lambdas fired.  Should be {} but was {}".format(lambdas_should_have_fired,
+                                                                                  lambdas_fired))
 
     return {
         'arn': args['upload_queue'],
-        'count': total_sent,
+        'count': tile_count,
     }
+
 
 def clear_queue(arn):
     """Delete any existing messages in the given SQS queue
@@ -134,8 +142,9 @@ def split_args(args):
         args_['tiles_to_skip'] = tiles_count_offset * MAX_NUM_TILES_PER_LAMBDA
         yield args_
 
+
 def verify_count(args):
-    """Verify that the number of messages in a queue is the given number
+    """Verify that the number of messages in a queue is at least the given number
 
     Args:
         args: {
@@ -147,7 +156,7 @@ def verify_count(args):
         int: The total number of messages in the queue
 
     Raises:
-        Error: If the count doesn't match the messages in the queue
+        Error: If the messages in the queue is less then the count
     """
 
     session = aws.get_session()
@@ -156,8 +165,11 @@ def verify_count(args):
                                        AttributeNames = ['ApproximateNumberOfMessages'])
     messages = int(resp['Attributes']['ApproximateNumberOfMessages'])
 
-    if messages != args['count']:
-        raise Exception('Counts do not match')
+    if messages > args['count']:
+      log.debug("More SQS messages then expected: required tiles {}, actual messages {}".format(args['count'],
+                                                                                                messages))
+    elif messages < args['count']:
+        raise Exception('Not enough messages in queue')
 
-    return args['count']
+    return messages
 
