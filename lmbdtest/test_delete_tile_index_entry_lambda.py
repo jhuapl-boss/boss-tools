@@ -35,8 +35,10 @@ class TestDeleteTileIndexEntryLambda(unittest.TestCase):
         self.dynamo = boto3.client('dynamodb', region_name=self.region_name)
         self.dynamo.create_table(TableName=self.table_name, **table_params)
 
+
     def tearDown(self):
         self.mock_dynamo.stop()
+
 
     def test_delete(self):
         fake_key = 'fakekey'
@@ -60,7 +62,21 @@ class TestDeleteTileIndexEntryLambda(unittest.TestCase):
 
         handler(event, context)
 
+        resp = self.dynamo.get_item(
+            TableName=self.table_name,
+            Key={
+                'chunk_key': {'S': fake_key},
+                'task_id': {'N': str(task_id)}
+            }
+        )
+
+        self.assertNotIn('Item', resp)
+
+
     def test_delete_key_doesnt_exist(self):
+        """
+        For this test, execution w/o error is passing.
+        """
         fake_key = 'nonexistantkey'
         task_id = 97
 
@@ -73,6 +89,7 @@ class TestDeleteTileIndexEntryLambda(unittest.TestCase):
         context = None
 
         handler(event, context)
+
 
     def get_tile_schema(self):
         """
