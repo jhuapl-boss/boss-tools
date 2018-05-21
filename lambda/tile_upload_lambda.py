@@ -97,6 +97,12 @@ if chunk_ready:
     ingest_queue.sendMessage(json.dumps(metadata))
 
     # Invoke Ingest lambda function
+
+    # While the ingest lambda is still part of the multiLambda, pass the
+    # name here since the ingest lambda won't have access to the normal context
+    # object.  Once ingest is no longer part of the multiLambda, both
+    # 'function-name' and 'lambda-name' may be removed.
+    metadata['function-name'] = metadata["parameters"]["ingest_lambda"]
     metadata["lambda-name"] = "ingest"
     lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
     response = lambda_client.invoke(

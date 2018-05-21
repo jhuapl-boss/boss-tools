@@ -1,0 +1,1 @@
+../lambda/delete_tile_index_entry_lambda.py
