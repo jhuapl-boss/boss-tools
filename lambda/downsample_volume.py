@@ -308,35 +308,24 @@ def downsample_cube(volume, cube, is_annotation):
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
-    sqs = boto3.resource('sqs')
-    status_arn = args['bucket_args'][0]['args']['downsample_status']
-
-    try:
-        queue = sqs.Queue(status_arn)
-        queue.load()
-    except Exception as ex:
-        log.error("Could not verify downsample status queue: {}".format(str(ex)))
-        log.info("Exiting early")
-        return
-
     def convert(args_, key):
         args_[key] = XYZ(*args_[key])
 
-    for arg in args['bucket_args']:
-        convert(arg, 'target')
-        convert(arg, 'step')
-        convert(arg, 'dim')
+    convert(args, 'step')
+    convert(args, 'dim')
 
-        downsample_volume(arg['args'], arg['target'], arg['step'], arg['dim'], arg['use_iso_flag'])
+    sqs = boto3.resource('sqs')
+    cubes = sqs.Queue(args['cubes_arn'])
 
-    try:
-        queue = sqs.Queue(status_arn)
-        queue.load()
-    except Exception as ex:
-        log.error("Could not get downsample status queue: {}".format(str(ex)))
-        log.info("Exiting without error")
-        return
+    timeout = context.get_remaining_time_in_millis() * 1000 # convert to seconds
+    msgs = cubes.receive_messages(MaxNumberOfMessages = args['bucket_size'],
+                                  VisibilityTimeout = timeout)
 
-    # Notify Activity that volume(s) were downsample successfully
-    queue.send_message(MessageBody = json.dumps(args),
-                       MessageGroupId = 'downsample')
+    for msg in msgs:
+        downsample_volume(args['args'],
+                          XYZ(*json.loads(msg.body)),
+                          args['step'],
+                          args['dim'],
+                          args['use_iso_flag'])
+        msg.delete()
+

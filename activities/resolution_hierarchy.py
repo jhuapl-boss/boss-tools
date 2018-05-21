@@ -59,6 +59,9 @@ MAX_WAIT_TIME = timedelta(hours=1)
 #      an exception to be raised (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
 UNCHANGING_MAX = 10
 
+# int: The number of multiprocessing pool workers to use
+POOL_SIZE = int(cpu_count() * 2)
+
 class ResolutionHierarchyError(Exception):
     pass
 
@@ -121,11 +124,10 @@ def downsample_channel(args):
 
     # TODO: load downsample_volume_lambda from boss config
 
-    # Different ID and queue for each resolution, as it takes 60 seconds
-    # to delete a queue
-    args['downsample_id'] = str(random.random())[2:] # remove the '0.' part of the number
-    args['downsample_dlq'] = create_queue('downsample-dlq-' + args['downsample_id'])
-    args['downsample_status'] = create_queue('downsample-status-' + args['downsample_id'], fifo=True)
+    # Different ID and queue for each resolution, as it takes 60 seconds to delete a queue
+    downsample_id = str(random.random())[2:] # remove the '0.' part of the number
+    dlq_arn = create_queue('downsample-dlq-' + downsample_id)
+    cubes_arn = create_queue('downsample-cubes-' + downsample_id)
 
     try:
         #log.debug("Downsampling resolution " + str(args['resolution']))
@@ -184,13 +186,24 @@ def downsample_channel(args):
             log.debug("Cubes extent: {}".format(cubes_stop))
             log.debug("Downsample step: {}".format(step))
 
-            sub_args = make_args(args, cubes_start, cubes_stop, step, dim, use_iso_flag)
-            sub_buckets = bucket(sub_args, BUCKET_SIZE)
+            log.debug("Populating input cube")
+            cube_count = populate_cubes(cubes_arn, cubes_start, cubes_stop, step)
 
-            launch_lambda_pool(args['downsample_volume_lambda'],
-                               args['downsample_dlq'],
-                               args['downsample_status'],
-                               sub_buckets)
+            log.debug("Invoking downsample lambdas")
+            lambda_count = ceildiv(cube_count, BUCKET_SIZE)
+            lambda_args = {
+                'bucket_size': BUCKET_SIZE,
+                'args': args,
+                'step': step,
+                'dim': dim,
+                'use_iso_flag': use_iso_flag,
+                'cubes_arn': cubes_arn,
+            }
+
+            launch_lambdas(lambda_count,
+                           args['downsample_volume_laambda'],
+                           json.dumps(lambda_args).encode('UTF8'),
+                           dlq_arn)
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -219,9 +232,99 @@ def downsample_channel(args):
         args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
         return args
     finally:
-        delete_queue(args['downsample_dlq'])
-        delete_queue(args['downsample_status'])
+        delete_queue(dlq_arn)
+        delete_queue(cubes_arn)
 
+def chunk(xs, size):
+    ys = []
+    for x in xs:
+        ys.append(x)
+        if len(ys) == size:
+            yield ys
+            ys = []
+    if len(ys) > 0:
+        yield ys
+
+def num_cubes(start, stop, step):
+    extents = (stop - start) / step
+    return extents.x * extents.y * extents.z
+
+def make_cubes(start, stop, step):
+    for target in xyz_range(start, stop, step = step):
+        yield target # XYZ type is automatically handled by JSON.dumps
+                     # Since it is a subclass of tuple
+
+def populate_cubes(queue_arn, start, stop, step):
+    # evenly chunk cubes into POOL_SIZE lists
+    count = num_cubes(start, stop, step)
+    enqueue_size = ceildiv(count, POOL_SIZE)
+
+    args = ((queue_arn, cubes)
+            for cubes in chunk(make_cubes(start, stop, step), enqueue_size))
+
+    log.debug("Enqueueing {} cubes in chunks of {} using {} processes".format(count, enqueue_size, POOL_SIZE))
+
+    with Pool(POOL_SIZE) as pool:
+        pool.starmap(enqueue_cubes, args)
+
+    return count
+
+def enqueue_cubes(queue_arn, cubes):
+    try:
+        sqs = aws.get_session().resource('sqs')
+        queue = sqs.Queue(queue_arn)
+        count = 0
+
+        msgs = ({'Id': id(cube),
+                 'MessageBody': json.dumps(cube)}
+                for cube in cubes)
+
+        for batch in chunk(msgs, 10): # 10 is the message batch limit for SQS
+            count += 1
+            if count % 500 == 0:
+                log.debug ("Enqueued {} cubes".format(count * 10))
+
+            queue.send_messages(Entries=batch)
+
+    except Exception as ex:
+        log.exception("Error caught in process, raising to controller")
+        raise ResolutionHierarchyError(str(ex))
+
+def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn):
+    per_lambda = ceildiv(total_count, POOL_SIZE)
+    d,m = divmod(total_count, per_lambda)
+    counts = [per_lambda] * d + [m]
+
+    assert sum(counts) == total_count, "Didn't calculate counts per lambda correctly"
+
+    log.debug("Launching {} lambdas in chunks of {} using {} processes".format(total_count, per_lambda, POOL_SIZE))
+
+    args = ((count, lambda_arn, lambda_args, dlq_arn)
+            for count in counts)
+
+    with Pool(POOL_SIZE) as pool:
+        pool.starmap(invoke_lambdas, args)
+
+def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
+    try:
+        lambda_ = aws.get_session().client('lambda')
+
+        log.info("Launching {} lambdas".format(count))
+
+        for i in range(1, count+1):
+            if i % 500 == 0:
+                log.debug("Launched {} lambdas".format(i))
+            if i % 10 == 0:
+                if check_queue(dlq_arn) > 0:
+                    raise FailedLambdaError()
+
+            lambda_.invoke(FunctionName = lambda_arn,
+                           InvocationType = 'Event', # Async execution
+                           Payload = lambda_args)
+    except Exception as ex:
+        log.exception("Error caught in process, raising to controller")
+        raise ResolutionHierarchyError(str(ex))
+'''
 def make_args(args, start, stop, step, dim, use_iso_flag):
     for target in xyz_range(start, stop, step = step):
         yield {
@@ -447,3 +550,4 @@ def check_queue(queue_arn):
             except:
                 log.exception("Problem gettting DLQ error message")
         return message_count
+'''
