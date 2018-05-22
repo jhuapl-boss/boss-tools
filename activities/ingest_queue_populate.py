@@ -87,12 +87,12 @@ def ingest_populate(args):
                      status_delay = STATUS_DELAY)
 
     tile_count = get_tile_count(args)
-
-    lambdas_should_have_fired = math.ceil(tile_count/MAX_NUM_TILES_PER_LAMBDA)
-    lambdas_fired = reduce(lambda x, y: x+y, results, 0)
-    if lambdas_should_have_fired != lambdas_fired:
-        log.debug("Warning not enough lambdas fired.  Should be {} but was {}".format(lambdas_should_have_fired,
-                                                                                  lambdas_fired))
+    messages_uploaded = reduce(lambda x, y: x+y, results, 0)
+    if tile_count != messages_uploaded:
+        log.debug("Warning.  Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
+                  .format(tile_count, messages_uploaded))
+    else:
+        log.debug("tile count and messages uploaded match: {}".format(tile_count))
 
     return {
         'arn': args['upload_queue'],
