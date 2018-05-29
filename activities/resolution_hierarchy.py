@@ -197,6 +197,7 @@ def downsample_channel(args):
                 'step': step,
                 'dim': dim,
                 'use_iso_flag': use_iso_flag,
+                'dlq_arn': dlq_arn,
                 'cubes_arn': cubes_arn,
             }
 
