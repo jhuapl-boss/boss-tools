@@ -317,9 +317,8 @@ def handler(args, context):
     sqs = boto3.resource('sqs')
     cubes = sqs.Queue(args['cubes_arn'])
 
-    timeout = context.get_remaining_time_in_millis() * 1000 # convert to seconds
     msgs = cubes.receive_messages(MaxNumberOfMessages = args['bucket_size'],
-                                  VisibilityTimeout = timeout)
+                                  WaitTimeSeconds = 5)
 
     for msg in msgs:
         downsample_volume(args['args'],
