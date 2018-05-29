@@ -10,6 +10,7 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib import ndlib
 from spdb.spatialdb import AWSObjectStore
 from spdb.spatialdb.object import ObjectIndices
+from random import randrange
 
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
@@ -20,6 +21,9 @@ log_handler.setLevel(logging.DEBUG)
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 log.addHandler(log_handler)
+
+
+LOOKUP_KEY_MAX_N = 100 # DP NOTE: Taken from spdb.spatialdb.object
 
 
 np_types = {
@@ -264,7 +268,9 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              version,
                              col_id,
                              '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job),
-                             AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1))
+                             # Replaced call to SPDB AWSObjectStore.generate_lookup_key, as SPDB master doesn't contain this call
+                             # AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1)
+                             '{}&{}&{}&{}&{}'.format(col_id, exp_id, chan_id, resolution + 1, randrange(LOOKUP_KEY_MAX_N)))
         s3_index.put(idx_key)
 
 
