@@ -53,10 +53,10 @@ RETRY_LIMIT = 0
 MAX_LAMBDA_TIME = timedelta(seconds=120)
 
 # datetime.delta: The maximum wait time after launching all lambdas
-MAX_WAIT_TIME = timedelta(hours=1)
+MAX_WAIT_TIME = timedelta(hours=4)
 
 # int: The number of status queue counts that have to be the same for
-#      an exception to be raised (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
+#      more lambdas to be launched (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
 UNCHANGING_MAX = 3
 
 # int: The number of multiprocessing pool workers to use
@@ -319,6 +319,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
     start = datetime.now()
     previous_count = 0
     count_count = 1
+    zero_count = 0
     while True:
         if check_queue(dlq_arn) > 0:
             raise FailedLambdaError()
@@ -341,7 +342,14 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
             count_count = 1
 
         if count == 0:
-            break
+            zero_count += 1
+            if zero_count == 2:
+                log.info("Finished polling for lambda completion")
+                break
+            else:
+                log.info("Zero cubes left, waiting to make sure lambda finishes")
+        else:
+            zero_count = 0
 
         current = datetime.now()
         if current - start > MAX_WAIT_TIME:
