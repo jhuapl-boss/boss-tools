@@ -41,26 +41,38 @@ def enable_debug_handler():
     signal.signal(signal.SIGUSR1, sigusr_handler)
 ######################################################
 
-# int: The number of volumes each sub_sfn should downsample with each execution
-BUCKET_SIZE = 8
 
-# int: The number of retries for launching a lambda before givin up and failing
-#      This only applies to throttling / resource related exceptions
-#      Zero (0) means no limit
-RETRY_LIMIT = 0
+###########################################################
+###               Configuration Options                 ###
+### Modify these values to modify the activity behavior ###
+
+# int: The number of volumes each downsample_volume lambda should downsample
+BUCKET_SIZE = 8
 
 # datetime.delta: The runtime of the downsample_volume lambda
 MAX_LAMBDA_TIME = timedelta(seconds=120)
 
-# datetime.delta: The maximum wait time after launching all lambdas
-MAX_WAIT_TIME = timedelta(hours=4)
+# int: The number of status poll cycles that have the same count for more
+#      lambdas to be launched (total time is UNCHANGING_LAUNCH * MAX_LAMBDA_TIME)
+UNCHANGING_LAUNCH = 3
 
-# int: The number of status queue counts that have to be the same for
-#      more lambdas to be launched (total time is UNCHANGING_MAX * MAX_LAMBDA_TIME)
-UNCHANGING_MAX = 3
+# int: The number of status poll cycles that have the same count for the
+#      activity to check the lambda throttle count and wait until throttling
+#      is no longer effecting the cubes queue count
+UNCHANGING_THROTTLE = 4
+
+# int: The number of status poll cycles that have to be the same for an
+#      exception to be raised
+#      This is a fail safe so the activity doesn't hang if there is a problem
+UNCHANGING_MAX = 5
 
 # int: The number of multiprocessing pool workers to use
 POOL_SIZE = int(cpu_count() * 2)
+
+# int: The number of status poll cycles that have a count of 0 (zero) before the
+#      polling loop exits
+ZERO_COUNT = 3
+###########################################################
 
 class ResolutionHierarchyError(Exception):
     pass
@@ -68,18 +80,10 @@ class ResolutionHierarchyError(Exception):
 class LambdaLaunchError(ResolutionHierarchyError):
     pass
 
-class LambdaRetryLimitExceededError(ResolutionHierarchyError):
-    def __init__(self):
-        msg = "Number of a throttle lambda retries exceeded limit of {}"
-        super().__init__(msg.format(RETRY_LIMIT))
-
 class FailedLambdaError(ResolutionHierarchyError):
     def __init__(self):
         msg = "A Lambda failed execution"
         super().__init__(msg)
-
-class LambdaWaitError(ResolutionHierarchyError):
-    pass
 
 def downsample_channel(args):
     """
@@ -89,6 +93,9 @@ def downsample_channel(args):
 
     Makes use of the bossutils.multidimensional library for simplified vector
     math.
+
+    Generators are used as much as possible (instead of lists) so that large
+    lists of data are not actualized and kept in memory.
 
     Args:
         args {
@@ -248,6 +255,11 @@ def chunk(xs, size):
         yield ys
 
 def num_cubes(start, stop, step):
+    """Calculate the number of volumes to be downsamples
+
+    Used so all of the results from make_cubes() doesn't have to be pulled into
+    memory.
+    """
     extents = (stop - start) / step
     return int(extents.x * extents.y * extents.z)
 
@@ -316,7 +328,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
     # Finished launching lambdas, need to wait for all to finish
     log.info("Finished launching lambdas")
 
-    start = datetime.now()
+    polling_start = datetime.now()
     previous_count = 0
     count_count = 1
     zero_count = 0
@@ -327,34 +339,66 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         count = check_queue(cubes_arn)
         log.debug("Status polling - count {}".format(count))
 
+        log.debug("Throttling count {}".format(lambda_throttle_count()))
+
         if count == previous_count:
             count_count += 1
             if count_count == UNCHANGING_MAX:
+                raise ResolutionHierarchyError("Status polling stuck at {} items for {}".format(count, polling_start - datetime.now()))
+            if count_count == UNCHANGING_THROTTLE:
+                # If the throttle count is increasing -> Sleep
+                # If the throttle count is decreasing
+                #     If the cubes queue count has changed -> Continue regular polling
+                #     If the cubes queue count has not changed -> Sleep
+                # If the throttle count is zero -> Continue regular polling
+                #
+                # This means that this loop will block until throttle has stopped / cubes
+                # in the queue have been processed.
+                #
+                # If throttling stops and no cubes have been processed the UNCHANGING_MAX
+                # threashold is the last guard so the activity doesn't hang
+                prev_throttle = 0
+                while True:
+                    throttle = lambda_throttle_count()
+
+                    if throttle < prev_throttle and check_queue(cubes_arn) != count:
+                        # If the throttle count is decreasing and the queue count has
+                        # changed continue the regular polling cycle
+                        break
+                    if throttle == 0:
+                        # No throttling happening
+                        break
+
+                    if throttle > 0:
+                        # Don't update count is there was an error getting the current count
+                        prev_throttle = throttle
+
+                    time.sleep(MAX_LAMBDA_TIME.seconds)
+
+                    if check_queue(dlq_arn) > 0:
+                        raise FailedLambdaError()
+
+            if count_count == UNCHANGING_LAUNCH:
                 needed = ceildiv(count, BUCKET_SIZE)
                 log.debug("Launching {} more lambdas".format(needed))
 
-                start_ = datetime.now()
+                start = datetime.now()
                 invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
-                stop_ = datetime.now()
-                log.debug("Launched {} lambdas in {}".format(needed, stop_ - start_))
+                stop = datetime.now()
+                log.debug("Launched {} lambdas in {}".format(needed, stop - start))
         else:
             previous_count = count
             count_count = 1
 
         if count == 0:
             zero_count += 1
-            if zero_count == 2:
+            if zero_count == ZERO_COUNT:
                 log.info("Finished polling for lambda completion")
                 break
             else:
                 log.info("Zero cubes left, waiting to make sure lambda finishes")
         else:
             zero_count = 0
-
-        current = datetime.now()
-        if current - start > MAX_WAIT_TIME:
-            log.error("Exceeded maximum wait time for lambdas to finish downsampling")
-            raise LambdaWaitError()
 
         time.sleep(MAX_LAMBDA_TIME.seconds)
 
@@ -377,184 +421,6 @@ def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
     except Exception as ex:
         log.exception("Error caught in process, raising to controller")
         raise ResolutionHierarchyError(str(ex))
-'''
-def make_args(args, start, stop, step, dim, use_iso_flag):
-    for target in xyz_range(start, stop, step = step):
-        yield {
-            'args': args,
-            'target': target, # XYZ type is automatically handled by JSON.dumps
-            'step': step,     # Since it is a subclass of tuple
-            'dim': dim,
-            'use_iso_flag': use_iso_flag,
-        }
-
-def bucket(sub_args, bucket_size):
-    """Take a generator of sub_args and break into multiple lists.
-
-    Args:
-        sub_args (generator): Generator yielding sub_args dictionaries
-        bucket_size (int): Maximum number of sub_arg dictionaries in each
-                           bucket. There may be less if bucket_size doesn't
-                           perfectly divide into the number of sub_args.
-
-    Returns:
-        (generator): Each yield is a list of sub_arg dictionaries
-    """
-    running = True
-    while running:
-        sub_args_bucket = []
-        try:
-            for i in range(bucket_size):
-                sub_args_bucket.append(next(sub_args))
-        except StopIteration:
-            running = False
-            if len(sub_args_bucket) == 0:
-                return # don't return a final empty bucket if no data
-        # we have to yield a dict with lambda-name at the first level to work with the multiLambda
-        yield {
-                'lambda-name': 'downsample_volume',  # name of the function in multiLambda to call
-                'bucket_args':  sub_args_bucket  # bucket of args
-              }
-
-def bucket_(xs, size):
-    ys = []
-    for x in xs:
-        ys.append(x)
-        if len(ys) == size:
-            yield ys
-            ys = []
-    if len(ys) > 0:
-        yield ys
-
-def launch_lambda_pool(lambda_arn, dlq_arn, status_arn, buckets):
-    buckets = list(buckets) # convert from generator to list for length
-    num_lambdas = len(buckets)
-
-    pool_size = int(cpu_count() * 2)
-    chunk_size = ceildiv(num_lambdas, pool_size) # divide lambdas between pool processes
-
-    chunks = ((lambda_arn, dlq_arn, status_arn, chunk)
-              for chunk in bucket_(buckets, chunk_size))
-
-    log.debug("Launching {} lambdas in chunks of {} using {} processes".format(num_lambdas, chunk_size, pool_size))
-
-    start = datetime.now()
-    with Pool(pool_size) as pool:
-        try:
-            pool.starmap(launch_lambdas_, chunks)
-        except:
-            log.error("Error encountered when launching lambdas")
-            raise
-    stop = datetime.now()
-    log.info("Launched {} lambdas in {}".format(num_lambdas, stop - start))
-
-    # Finished launching lambdas, need to wait for all to finish
-    log.info("Finished launching lambdas")
-
-    start = datetime.now()
-    previous_count = 0
-    count_count = 1
-    while True:
-        if check_queue(dlq_arn) > 0:
-            raise FailedLambdaError()
-
-        count = check_queue(status_arn)
-        log.debug("Status polling - count {}".format(count))
-
-        if count == previous_count:
-            count_count += 1
-            if count_count == UNCHANGING_MAX:
-                raise ResolutionHierarchyError("Status count not changing")
-        else:
-            previous_count = count
-            count_count = 1
-
-        if count == num_lambdas:
-            break
-
-        if count > num_lambdas:
-            log.warning("More status messages than expected, exiting: {} > {}".format(count, num_lambdas))
-            break
-
-        current = datetime.now()
-        if current - start > MAX_WAIT_TIME:
-            log.error("Exceeded maximum wait time for lambdas to finish downsampling")
-            raise LambdaWaitError()
-        
-        time.sleep(MAX_LAMBDA_TIME.seconds)
-
-def launch_lambdas_(*args):
-    """
-    For whatever reason the exceptions raised by launch_lambdas were not
-    propogating correctly to the parent process. If a new exception is raised
-    then it is propogated, not sure why. This wrapper works around this problem.
-    """
-    enable_debug_handler()
-
-    try:
-        launch_lambdas(*args)
-    except Exception as ex:
-        log = logger.BossLogger().logger
-        log.exception("Error caught in process, raising to controller")
-        raise ResolutionHierarchyError(str(ex))
-
-def launch_lambdas(lambda_arn, dlq_arn, status_arn, buckets):
-    log = logger.BossLogger().logger
-
-    session = aws.get_session();
-    lambda_ = session.client('lambda')
-
-    log.info("Launcing {} lambdas".format(len(buckets)))
-
-    slowdown = 0
-    count = 0
-    for bucket in buckets:
-        count += 1
-        if count % 500 == 0:
-            log.debug("Launched {} lambdas".format(count))
-
-        retry = 0
-
-        keys = []
-        try: 
-            while True:
-                time.sleep(slowdown)
-                try:
-                    lambda_.invoke(FunctionName = lambda_arn,
-                                   InvocationType = 'Event', # Async execution
-                                   Payload = json.dumps(bucket).encode('UTF8'))
-                except (lambda_.exceptions.TooManyRequestsException,):
-                    # Need to wait until some executions has finished
-                    log.debug("Unavailable resources, waiting for some lambdas to finish")
-                    if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
-                        raise LambdaRetryLimitExceededError()
-                    retry += 1
-
-                    # Wait for some of the launched lambdas to finish
-                    time.sleep(MAX_LAMBDA_TIME.seconds/2)
-                except (lambda_.exceptions.EC2ThrottledException,):
-                    # Need to slow down
-                    log.debug("Throttled, slowing down")
-                    if RETRY_LIMIT > 0 and retry > RETRY_LIMIT:
-                        raise LambdaRetryLimitExceededError()
-                    retry += 1
-                    slowdown += 1 # XXX: is there a better value?
-                                  # XXX: how to handle decrementing slowdown value?
-                                  #      maybe remove 1 after a successful launch?
-                else:
-                    # Successfully launched lambda
-                    break
-        except ResolutionHierarchyError as ex:
-            raise
-        except Exception as ex:
-            log.warn(ex)
-            raise
-        else:
-            # Check for errors after launching each lambda
-            msgs = check_queue(dlq_arn)
-            if msgs > 0:
-                raise FailedLambdaError()
-'''
 
 def create_queue(queue_name, fifo=False):
     session = aws.get_session()
@@ -593,7 +459,10 @@ def check_queue(queue_arn):
         log.exception("Could not get message count for queue '{}'".format(queue_arn))
         return 0
     else:
-        message_count = int(resp['Attributes']['ApproximateNumberOfMessages'])
+        # Include both the number of messages and the number of in-flight messages
+        message_count = int(resp['Attributes']['ApproximateNumberOfMessages']) +
+                        int(resp['Attributes']['ApproximateNumberOfMessagesDelayed']) +
+                        int(resp['Attributes']['ApproximateNumberOfMessagesNotVisible'])
         if message_count > 0 and 'dlq' in queue_arn:
             try:
                 resp = sqs.receive_message(QueueUrl = queue_arn)
@@ -604,3 +473,25 @@ def check_queue(queue_arn):
             except:
                 log.exception("Problem gettting DLQ error message")
         return message_count
+
+def lambda_throttle_count():
+    session = aws.get_session()
+    cw = session.client('cloudwatch')
+
+    try:
+        now = datetime.now()
+        delta = timedelta(minutes=1)
+        resp = cw.get_metric_statistics(Namespace = 'AWS/Lambda',
+                                        MetricName = 'Throttles',
+                                        StartTime = now - delta,
+                                        EndTime = now,
+                                        Period = 60,
+                                        Statistics = ['Average'])
+
+        if 'Datapoints' in resp and len(resp['Datapoints']) > 0:
+            if 'Average' in resp['Datapoints'][0]:
+                return resp['Datapoints'][0]['Average']
+        return 0
+    except:
+        log.exception("Problem getting Lambda Throttle Count")
+        return -1
