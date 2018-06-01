@@ -380,12 +380,13 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
 
             if count_count == UNCHANGING_LAUNCH:
                 needed = ceildiv(count, BUCKET_SIZE)
-                log.debug("Launching {} more lambdas".format(needed))
+                if needed > 0:
+                    log.debug("Launching {} more lambdas".format(needed))
 
-                start = datetime.now()
-                invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
-                stop = datetime.now()
-                log.debug("Launched {} lambdas in {}".format(needed, stop - start))
+                    start = datetime.now()
+                    invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
+                    stop = datetime.now()
+                    log.debug("Launched {} lambdas in {}".format(needed, stop - start))
         else:
             previous_count = count
             count_count = 1
@@ -454,7 +455,9 @@ def check_queue(queue_arn):
 
     try:
         resp = sqs.get_queue_attributes(QueueUrl = queue_arn,
-                                        AttributeNames = ['ApproximateNumberOfMessages'])
+                                        AttributeNames = ['ApproximateNumberOfMessages',
+                                                          'ApproximateNumberOfMessagesDelayed',
+                                                          'ApproximateNumberOfMessagesNotVisible'])
     except:
         log.exception("Could not get message count for queue '{}'".format(queue_arn))
         return 0
