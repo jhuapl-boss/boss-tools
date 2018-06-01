@@ -460,8 +460,8 @@ def check_queue(queue_arn):
         return 0
     else:
         # Include both the number of messages and the number of in-flight messages
-        message_count = int(resp['Attributes']['ApproximateNumberOfMessages']) +
-                        int(resp['Attributes']['ApproximateNumberOfMessagesDelayed']) +
+        message_count = int(resp['Attributes']['ApproximateNumberOfMessages']) + \
+                        int(resp['Attributes']['ApproximateNumberOfMessagesDelayed']) + \
                         int(resp['Attributes']['ApproximateNumberOfMessagesNotVisible'])
         if message_count > 0 and 'dlq' in queue_arn:
             try:
