@@ -484,14 +484,15 @@ def lambda_throttle_count(lambda_arn):
     lambda_name = lambda_arn.split(':')[-1]
 
     try:
-        now = datetime.now()
-        delta = timedelta(minutes=1)
+        # The current statistic value is still being updated, get the previous value
+        end = datetime.now() - timedelta(minutes=1)
+        begin = end - timedelta(minutes=1)
         resp = cw.get_metric_statistics(Namespace = 'AWS/Lambda',
                                         MetricName = 'Throttles',
                                         # Limit the throttle count to only our target lambda function
                                         Dimensions = [{'Name': 'FunctionName', 'Value': lambda_name}],
-                                        StartTime = now - delta,
-                                        EndTime = now,
+                                        StartTime = begin,
+                                        EndTime = end,
                                         Period = 60,
                                         Unit = 'Count',
                                         Statistics = ['SampleCount'])
