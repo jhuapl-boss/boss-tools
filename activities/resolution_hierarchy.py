@@ -131,52 +131,54 @@ def downsample_channel(args):
 
     # TODO: load downsample_volume_lambda from boss config
 
-    # Different ID and queue for each resolution, as it takes 60 seconds to delete a queue
-    downsample_id = str(random.random())[2:] # remove the '0.' part of the number
-    dlq_arn = create_queue('downsample-dlq-' + downsample_id)
-    cubes_arn = create_queue('downsample-cubes-' + downsample_id)
+    #log.debug("Downsampling resolution " + str(args['resolution']))
 
-    try:
-        #log.debug("Downsampling resolution " + str(args['resolution']))
+    resolution = args['resolution']
 
-        resolution = args['resolution']
+    dim = XYZ(*CUBOIDSIZE[resolution])
+    #log.debug("Cube dimensions: {}".format(dim))
 
-        dim = XYZ(*CUBOIDSIZE[resolution])
-        #log.debug("Cube dimensions: {}".format(dim))
+    def frame(key):
+        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
 
-        def frame(key):
-            return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
+    # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
+    # downsampling. If both are happening, fanout one and then the other in series.
+    configs = []
+    if args['type'] == 'isotropic':
+        configs.append({
+            'name': 'isotropic',
+            'step': XYZ(2,2,2),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
+    else:
+        configs.append({
+            'name': 'anisotropic',
+            'step': XYZ(2,2,1),
+            'iso_flag': False,
+            'frame_start_key': '{}_start',
+            'frame_stop_key': '{}_stop',
+        })
 
-        # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
-        # downsampling. If both are happening, fanout one and then the other in series.
-        configs = []
-        if args['type'] == 'isotropic':
+        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             configs.append({
                 'name': 'isotropic',
                 'step': XYZ(2,2,2),
-                'iso_flag': False,
-                'frame_start_key': '{}_start',
-                'frame_stop_key': '{}_stop',
-            })
-        else:
-            configs.append({
-                'name': 'anisotropic',
-                'step': XYZ(2,2,1),
-                'iso_flag': False,
-                'frame_start_key': '{}_start',
-                'frame_stop_key': '{}_stop',
+                'iso_flag': True,
+                'frame_start_key': 'iso_{}_start',
+                'frame_stop_key': 'iso_{}_stop',
             })
 
-            if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
-                configs.append({
-                    'name': 'isotropic',
-                    'step': XYZ(2,2,2),
-                    'iso_flag': True,
-                    'frame_start_key': 'iso_{}_start',
-                    'frame_stop_key': 'iso_{}_stop',
-                })
+    for config in configs:
+        # Different ID and queue for each resolution, as it takes 60 seconds to delete a queue
+        # Different ID and queue for each iso/aniso downsample incase a a DLQ message is received
+        #     for the previous config
+        downsample_id = str(random.random())[2:] # remove the '0.' part of the number
+        dlq_arn = create_queue('downsample-dlq-' + downsample_id)
+        cubes_arn = create_queue('downsample-cubes-' + downsample_id)
 
-        for config in configs:
+        try:
             frame_start = frame(config['frame_start_key'])
             frame_stop = frame(config['frame_stop_key'])
             step = config['step']
@@ -224,25 +226,25 @@ def downsample_channel(args):
             resize('x', step.x)
             resize('y', step.y)
             resize('z', step.z)
+        finally:
+            delete_queue(dlq_arn)
+            delete_queue(cubes_arn)
 
-        # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
-        if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
-            def copy(var):
-                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
-            copy('x')
-            copy('y')
-            copy('z')
+    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
+    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
+        def copy(var):
+            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+        copy('x')
+        copy('y')
+        copy('z')
 
-        # Advance the loop and recalculate the conditional
-        # Using max - 1 because resolution_max should not be a valid resolution
-        # and res < res_max will end with res = res_max - 1, which generates res_max resolution
-        args['resolution'] = resolution + 1
-        args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
-        return args
-    finally:
-        delete_queue(dlq_arn)
-        delete_queue(cubes_arn)
+    # Advance the loop and recalculate the conditional
+    # Using max - 1 because resolution_max should not be a valid resolution
+    # and res < res_max will end with res = res_max - 1, which generates res_max resolution
+    args['resolution'] = resolution + 1
+    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
+    return args
 
 def chunk(xs, size):
     ys = []
