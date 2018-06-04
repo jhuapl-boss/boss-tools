@@ -339,7 +339,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         count = check_queue(cubes_arn)
         log.debug("Status polling - count {}".format(count))
 
-        log.debug("Throttling count {}".format(lambda_throttle_count()))
+        log.debug("Throttling count {}".format(lambda_throttle_count(lambda_arn)))
 
         if count == previous_count:
             count_count += 1
@@ -359,7 +359,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                 # threashold is the last guard so the activity doesn't hang
                 prev_throttle = 0
                 while True:
-                    throttle = lambda_throttle_count()
+                    throttle = lambda_throttle_count(lambda_arn)
 
                     if throttle < prev_throttle and check_queue(cubes_arn) != count:
                         # If the throttle count is decreasing and the queue count has
@@ -477,23 +477,28 @@ def check_queue(queue_arn):
                 log.exception("Problem gettting DLQ error message")
         return message_count
 
-def lambda_throttle_count():
+def lambda_throttle_count(lambda_arn):
     session = aws.get_session()
     cw = session.client('cloudwatch')
+
+    lambda_name = lambda_arn.split(':')[-1]
 
     try:
         now = datetime.now()
         delta = timedelta(minutes=1)
         resp = cw.get_metric_statistics(Namespace = 'AWS/Lambda',
                                         MetricName = 'Throttles',
+                                        # Limit the throttle count to only our target lambda function
+                                        Dimensions = [{'Name': 'FunctionName', 'Value': lambda_name}],
                                         StartTime = now - delta,
                                         EndTime = now,
                                         Period = 60,
-                                        Statistics = ['Average'])
+                                        Unit = 'Count',
+                                        Statistics = ['SampleCount'])
 
         if 'Datapoints' in resp and len(resp['Datapoints']) > 0:
-            if 'Average' in resp['Datapoints'][0]:
-                return resp['Datapoints'][0]['Average']
+            if 'SampleCount' in resp['Datapoints'][0]:
+                return resp['Datapoints'][0]['SampleCount']
         return 0
     except:
         log.exception("Problem getting Lambda Throttle Count")
