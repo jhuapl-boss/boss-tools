@@ -127,6 +127,10 @@ def downsample_channel(args):
 
             aws_region (str) AWS region to run in such as us-east-1
         }
+
+    Return:
+        dict: An updated argument dictionary containing the shrunk frame,
+              resolution, and res_lt_max values
     """
 
     # TODO: load downsample_volume_lambda from boss config
@@ -247,6 +251,15 @@ def downsample_channel(args):
     return args
 
 def chunk(xs, size):
+    """Chunk the input iterable into lists of the requested size
+
+    Args:
+        xs (iterable): A list or generator of items to chunk
+        size (int): The number of items to include in each output lists
+
+    Return:
+        Generator: A Generator of lists, each of length size
+    """
     ys = []
     for x in xs:
         ys.append(x)
@@ -261,16 +274,45 @@ def num_cubes(start, stop, step):
 
     Used so all of the results from make_cubes() doesn't have to be pulled into
     memory.
+
+    Args:
+        start (XYZ): Starting corner of the coordinate frame
+        stop (XYZ): Far corner of the coordinate frame
+        step (XYZ): The size of each volume to downsample
+
+    Return:
+        int: The number of volumes in the frame
     """
     extents = (stop - start) / step
     return int(extents.x * extents.y * extents.z)
 
 def make_cubes(start, stop, step):
+    """Produce the target cubes to downsample
+
+    Args:
+        start (XYZ): Starting corner of the coordinate frame
+        stop (XYZ): Far corner of the coordinate frame
+        step (XYZ): The size of each volume to downsample
+
+    Return:
+        Generator: A Generator of XYZ target cubes
+    """
     for target in xyz_range(start, stop, step = step):
         yield target # XYZ type is automatically handled by JSON.dumps
                      # Since it is a subclass of tuple
 
 def populate_cubes(queue_arn, start, stop, step):
+    """Populate the given SQS queue with the target cubes to downsample
+
+    Args:
+        queue_arn (str): The target SQS queue URL
+        start (XYZ): Starting corner of the coordinate frame
+        stop (XYZ): Far corner of the coordinate frame
+        step (XYZ): The size of each volume to downsample
+
+    Return:
+        int: The number of cubes enqueued
+    """
     # evenly chunk cubes into POOL_SIZE lists
     count = num_cubes(start, stop, step)
     enqueue_size = ceildiv(count, POOL_SIZE)
@@ -289,6 +331,14 @@ def populate_cubes(queue_arn, start, stop, step):
     return count
 
 def enqueue_cubes(queue_arn, cubes):
+    """Multiprocessing.Pool worker function for enqueuing a number of messages
+
+    Called by populate_cubes()
+
+    Args:
+        queue_arn (str): The target SQS queue URL
+        cubes (list[XYZ]): A list of XYZ cubes to enqueue
+    """
     try:
         sqs = aws.get_session().resource('sqs')
         queue = sqs.Queue(queue_arn)
@@ -310,6 +360,24 @@ def enqueue_cubes(queue_arn, cubes):
         raise ResolutionHierarchyError(str(ex))
 
 def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
+    """Launch lambdas to process all of the target cubes to downsample
+
+    Launches an initial set of lambdas and monitors the cubes SQS queue to
+    understand the current status. If the count in the queue doesn't change
+    for UNCHANGING_LAUNCH cycles then it will calculate how many more lambdas
+    to launch and launch them.
+
+    If the queue count doesn't change after launching more lambdas an exception
+    will eventually be raised so the activity is not hanging forever.
+
+    Args:
+        total_count (int): The initial number of lambdas to launch
+        lambda_arn (str): Name or ARN of the lambda function to invoke
+        lambda_args (str): The lambda payload to pass when invoking
+        dlq_arn (str): ARN of the SQS DLQ to monitor for error messages
+        cubes_arn (str): ARN of the input cubes SQS queue to monitor for
+                         completion of the downsample
+    """
     per_lambda = ceildiv(total_count, POOL_SIZE)
     d,m = divmod(total_count, per_lambda)
     counts = [per_lambda] * d
@@ -408,6 +476,20 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
+    """Multiprocessing.Pool worker function for invoking a number of lambdas
+
+    Called by launch_lambdas()
+
+    The dlq_arn queue is only checked every 10 lambdas launched. This is so
+    that the queue is not hit too hard when invoking a large number of lambdas
+    via Multiprocessing.Pool.
+
+    Args:
+        count (int): The number of lambdas to launch
+        lambda_arn (str): Name or ARN of the lambda function to invoke
+        lambda_args (str): The lambda payload to pass when invoking
+        dlq_arn (str): ARN of the SQS DLQ to monitor for error messages
+    """
     try:
         lambda_ = aws.get_session().client('lambda')
 
@@ -428,6 +510,14 @@ def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
         raise ResolutionHierarchyError(str(ex))
 
 def create_queue(queue_name):
+    """Create a SQS queue
+
+    Args:
+        queue_name (str): Name of the queue
+
+    Return:
+        str: URL of the queue
+    """
     session = aws.get_session()
     sqs = session.client('sqs')
 
@@ -437,6 +527,11 @@ def create_queue(queue_name):
     return url
 
 def delete_queue(queue_arn):
+    """Delete a SQS queue
+
+    Args:
+        queue_arn (str): The URL of the queue
+    """
     session = aws.get_session()
     sqs = session.client('sqs')
 
@@ -446,6 +541,20 @@ def delete_queue(queue_arn):
         log.exception("Could not delete status queue '{}'".format(queue_arn))
 
 def check_queue(queue_arn):
+    """Get the count of messages in the given queue
+
+    The count is a combination Approximate Number of Messages, Messages Delayed,
+    and Messages Not Visible.
+
+    If the queue_arn contains 'dlq' the first message will be read and the SNS
+    DLQ message decoded to print the error that caused the DLQ message.
+
+    Args:
+        queue_arn (str): The URL of the queue
+
+    Return:
+        int: The count of messages or zero if the queue could not be queried
+    """
     session = aws.get_session()
     sqs = session.client('sqs')
 
@@ -474,6 +583,19 @@ def check_queue(queue_arn):
         return message_count
 
 def lambda_throttle_count(lambda_arn):
+    """Read the Throttle count for the given Lambda function from Cloud Watch
+
+    The metric is read for the last minute, which is in the process of being updated
+    so the value read is not the final value that is recorded in Cloud Watch for the
+    given time period.
+
+    Args:
+        lambda_arn (str): ARN or Name of the lambda to get the metric for
+
+    Return:
+        float: The Sample Count for the Lambda's Throttle count
+        -1: If there was an error getting the metric
+    """
     session = aws.get_session()
     cw = session.client('cloudwatch')
 
@@ -495,7 +617,7 @@ def lambda_throttle_count(lambda_arn):
         if 'Datapoints' in resp and len(resp['Datapoints']) > 0:
             if 'SampleCount' in resp['Datapoints'][0]:
                 return resp['Datapoints'][0]['SampleCount']
-        return 0
+        return 0.0
     except:
         log.exception("Problem getting Lambda Throttle Count")
         return -1
