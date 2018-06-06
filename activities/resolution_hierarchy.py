@@ -22,7 +22,7 @@ import types
 import json
 import time
 import random
-from multiprocessing import Pool, Value, cpu_count
+from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
 
 log = logger.BossLogger().logger
@@ -312,7 +312,9 @@ def enqueue_cubes(queue_arn, cubes):
 def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
     per_lambda = ceildiv(total_count, POOL_SIZE)
     d,m = divmod(total_count, per_lambda)
-    counts = [per_lambda] * d + [m]
+    counts = [per_lambda] * d
+    if m > 0:
+        counts += [m]
 
     assert sum(counts) == total_count, "Didn't calculate counts per lambda correctly"
 
@@ -425,20 +427,12 @@ def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):
         log.exception("Error caught in process, raising to controller")
         raise ResolutionHierarchyError(str(ex))
 
-def create_queue(queue_name, fifo=False):
+def create_queue(queue_name):
     session = aws.get_session()
     sqs = session.client('sqs')
-    attributes = {}
 
-    if fifo:
-        queue_name += '.fifo'
-        attributes = {
-            'FifoQueue': 'true',
-            'ContentBasedDeduplication': 'true',
-        }
+    resp = sqs.create_queue(QueueName = queue_name)
 
-    resp = sqs.create_queue(QueueName = queue_name,
-                            Attributes = attributes)
     url = resp['QueueUrl']
     return url
 
