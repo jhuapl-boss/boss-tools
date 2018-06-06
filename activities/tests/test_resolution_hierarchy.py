@@ -26,7 +26,7 @@ from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timedelta
 
 import boto3
-from moto import mock_sqs, mock_dynamodb, mock_lambda
+from moto import mock_sqs
 
 #import logging.config
 #logging.config.dictConfig({
@@ -100,28 +100,6 @@ def make_check_queue(**kwargs):
         return next(arns[arn])
 
     return check_queue
-
-# Stub AWS Lambda Client with invoke and exceptions
-class MockLambda(object):
-    exceptions_ = {
-        'RequestTooLargeException': type('RequestTooLargeException', (Exception, ), {}),
-        'TooManyRequestsException': type('TooManyRequestsException', (Exception, ), {}),
-        'EC2ThrottledException': type('EC2ThrottledException', (Exception, ), {}),
-
-        # Stand-in for any other Exception that boto3 may throw
-        'UnknownException': type('UnknownException', (Exception, ), {}),
-    }
-
-    def __init__(self):
-        self.invoke = MagicMock()
-
-    def __getattr__(self, name):
-        if name == 'exceptions':
-            return self
-        elif name in MockLambda.exceptions_:
-            return MockLambda.exceptions_[name]
-        else:
-            return AttributeError()
 
 # Mockup import for resolution_hierarchy and bossutils.multidimensional
 sys.modules['bossutils'] = MagicMock()
