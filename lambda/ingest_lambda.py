@@ -17,11 +17,14 @@ from ndingest.ndqueue.ingestqueue import IngestQueue
 from ndingest.ndbucket.tilebucket import TileBucket
 from ndingest.util.bossutil import BossUtil
 
+from bossnames.names import AWSNames
+
 from io import BytesIO
 from PIL import Image
 import numpy as np
 import math
 import boto3
+
 
 print("$$$ IN INGEST LAMBDA $$$")
 # Load settings
@@ -199,45 +202,57 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
             sp.objectio.add_cuboid_to_index(object_key, ingest_job=int(msg_data["ingest_job"]))
 
             # Update id indices if this is an annotation channel
-            if resource.data['channel']['type'] == 'annotation':
-                try:
-                    sp.objectio.update_id_indices(
-                        resource, proj_info.resolution, [object_key], [cube.data])
-                except SpdbError as ex:
-                    sns_client = boto3.client('sns')
-                    topic_arn = msg_data['parameters']["OBJECTIO_CONFIG"]["prod_mailing_list"]
-                    msg = 'During ingest:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\n'.format(
-                        ex.message,
-                        resource.data['collection']['name'],
-                        resource.data['experiment']['name'],
-                        resource.data['channel']['name'])
-                    sns_client.publish(
-                        TopicArn=topic_arn,
-                        Subject='Object services misuse',
-                        Message=msg)
+            # We no longer index during ingest.
+            #if resource.data['channel']['type'] == 'annotation':
+            #   try:
+            #       sp.objectio.update_id_indices(
+            #           resource, proj_info.resolution, [object_key], [cube.data])
+            #   except SpdbError as ex:
+            #       sns_client = boto3.client('sns')
+            #       topic_arn = msg_data['parameters']["OBJECTIO_CONFIG"]["prod_mailing_list"]
+            #       msg = 'During ingest:\n{}\nCollection: {}\nExperiment: {}\n Channel: {}\n'.format(
+            #           ex.message,
+            #           resource.data['collection']['name'],
+            #           resource.data['experiment']['name'],
+            #           resource.data['channel']['name'])
+            #       sns_client.publish(
+            #           TopicArn=topic_arn,
+            #           Subject='Object services misuse',
+            #           Message=msg)
+
+    lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
+
+    names = AWSNames.create_from_lambda_name(event['function-name'])
+
+    delete_tiles_data = {
+        'tile_key_list': tile_key_list,
+        'region': SETTINGS.REGION_NAME,
+        'bucket': tile_bucket.bucket.name
+    }
+
+    # Delete tiles from tile bucket.
+    lambda_client.invoke(
+        FunctionName=names.delete_tile_objs_lambda,
+        InvocationType='Event',
+        Payload=json.dumps(delete_tiles_data).encode()
+    )       
+
+    delete_tile_entry_data = {
+        'tile_index': tile_index_db.table.name,
+        'region': SETTINGS.REGION_NAME,
+        'chunk_key': chunk_key,
+        'task_id': msg_data['ingest_job']
+    }
+
+    # Delete entry from tile index.
+    lambda_client.invoke(
+        FunctionName=names.delete_tile_index_entry_lambda,
+        InvocationType='Event',
+        Payload=json.dumps(delete_tile_entry_data).encode()
+    )       
 
     # Delete message since it was processed successfully
     ingest_queue.deleteMessage(msg_id, msg_rx_handle)
-
-    # Delete Tiles
-    for tile in tile_key_list:
-        for try_cnt in range(0, 4):
-            try:
-                time.sleep(try_cnt)
-                print("Deleting tile: {}".format(tile))
-                tile_bucket.deleteObject(tile)
-                break
-            except:
-                print("failed")
-
-    # Delete Entry in tile table
-    for try_cnt in range(0, 4):
-        try:
-            time.sleep(try_cnt)
-            tile_index_db.deleteCuboid(chunk_key, int(msg_data["ingest_job"]))
-            break
-        except:
-            print("failed")
 
     # Increment run counter
     run_cnt += 1
