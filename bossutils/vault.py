@@ -75,19 +75,6 @@ class Vault:
         with open(configuration.CONFIG_FILE, "w") as fh:
             self.config.config.write(fh)
 
-    def rotate_token(self):
-        """Read a new token from the current cubbyhold and override the token
-        stored in the BossConfig."""
-        new_token = self.read("/cubbyhole", "token")
-        self.client.token = new_token
-
-        if not self.client.is_authenticated():
-            raise Exception("Could not authenticate with rotated Vault token")
-
-        self.config[VAULT_SECTION][VAULT_TOKEN_KEY] = new_token
-        with open(configuration.CONFIG_FILE, "w") as fh:
-            self.config.write(fh)
-
     def read_dict(self, path, raw=False):
         """Read a dictionary of keys from the Vault path.
 
