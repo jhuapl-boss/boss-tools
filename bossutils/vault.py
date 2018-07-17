@@ -35,7 +35,7 @@ def catch_expire(function):
     def wrapper(*args, **kwargs):
         try:
             return function(*args, **kwargs)
-        except:
+        except: #Need to specify the type of exception...
             blog = BossLogger().logger
             msg = "Your token had expired.  Dynamically creating a new one."
             blog.info(msg)
