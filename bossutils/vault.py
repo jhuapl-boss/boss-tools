@@ -22,10 +22,26 @@ VAULT_TOKEN_KEY is the config key for the Vault access token
 import hvac
 from . import configuration
 from . import utils
+import functools
+from bossutils.logger import BossLogger
 
 VAULT_SECTION = "vault"
 VAULT_URL_KEY = "url"
 VAULT_TOKEN_KEY = "token"
+
+def catch_expire(function):
+        """Catches error raised when token has expired and rotates token if so.
+        Executes the same function once the token has been replaced."""
+    def wrapper(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except:
+            blog = BossLogger().logger
+            msg = "Your token had expired.  Dynamically creating a new one."
+            blog.info(msg)
+            Vault.login()
+            function(*args, **kwargs)
+    return wrapper
 
 class Vault:
     """Vault is a wrapper class for the hvac Vault client that automatically
@@ -50,7 +66,7 @@ class Vault:
         else:
             self.client.token = token
             if not self.client.is_authenticated():
-                raise Exception("Could not authenticate to Vault server")
+                self.login()
 
     def logout(self):
         """Logout and clear the internal state.
@@ -91,6 +107,7 @@ class Vault:
         else:
             return response["data"]
 
+    @catch_expire
     def read(self, path, key):
         """Read the specific key from the Vault path.
 
@@ -103,19 +120,23 @@ class Vault:
             raise Exception("Could not locate {}/{} in Vault".format(path,key))
 
         return response
-
+    
+    @catch_expire
     def write(self, path, **kwargs):
         """Write the given key / values in the given Vault path."""
         self.client.write(path, **kwargs)
 
+    @catch_expire
     def delete(self, path):
         """Delete the given Vault path."""
         self.client.delete(path)
 
+    @catch_expire
     def revoke_secret(self, lease_id):
         """Revoke the given Vault secret."""
         self.client.revoke_secret(lease_id)
 
+    @catch_expire
     def revoke_secret_prefix(self, prefix):
         """Revoke Vault secret(s) starting with the given prefix.
 
@@ -124,6 +145,7 @@ class Vault:
         """
         self.client.revoke_secret_prefix(prefix)
 
+    @catch_expire
     def renew_secret(self, lease_id):
         """Renew the given Vault secret."""
         return self.client.renew_secret(lease_id)
