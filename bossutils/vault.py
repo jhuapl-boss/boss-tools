@@ -32,16 +32,16 @@ VAULT_TOKEN_KEY = "token"
 def catch_expire(function):
     """Catches error raised when token has expired and rotates token if so.
     Executes the same function once the token has been replaced."""
-    def wrapper(*args, **kwargs):
+    def wrapper(self, *args, **kwargs):
         try:
-            return function(*args, **kwargs)
-        except Forbidden as e:
+            return function(self, *args, **kwargs)
+        except hvac.exceptions.Forbidden as e:
             blog = BossLogger().logger
             blog.info(str(e))
             msg = "Your token had expired.  Dynamically creating a new one."
             blog.info(msg)
-            Vault.login(self=None)
-            function(*args, **kwargs)
+            Vault.login(self)
+            function(self, *args, **kwargs)
     return wrapper
 
 class Vault:
