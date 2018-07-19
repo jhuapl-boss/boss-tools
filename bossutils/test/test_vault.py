@@ -32,7 +32,7 @@ class TestVaultClient(unittest.TestCase):
             }
         }
 
-    def test_exceptin_if_cant_auth_to_vault(self, mockClient):
+    def test_exception_if_cant_auth_to_vault(self, mockClient):
         instance = mockClient.return_value
         instance.is_authenticated.return_value = False
         with self.assertRaises(Exception):
