@@ -87,9 +87,9 @@ def ingest_populate(args):
                      status_delay = STATUS_DELAY)
 
     tile_count = get_tile_count(args)
-    messages_uploaded = reduce(lambda x, y: x+y, results, 0)
+    messages_uploaded = sum(results)
     if tile_count != messages_uploaded:
-        log.debug("Warning.  Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
+        log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
                   .format(tile_count, messages_uploaded))
     else:
         log.debug("tile count and messages uploaded match: {}".format(tile_count))
@@ -118,15 +118,7 @@ def get_tile_count(args):
     extent = lambda v: args[v + '_stop'] - args[v + '_start']
     num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
 
-    x_extent = args['x_stop'] - args['x_start']
-    y_extent = args['y_stop'] - args['y_start']
-    z_extent = args['z_stop'] - args['z_start']
-    t_extent = args['t_stop'] - args['t_start']
-    num_tiles_in_x = math.ceil(x_extent / args['x_tile_size'])
-    num_tiles_in_y = math.ceil(y_extent / args['y_tile_size'])
-    num_tiles_in_z = math.ceil(z_extent / args['z_tile_size'])
-    num_tiles_in_t = math.ceil(t_extent / args['t_tile_size'])
-    tile_count = num_tiles_in_x * num_tiles_in_y * num_tiles_in_z * num_tiles_in_t
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * num_tiles_in('t')
     return tile_count
 
 
