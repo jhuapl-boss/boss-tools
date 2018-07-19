@@ -23,39 +23,6 @@ from unittest.mock import patch, MagicMock
 
 @patch('boto3.resource')
 class TestIngestQueueUploadLambda(unittest.TestCase):
-    # def test_something(self, fake_resource):
-    #
-    #     # This puts in a mock for boto3.resource('sqs').Queue().
-    #     queue = MagicMock()
-    #     fake_resource.return_value = queue
-    #     context = None
-    #     args = {
-    #         "upload_sfn": "IngestUpload",
-    #         "x_start": 0,
-    #         "x_stop": 2048,
-    #         "y_start": 0,
-    #         "y_stop": 2048,
-    #         "z_start": 0,
-    #         "z_stop": 20,
-    #         "t_start": 0,
-    #         "t_stop": 1,
-    #         "project_info": [
-    #           "3",
-    #           "3",
-    #           "3"
-    #         ],
-    #         "ingest_queue": "https://queue.amazonaws.com/...",
-    #         "job_id": 11,
-    #         "t_tile_size": 1,
-    #         "upload_queue": "https://queue.amazonaws.com/...",
-    #         "z_tile_size": 16,
-    #         "y_tile_size": 1024,
-    #         "resolution": 0,
-    #         "x_tile_size": 1024,
-    #         "tiles_to_skip": 1000
-    #     }
-    #
-    #     iqu.handler(args, context)
 
     def test_get_tile_count(self, fake_resource):
         args = {
