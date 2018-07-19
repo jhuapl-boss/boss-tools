@@ -63,7 +63,6 @@ class BossActivityManager(ActivityManager):
             key('delete_coordinate_frame') : dc.delete_coordinate_frame,
 
             # Populate Upload Queue StepFunction
-            #key('PopulateQueue') : puq.populate_upload_queue,
             key('IngestPopulate') : iqp.ingest_populate,
             key('VerifyCount') : iqp.verify_count,
 
