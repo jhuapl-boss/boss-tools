@@ -10,6 +10,7 @@ from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib import ndlib
 from spdb.spatialdb import AWSObjectStore
 from spdb.spatialdb.object import ObjectIndices
+from random import randrange
 
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
@@ -20,6 +21,9 @@ log_handler.setLevel(logging.DEBUG)
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 log.addHandler(log_handler)
+
+
+LOOKUP_KEY_MAX_N = 100 # DP NOTE: Taken from spdb.spatialdb.object
 
 
 np_types = {
@@ -148,6 +152,9 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     Args:
         args {
+            downsample_id (str)
+            downsample_status_table (ARN)
+
             collection_id (int)
             experiment_id (int)
             channel_id (int)
@@ -201,7 +208,15 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     volume_empty = True # abort if the volume doesn't exist in S3
     for offset in xyz_range(step):
-        cube = target + offset
+        if args.get('test'):
+            # Enable Test Mode
+            # This is where the cubes downsamples are all taken from 0/0/0
+            # so that the entire frame doesn't have to be populated to test
+            # the code paths that downsample cubes
+            cube = offset # use target 0/0/0
+        else:
+            cube = target + offset
+
         try:
             obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
             data = s3.get(obj_key)
@@ -253,7 +268,9 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              version,
                              col_id,
                              '{}&{}&{}&{}'.format(exp_id, chan_id, resolution + 1, ingest_job),
-                             AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1))
+                             # Replaced call to SPDB AWSObjectStore.generate_lookup_key, as SPDB master doesn't contain this call
+                             # AWSObjectStore.generate_lookup_key(col_id, exp_id, chan_id, resolution + 1)
+                             '{}&{}&{}&{}&{}'.format(col_id, exp_id, chan_id, resolution + 1, randrange(LOOKUP_KEY_MAX_N)))
         s3_index.put(idx_key)
 
 def downsample_cube(volume, cube, is_annotation):
@@ -296,13 +313,22 @@ def downsample_cube(volume, cube, is_annotation):
             cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
-    """Convert JSON arguments into the expected internal types"""
-    def convert(key):
-        args[key] = XYZ(*args[key])
+    def convert(args_, key):
+        args_[key] = XYZ(*args_[key])
 
-    convert('target')
-    convert('step')
-    convert('dim')
+    convert(args, 'step')
+    convert(args, 'dim')
 
-    downsample_volume(args['args'], args['target'], args['step'], args['dim'], args['use_iso_flag'])
+    sqs = boto3.resource('sqs')
+    cubes = sqs.Queue(args['cubes_arn'])
+    msgs = cubes.receive_messages(MaxNumberOfMessages = args['bucket_size'],
+                                  WaitTimeSeconds = 5)
+
+    for msg in msgs:
+        downsample_volume(args['args'],
+                          XYZ(*json.loads(msg.body)),
+                          args['step'],
+                          args['dim'],
+                          args['use_iso_flag'])
+        msg.delete()
 

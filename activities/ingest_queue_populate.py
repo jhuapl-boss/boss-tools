@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import time
+import math
 from functools import reduce
 
 from bossutils import aws
@@ -22,11 +23,13 @@ from heaviside.activities import fanout
 
 log = logger.BossLogger().logger
 
-POLL_DELAY = 5
+POLL_DELAY = 0
 STATUS_DELAY = 1
-MAX_NUM_PROCESSES = 50
+MAX_NUM_PROCESSES = 120
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
+MAX_NUM_TILES_PER_LAMBDA = 45000
+
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -59,7 +62,7 @@ def ingest_populate(args):
 
             'z_start': 0,
             'z_stop': 0
-            'z_tile_size': 16,
+            'z_tile_size': 1,
         }
 
     Returns:
@@ -67,6 +70,10 @@ def ingest_populate(args):
          'count': Number of messages put into the queue}
     """
     log.debug("Starting to populate upload queue")
+
+    args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_TILES_PER_LAMBDA
+    args['z_chunk_size'] = 16
+    args['z_tile_size'] = 1
 
     clear_queue(args['upload_queue'])
 
@@ -79,12 +86,19 @@ def ingest_populate(args):
                      poll_delay = POLL_DELAY,
                      status_delay = STATUS_DELAY)
 
-    total_sent = reduce(lambda x, y: x+y, results, 0)
+    tile_count = get_tile_count(args)
+    messages_uploaded = sum(results)
+    if tile_count != messages_uploaded:
+        log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
+                  .format(tile_count, messages_uploaded))
+    else:
+        log.debug("tile count and messages uploaded match: {}".format(tile_count))
 
     return {
         'arn': args['upload_queue'],
-        'count': total_sent,
+        'count': tile_count,
     }
+
 
 def clear_queue(arn):
     """Delete any existing messages in the given SQS queue
@@ -98,24 +112,31 @@ def clear_queue(arn):
     client.purge_queue(QueueUrl = arn)
     time.sleep(60)
 
+
+def get_tile_count(args):
+    tile_size = lambda v: args[v + "_tile_size"]
+    extent = lambda v: args[v + '_stop'] - args[v + '_start']
+    num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
+
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * num_tiles_in('t')
+    return tile_count
+
+
 def split_args(args):
-    range_ = lambda v: range(args[v + '_start'], args[v + '_stop'], args[v + '_tile_size'])
+    # Compute # of tiles in the job
+    tile_count = get_tile_count(args)
+    log.debug("Total Tile Count: " + str(tile_count))
 
-    for t in range_('t'):
-        for z in range_('z'):
-            args_ = args.copy()
+    offset_count = math.ceil(tile_count / MAX_NUM_TILES_PER_LAMBDA)
 
-            args_['t_start'] = t
-            args_['t_stop'] = t + args['t_tile_size']
+    for tiles_count_offset in range(offset_count):
+        args_ = args.copy()
+        args_['tiles_to_skip'] = tiles_count_offset * MAX_NUM_TILES_PER_LAMBDA
+        yield args_
 
-            args_['z_start'] = z
-            args_['z_stop'] = z + args['z_tile_size']
-            args_['final_z_stop'] = args['z_stop']
-
-            yield args_
 
 def verify_count(args):
-    """Verify that the number of messages in a queue is the given number
+    """Verify that the number of messages in a queue is at least the given number
 
     Args:
         args: {
@@ -127,7 +148,7 @@ def verify_count(args):
         int: The total number of messages in the queue
 
     Raises:
-        Error: If the count doesn't match the messages in the queue
+        Error: If the messages in the queue is less then the count
     """
 
     session = aws.get_session()
@@ -136,8 +157,11 @@ def verify_count(args):
                                        AttributeNames = ['ApproximateNumberOfMessages'])
     messages = int(resp['Attributes']['ApproximateNumberOfMessages'])
 
-    if messages != args['count']:
-        raise Exception('Counts do not match')
+    if messages > args['count']:
+      log.debug("More SQS messages then expected: required tiles {}, actual messages {}".format(args['count'],
+                                                                                                messages))
+    elif messages < args['count']:
+        raise Exception('Not enough messages in queue')
 
-    return args['count']
+    return messages
 
