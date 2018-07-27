@@ -64,11 +64,17 @@ class TestVaultClient(unittest.TestCase):
         with self.assertRaises(Exception):
             v.read('secrets', 'super')
 
-    @patch.object(Vault, 'login')
-    def test_retry_logic(self, mockLogin, mockClient):
-        v = Vault(self.cfg)
-        login = mockLogin.return_value
-        login.login.return_value = True
+    def test_retry_logic_calls_login(self, mockClient):
         instance = mockClient.return_value
-        instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),v.read('secrets','super')]
-        v.read('secrets','super')
+        v = Vault(self.cfg)
+        instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),{ "data" : {"super": ""} }]
+        with patch.object(Vault, 'login') as mock:
+            v.read('secrets','super')
+            mock.assert_called_once_with(v)
+
+    def test_retry_logic_returns(self, mockClient):
+        instance = mockClient.return_value
+        v = Vault(self.cfg)
+        instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),{ "data" : {"super": "this!"} }]
+        with patch.object(Vault, 'login') as mock:
+            self.assertEqual(v.read('secrets', 'super'), "this!")
