@@ -112,7 +112,7 @@ class Vault:
     def read(self, path, key):
         """Read the specific key from the Vault path.
 
-        An Exception is t:hrown if the path or key do not exist."""
+        An Exception is thrown if the path or key do not exist."""
         response = self.client.read(path)
         if response is not None:
             response = response["data"][key]
