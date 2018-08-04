@@ -145,21 +145,24 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
         if 'x_size' in metadata:
             tile_size_x = metadata['x_size']
         else:
+            print('MetadataMissing: x_size not in tile metadata:  using 1024.')
             tile_size_x = 1024
 
         if 'y_size' in metadata:
             tile_size_y = metadata['y_size']
         else:
+            print('MetadataMissing: y_size not in tile metadata:  using 1024.')
             tile_size_y = 1024
 
         if image_size == 0:
-            print('Zero length tile using black instead: {}'.format(tile_key))
+            print('TileError: Zero length tile, using black instead: {}'.format(tile_key))
             tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         else:
             try:
                 tile_img = np.asarray(Image.open(image_bytes), dtype=dtype)
             except TypeError as te:
-                print('TypeError, incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'.format(image_size, tile_key))
+                print('TileError: Incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'
+                      .format(image_size, tile_key))
                 tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         data.append(tile_img)
         num_z_slices += 1
