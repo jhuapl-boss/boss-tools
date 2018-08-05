@@ -29,6 +29,8 @@ from ndingest.ndingestproj.bossingestproj import BossIngestProj
 
 from botocore.exceptions import ClientError
 
+print("$$$ IN TILE UPLOAD LAMBDA $$$")
+
 # Load settings
 SETTINGS = BossSettings.load()
 
