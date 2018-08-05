@@ -130,7 +130,7 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
     num_z_slices = 0
     for tile_key in tile_key_list:
         try:
-            image_data, message_id, receipt_handle, _ = tile_bucket.getObjectByKey(tile_key)
+            image_data, message_id, receipt_handle, metadata = tile_bucket.getObjectByKey(tile_key)
         except KeyError:
             print('Key: {} not found in tile bucket, assuming redelivered SQS message and aborting.'.format(
                 tile_key))
@@ -138,9 +138,35 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
             ingest_queue.deleteMessage(msg_id, msg_rx_handle)
             sys.exit("Aborting due to missing tile in bucket")
 
-        tile_img = np.asarray(Image.open(BytesIO(image_data)), dtype=dtype)
+        image_bytes = BytesIO(image_data)
+        image_size = image_bytes.getbuffer().nbytes
+
+        # Get tiles size from metadata, need to shape black tile if actual tile is corrupt.
+        if 'x_size' in metadata:
+            tile_size_x = metadata['x_size']
+        else:
+            print('MetadataMissing: x_size not in tile metadata:  using 1024.')
+            tile_size_x = 1024
+
+        if 'y_size' in metadata:
+            tile_size_y = metadata['y_size']
+        else:
+            print('MetadataMissing: y_size not in tile metadata:  using 1024.')
+            tile_size_y = 1024
+
+        if image_size == 0:
+            print('TileError: Zero length tile, using black instead: {}'.format(tile_key))
+            tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
+        else:
+            try:
+                tile_img = np.asarray(Image.open(image_bytes), dtype=dtype)
+            except TypeError as te:
+                print('TileError: Incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'
+                      .format(image_size, tile_key))
+                tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         data.append(tile_img)
         num_z_slices += 1
+
 
     # Make 3D array of image data. It should be in XYZ at this point
     chunk_data = np.array(data)
