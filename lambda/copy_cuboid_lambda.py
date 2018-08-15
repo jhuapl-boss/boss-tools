@@ -35,6 +35,7 @@ event: {
 """
 
 import boto3
+import botocore
 import hashlib
 import logging
 from spdb.c_lib.ndtype import CUBOIDSIZE
@@ -69,7 +70,10 @@ def copy_cuboid(event):
 
     logger.info('Copying {} to {}'.format(event['s3_key'], new_key))
 
-    s3_copy(bucket, source, new_key, event['region'])
+    if not s3_copy(bucket, source, new_key, event['region']):
+        # Key not present, so don't add to index.
+        return
+
     update_s3_index(event['object_store_config'], new_key, event['ingest_job'])
 
 def s3_copy(bucket, source, key, region):
@@ -81,6 +85,9 @@ def s3_copy(bucket, source, key, region):
         source (dict): Identify source cuboid, keys: 'Bucket', 'Key'.
         key (str): Copy destination S3 object key.
         region (str): AWS region.
+
+    Returns:
+        (bool): False if source not found.
     """
 
     # Append version (always 0 particularly since we're copying to a new
@@ -88,11 +95,17 @@ def s3_copy(bucket, source, key, region):
     versioned_key = '{}&0'.format(key)
 
     s3 = boto3.client('s3', region_name=region)
-    s3.copy_object(
-        Bucket=bucket,
-        CopySource=source,
-        Key=versioned_key
-    )
+    try:
+        s3.copy_object(
+            Bucket=bucket,
+            CopySource=source,
+            Key=versioned_key
+        )
+    except s3.exceptions.NoSuchKey as ex:
+        logger.warn('Key does not exist in S3 - probably black tile.')
+        return False
+
+    return True
 
 def update_s3_index(obj_store_init, key, ingest_job):
     """
