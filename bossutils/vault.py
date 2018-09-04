@@ -62,7 +62,6 @@ class Vault:
     def login(self):
         pkcs7 = utils.read_url(utils.DYNAMIC_URL + 'instance-identity/pkcs7').replace('\n', '')
         role = self.config['system']['type']
-        print(role)
 
         response = self.client.auth_ec2(pkcs7=pkcs7,role=role,nonce='BOSS Vault Client', mount_point='aws')
 
