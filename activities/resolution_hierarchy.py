@@ -22,7 +22,6 @@ import types
 import json
 import time
 import random
-from math import ceil
 from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
 
@@ -284,8 +283,8 @@ def num_cubes(start, stop, step):
     Return:
         int: The number of volumes in the frame
     """
-    extents = (stop - start) / step
-    return int(ceil(extents.x) * ceil(extents.y) * ceil(extents.z))
+    extents = ceildiv(stop - start, step)
+    return int(extents.x * extents.y * extents.z)
 
 def make_cubes(start, stop, step):
     """Produce the target cubes to downsample
