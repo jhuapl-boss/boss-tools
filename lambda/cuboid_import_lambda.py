@@ -44,6 +44,8 @@ import urllib
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+logging.getLogger('boto3').setLevel(logging.ERROR)
+logging.getLogger('botocore').setLevel(logging.ERROR)
 
 def handler(event, context):
     """
@@ -69,6 +71,8 @@ def run(event, context):
     Raises:
         (ValueError): if there is no exactly one Record in event.
     """
+    logger.info(event)
+
     num_records = len(event['Records'])
     if num_records != 1:
         raise ValueError('S3 trigger event sent {} records.'.format(num_records))
@@ -87,11 +91,14 @@ def run(event, context):
     metadata = get_object_metadata(bucket, key, region)
     ingest_job = metadata['ingest_job']
 
+    logger.info('Copying {}'.format(key))
     s3_copy(target_bucket, source, region)
 
+    logger.info('Updating S3 index table')
     s3_index = names.s3_index
     update_s3_index(get_object_store_cfg(target_bucket, s3_index), key, ingest_job)
 
+    logger.info('Deleting cuboid from ingest bucket')
     s3_delete(bucket, key, region)
 
 def s3_copy(target_bucket, source, region):
