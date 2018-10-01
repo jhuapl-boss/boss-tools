@@ -19,6 +19,20 @@ The cuboid is copied to the standard S3 cuboid bucket and the S3 index table
 is updated with the new cuboid's key.
 
 This lambda is referenced by the key 'cuboid_import_lambda' in names.py.
+
+The event parameter passed into the lambda should be provided by the ingest
+bucket's trigger.
+
+event: {
+    "Records": [
+        {
+            "s3": {
+                "object": { "key": (str): S3 object key },
+                "bucket": { "name": (str): bucket name }
+            } 
+        }
+    ]
+}
 """
 
 from bossnames.names import AWSNames
@@ -51,7 +65,14 @@ def run(event, context):
     Args:
         event (dict): Lambda input parameters.  See module level comments.
         context (Context): Lambda Context object.
+
+    Raises:
+        (ValueError): if there is no exactly one Record in event.
     """
+    num_records = len(event['Records'])
+    if num_records != 1:
+        raise ValueError('S3 trigger event sent {} records.'.format(num_records))
+
     key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'])
     bucket = event['Records'][0]['s3']['bucket']['name']
 
