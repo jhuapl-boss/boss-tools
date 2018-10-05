@@ -164,6 +164,11 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
                 print('TileError: Incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'
                       .format(image_size, tile_key))
                 tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
+            except OSError as oe:
+                print('TileError: OSError, using black instead (tile_size_in_bytes, tile_key): {}, {} ErrorMessage: {}'
+                      .format(image_size, tile_key, oe))
+                tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
+
         data.append(tile_img)
         num_z_slices += 1
 
