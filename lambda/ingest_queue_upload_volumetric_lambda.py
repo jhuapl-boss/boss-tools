@@ -175,56 +175,58 @@ def create_messages(args):
 
     chunks_to_skip = args['items_to_skip']
     count_in_offset = 0
+    for t in range_('t'):
+        for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
+            for y in range_('y'):
+                for x in range_('x'):
 
-    for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
-        for y in range_('y'):
-            for x in range_('x'):
+                    if chunks_to_skip > 0:
+                        chunks_to_skip -= 1
+                        continue
 
-                if chunks_to_skip > 0:
-                    chunks_to_skip -= 1
-                    continue
+                    if count_in_offset == 0:
+                        print("Finished skipping chunks")
 
-                if count_in_offset == 0:
-                    print("Finished skipping chunks")
+                    chunk_x = int(x / tile_size('x'))
+                    chunk_y = int(y / tile_size('y'))
+                    chunk_z = int(z / args['z_chunk_size'])
+                    chunk_key = hashed_key(1,  # num of items
+                                           args['project_info'][0],
+                                           args['project_info'][1],
+                                           args['project_info'][2],
+                                           args['resolution'],
+                                           chunk_x,
+                                           chunk_y,
+                                           chunk_z,
+                                           t)
 
-                chunk_x = int(x / tile_size('x'))
-                chunk_y = int(y / tile_size('y'))
-                chunk_z = int(z / args['z_chunk_size'])
-                chunk_key = hashed_key(args['project_info'][0],
-                                       args['project_info'][1],
-                                       args['project_info'][2],
-                                       args['resolution'],
-                                       chunk_x,
-                                       chunk_y,
-                                       chunk_z)
+                    count_in_offset += 1
+                    if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
+                        return  # end the generator
 
-                count_in_offset += 1
-                if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
-                    return  # end the generator
+                    cuboids = []
+                    x_extent = args["x_stop"] - args["x_start"]
+                    y_extent = args["y_stop"] - args["y_start"]
+                    z_extent = args["z_chunk_size"]
 
-                cuboids = []
-                x_extent = args["x_stop"] - args["x_start"]
-                y_extent = args["y_stop"] - args["y_start"]
-                z_extent = args["z_chunk_size"]
+                    for chunk_offset_z in range(0, args["z_chunk_size"], 16):
+                        for chunk_offset_y in range(0, tile_size('y'), 512):
+                            for chunk_offset_x in range(0, tile_size('x'), 512):
+                                morton = XYZMorton([chunk_offset_x,chunk_offset_y, chunk_offset_z])
+                                lookup_key = lookup_key_from_chunk_key(chunk_key)
+                                res = resolution_from_chunk_key(chunk_key)
+                                object_key = generate_object_key(lookup_key, res, z, morton)
+                                new_cuboid = {
+                                    "x": chunk_offset_x,
+                                    "y": chunk_offset_y,
+                                    "z": chunk_offset_z,
+                                    "key": object_key,
+                                }
+                                cuboids.append(new_cuboid)
 
-                for chunk_offset_z in range(0, args["z_chunk_size"], 16):
-                    for chunk_offset_y in range(0, tile_size('y'), 512):
-                        for chunk_offset_x in range(0, tile_size('x'), 512):
-                            morton = XYZMorton([chunk_offset_x,chunk_offset_y, chunk_offset_z])
-                            lookup_key = lookup_key_from_chunk_key(chunk_key)
-                            res = resolution_from_chunk_key(chunk_key)
-                            object_key = generate_object_key(lookup_key, res, 0, morton)
-                            new_cuboid = {
-                                "x": chunk_offset_x,
-                                "y": chunk_offset_y,
-                                "z": chunk_offset_z,
-                                "key": object_key,
-                            }
-                            cuboids.append(new_cuboid)
+                    msg = {
+                        'chunk_key': chunk_key,
+                        'cuboids': cuboids,
+                    }
 
-                msg = {
-                    'chunk_key': chunk_key,
-                    'cuboids': cuboids,
-                }
-
-                yield json.dumps(msg)
+                    yield json.dumps(msg)
