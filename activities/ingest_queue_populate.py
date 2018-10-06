@@ -18,7 +18,6 @@ from functools import reduce
 
 from bossutils import aws
 from bossutils import logger
-from bosscore.error import BossError, ErrorCodes, BossResourceNotFoundError
 
 from heaviside.activities import fanout
 
@@ -73,10 +72,10 @@ def ingest_populate(args):
     """
     log.debug("Starting to populate upload queue")
 
-    args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
+    args['MAX_NUM_ITEMS_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
 
-    if (args["ingest_type"] == 0) or (args["ingest_type"] == 1):
-        raise BossError("{}".format("Unknown ingest_type: {}".format(args["ingest_type"])))
+    if (args["ingest_type"] != 0) and (args["ingest_type"] != 1):
+        raise ValueError("{}".format("Unknown ingest_type: {}".format(args["ingest_type"])))
 
     clear_queue(args['upload_queue'])
 
