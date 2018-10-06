@@ -72,7 +72,7 @@ def ingest_populate(args):
     """
     log.debug("Starting to populate upload queue")
 
-    args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
+    args['MAX_NUM_ITEMS_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
 
     if (args["ingest_type"] != 0) and (args["ingest_type"] != 1):
         raise ValueError("{}".format("Unknown ingest_type: {}".format(args["ingest_type"])))
