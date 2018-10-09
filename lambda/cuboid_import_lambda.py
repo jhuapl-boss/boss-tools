@@ -37,6 +37,7 @@ event: {
 
 from bossnames.names import AWSNames
 import boto3
+import json
 import logging
 import os
 from spdb.spatialdb.object import AWSObjectStore
@@ -89,6 +90,7 @@ def run(event, context):
     region = event['region']
 
     metadata = get_object_metadata(bucket, key, region)
+    logger.info('Metadata: {}'.format(metadata))
     ingest_job = metadata['ingest_job']
 
     logger.info('Copying {}'.format(key))
@@ -149,7 +151,7 @@ def get_object_metadata(bucket, key, region):
     """
     s3 = boto3.resource('s3', region_name=region)
     obj = s3.Object(bucket, key)
-    return obj.metadata
+    return json.loads(obj.metadata['metadata'])
     
 def get_object_store_cfg(bucket, s3_index):
     """

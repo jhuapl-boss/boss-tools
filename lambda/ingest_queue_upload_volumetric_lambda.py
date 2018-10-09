@@ -12,6 +12,11 @@ class FailedToSendMessages(Exception):
 SQS_BATCH_SIZE = 10
 SQS_RETRY_TIMEOUT = 15
 
+# Boss cuboid dimensions.
+CUBOID_X = 512
+CUBOID_Y = 512
+CUBOID_Z = 16
+
 def handler(args, context):
     """Populate the ingest upload SQS Queue with tile information
 
@@ -102,13 +107,13 @@ def lookup_key_from_chunk_key(chunk_key):
     breaks out the lookup_key from the chunk_key.
 
     Args:
-        chunk_key (str): volumetric chunk key = hash&col_id&exp_id&ch_idres&x&y&z"
+        chunk_key (str): volumetric chunk key = hash&num_items&col_id&exp_id&ch_idres&x&y&z"
 
     Returns (str): lookup_key col_id&exp_id&ch_id
 
     """
     parts = chunk_key.split('&')
-    lookup_parts = parts[1:4]
+    lookup_parts = parts[2:5]
     return "&".join(lookup_parts)
 
 
@@ -117,13 +122,13 @@ def resolution_from_chunk_key(chunk_key):
     breaks out the resolution from the chunk_key.
 
     Args:
-        chunk_key (str): volumetric chunk key = hash&col_id&exp_id&ch_idres&x&y&z"
+        chunk_key (str): volumetric chunk key = hash&num_items&col_id&exp_id&ch_idres&x&y&z"
 
     Returns (str): resolution
 
     """
     parts = chunk_key.split('&')
-    return parts[4]
+    return parts[5]
 
 
 def generate_object_key(lookup_key, resolution, time_sample, morton_id):
@@ -209,10 +214,11 @@ def create_messages(args):
                     y_extent = args["y_stop"] - args["y_start"]
                     z_extent = args["z_chunk_size"]
 
-                    for chunk_offset_z in range(0, args["z_chunk_size"], 16):
-                        for chunk_offset_y in range(0, tile_size('y'), 512):
-                            for chunk_offset_x in range(0, tile_size('x'), 512):
-                                morton = XYZMorton([chunk_offset_x,chunk_offset_y, chunk_offset_z])
+                    for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
+                        for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
+                            for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
+                                morton = XYZMorton(
+                                    [chunk_offset_x/CUBOID_X,chunk_offset_y/CUBOID_Y, chunk_offset_z/CUBOID_Z])
                                 lookup_key = lookup_key_from_chunk_key(chunk_key)
                                 res = resolution_from_chunk_key(chunk_key)
                                 object_key = generate_object_key(lookup_key, res, z, morton)
