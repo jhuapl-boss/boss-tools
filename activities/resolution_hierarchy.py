@@ -283,7 +283,7 @@ def num_cubes(start, stop, step):
     Return:
         int: The number of volumes in the frame
     """
-    extents = (stop - start) / step
+    extents = ceildiv(stop - start, step)
     return int(extents.x * extents.y * extents.z)
 
 def make_cubes(start, stop, step):
