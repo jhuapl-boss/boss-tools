@@ -11,6 +11,7 @@ from spdb.c_lib import ndlib
 from spdb.spatialdb import AWSObjectStore
 from spdb.spatialdb.object import ObjectIndices
 from random import randrange
+from botocore.exceptions import ClientError
 
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
@@ -75,10 +76,11 @@ class S3Bucket(object):
         try:
             resp = self.s3.get_object(Key = key,
                                       Bucket = self.bucket)
-        except:
-            raise Exception("No Such Key")
-
-        self._check_error(resp, "reading")
+        except ClientError as e:
+            if e.response['ResponseMetadata']['HTTPStatusCode'] == 404:
+                # Cube doesn't exist
+                return None
+            raise
 
         data = resp['Body'].read()
         return data
@@ -152,9 +154,6 @@ def downsample_volume(args, target, step, dim, use_iso_key):
 
     Args:
         args {
-            downsample_id (str)
-            downsample_status_table (ARN)
-
             collection_id (int)
             experiment_id (int)
             channel_id (int)
@@ -217,9 +216,9 @@ def downsample_volume(args, target, step, dim, use_iso_key):
         else:
             cube = target + offset
 
-        try:
-            obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
-            data = s3.get(obj_key)
+        obj_key = HashedKey(parent_iso, col_id, exp_id, chan_id, resolution, t, cube.morton, version=version)
+        data = s3.get(obj_key)
+        if data:
             data = blosc.decompress(data)
 
             # DP ???: Check to see if the buffer is all zeros?
@@ -229,14 +228,6 @@ def downsample_volume(args, target, step, dim, use_iso_key):
             #log.debug("Downloaded cube {}".format(cube))
             volume[offset * dim: (offset + 1) * dim] = data
             volume_empty = False
-        except Exception as e: # TODO: Create custom exception for S3 download
-            #log.exception("Problem downloading cubes {}".format(cube))
-            #log.debug("No cube at {}".format(cube))
-
-            # Eat the error, we don't care if the cube doesn't exist
-            # If the cube doesn't exist blank data will be used for downsampling
-            # If all the cubes don't exist, then the downsample is finished
-            pass
 
     if volume_empty:
         log.debug("Completely empty volume, not downsampling")
