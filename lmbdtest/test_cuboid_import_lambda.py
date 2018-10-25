@@ -13,14 +13,14 @@
 # limitations under the License.
 
 from bossnames.names import AWSNames
+from bossnames.bucket_object_tags import TAG_DELETE_KEY, TAG_DELETE_VALUE
 import boto3
 import io
+import json
 from lambdafcns.cuboid_import_lambda import run, get_object_store_cfg
 from moto import mock_s3
 import unittest
 from unittest.mock import patch
-
-import tempfile
 
 class Context:
     """
@@ -61,7 +61,7 @@ class TestCuboidImportLambda(unittest.TestCase):
         with self.assertRaises(ValueError):
             run(event, Context())
 
-    @patch('lambdafcns.cuboid_import_lambda.s3_delete', autospec=True)
+    @patch('lambdafcns.cuboid_import_lambda.s3_mark_for_deletion', autospec=True)
     @patch('lambdafcns.cuboid_import_lambda.get_object_metadata', autospec=True)
     @patch('lambdafcns.cuboid_import_lambda.update_s3_index', autospec=True)
     @patch('lambdafcns.cuboid_import_lambda.s3_copy', autospec=True)
@@ -98,7 +98,8 @@ class TestCuboidImportLambda(unittest.TestCase):
         key = '02e4578abd294eb42c5c625b6340bd59&4&4&30&0&0&8802'
         data = 'my_cuboid'.encode()
         ingest_job = '29'
-        bucket.put_object(Key=key, Body=data, Metadata={'ingest_job': ingest_job})
+        metadata = json.dumps({'ingest_job': ingest_job}, separators=(',', ':'))
+        bucket.put_object(Key=key, Body=data, Metadata={'metadata': metadata})
 
         event = {
             'Records': [
@@ -123,5 +124,8 @@ class TestCuboidImportLambda(unittest.TestCase):
             actual = f.getvalue()
             self.assertEqual(data, actual)
 
-        # Confirm S3 object removed from source bucket.
-        self.assertFalse(key in bucket.objects.all())
+        # Confirm S3 object marked for deletion in source bucket.
+        client = boto3.client('s3', region_name=event['region'])
+        actual_obj = client.get_object_tagging(Bucket=BUCKET_NAME, Key=key)
+        self.assertEqual(TAG_DELETE_KEY, actual_obj['TagSet'][0]['Key'])
+        self.assertEqual(TAG_DELETE_VALUE, actual_obj['TagSet'][0]['Value'])

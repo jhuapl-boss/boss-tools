@@ -35,6 +35,7 @@ event: {
 }
 """
 
+from bossnames.bucket_object_tags import TAG_DELETE_KEY, TAG_DELETE_VALUE
 from bossnames.names import AWSNames
 import boto3
 import json
@@ -100,8 +101,8 @@ def run(event, context):
     s3_index = names.s3_index
     update_s3_index(get_object_store_cfg(target_bucket, s3_index), key, ingest_job)
 
-    logger.info('Deleting cuboid from ingest bucket')
-    s3_delete(bucket, key, region)
+    logger.info('Cuboid in ingest bucket marked for deletion')
+    s3_mark_for_deletion(bucket, key, region)
 
 def s3_copy(target_bucket, source, region):
     """
@@ -124,7 +125,7 @@ def s3_copy(target_bucket, source, region):
         Key=versioned_key
     )
 
-def s3_delete(bucket, key, region):
+def s3_mark_for_deletion(bucket, key, region):
     """
     Delete the S3 object.
 
@@ -133,9 +134,12 @@ def s3_delete(bucket, key, region):
         key (str): S3 object key.
         region (str): AWS region.
     """
-    s3 = boto3.resource('s3', region_name=region)
-    obj = s3.Object(bucket, key)
-    obj.delete()
+    s3 = boto3.client('s3', region_name=region)
+    s3.put_object_tagging(
+        Bucket=bucket, Key=key, Tagging={
+            'TagSet': [{ 'Key': TAG_DELETE_KEY, 'Value': TAG_DELETE_VALUE }]
+        }
+    )
 
 def get_object_metadata(bucket, key, region):
     """
