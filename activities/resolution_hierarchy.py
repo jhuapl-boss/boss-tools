@@ -192,6 +192,16 @@ def downsample_channel(args):
             cubes_start = frame_start // dim
             cubes_stop = ceildiv(frame_stop, dim)
 
+            # For a non-zero start, make sure start cube aligns with a zero start downsample
+            # so that the data aligns and there are no shifts with the new downsampled data
+            mod = cubes_start % step
+            if mod.x != 0:
+                cubes_start = XYZ(cubes_start.x - 1, cubes_start.y, cubes_start.z)
+            if mod.y != 0:
+                cubes_start = XYZ(cubes_start.x, cubes_start.y - 1, cubes_start.z)
+            if mod.z != 0:
+                cubes_start = XYZ(cubes_start.x, cubes_start.y, cubes_start.z - 1)
+
             log.debug('Downsampling {} resolution {}'.format(config['name'], resolution))
             log.debug("Frame corner: {}".format(frame_start))
             log.debug("Frame extent: {}".format(frame_stop))
