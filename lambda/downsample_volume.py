@@ -26,6 +26,8 @@ log.addHandler(log_handler)
 
 LOOKUP_KEY_MAX_N = 100 # DP NOTE: Taken from spdb.spatialdb.object
 
+EXCEPTIONS_NOT_RELATED_TO_KEY = ('ProvisionedThroughputExceededException', 'ThrottlingException')
+
 
 np_types = {
     'uint64': np.uint64,
@@ -80,6 +82,8 @@ class S3Bucket(object):
             if e.response['ResponseMetadata']['HTTPStatusCode'] == 404:
                 # Cube doesn't exist
                 return None
+            if e.response['Error']['Code'] not in EXCEPTIONS_NOT_RELATED_TO_KEY:
+                print("S3 key in get_object error: {}".format(key))
             raise
 
         data = resp['Body'].read()
