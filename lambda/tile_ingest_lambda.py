@@ -1,5 +1,16 @@
-#!/usr/bin/env python3.4
-# This lambda is for ingest
+# Copyright 2016 The Johns Hopkins University Applied Physics Laboratory
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import sys
 import json
@@ -26,22 +37,15 @@ import math
 import boto3
 
 
-print("$$$ IN INGEST LAMBDA $$$")
-# Load settings
-SETTINGS = BossSettings.load()
+def handler(event, context):
+    # Load settings
+    SETTINGS = BossSettings.load()
 
-# Parse input args passed as a JSON string from the lambda loader
-json_event = sys.argv[1]
-event = json.loads(json_event)
+    # Load the project info from the chunk key you are processing
+    proj_info = BossIngestProj.fromSupercuboidKey(event["chunk_key"])
+    proj_info.job_id = event["ingest_job"]
 
-# Load the project info from the chunk key you are processing
-proj_info = BossIngestProj.fromSupercuboidKey(event["chunk_key"])
-proj_info.job_id = event["ingest_job"]
-
-# Handle up to 2 messages before quitting (helps deal with making sure all messages get processed)
-run_cnt = 0
-while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full memory when pulling off more than 1.
-    # Get message from SQS flush queue, try for ~2 seconds
+    # Get message from SQS ingest queue, try for ~2 seconds
     rx_cnt = 0
     msg_data = None
     msg_id = None
@@ -64,10 +68,10 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
             time.sleep(1)
 
     if not msg_id:
-        # Nothing to flush. Exit.
+        # No tiles ready to ingest. Exit.
         sys.exit("No ingest message available")
 
-    # Get the write-cuboid key to flush
+    # Get the chunk key of the tiles to ingest.
     chunk_key = msg_data['chunk_key']
     print("Ingesting Chunk {}".format(chunk_key))
 
@@ -187,8 +191,6 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
     print("Num X Cuboids: {}".format(num_x_cuboids))
     print("Num Y Cuboids: {}".format(num_y_cuboids))
 
-    # Cuboid List
-    cuboids = []
     chunk_key_parts = BossUtil.decode_chunk_key(chunk_key)
     t_index = chunk_key_parts['t_index']
     for x_idx in range(0, num_x_cuboids):
@@ -253,7 +255,7 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
 
     lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
 
-    names = AWSNames.create_from_lambda_name(event['function-name'])
+    names = AWSNames.create_from_lambda_name(context.function_name)
 
     delete_tiles_data = {
         'tile_key_list': tile_key_list,
@@ -284,6 +286,3 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
 
     # Delete message since it was processed successfully
     ingest_queue.deleteMessage(msg_id, msg_rx_handle)
-
-    # Increment run counter
-    run_cnt += 1

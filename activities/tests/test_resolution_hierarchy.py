@@ -318,24 +318,28 @@ class TestDownsampleChannel(unittest.TestCase):
         #        the problem that we run into is that the frame start shrinks towards zero. This presents an
         #        issue when the Channel's Frame starts at the initial offset and downsampling shrinks the frame
         #        for lower resolutions beyond the lower extent of the Channel's Frame, makng that data unavailable.
-        args1 = self.get_args(type='isotropic', scale=3,
-                              x_start=512, y_start=512, z_start=16) # Really two cubes offset by one cube
+        # Derek: The start / stop values were taken from a non-zero start downsample that showed there was a problem
+        #        when the start cube was not even, and therefore didn't align with a full downsample that started
+        #        at zero
+        args1 = self.get_args(type='isotropic', resolution=4,
+                              x_start=4992, y_start=4992, z_start=1232,
+                              x_stop=6016,  y_stop=6016,  z_stop=1264)
 
         args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(1,1,1),
-                        md.XYZ(3,3,3),
+                        md.XYZ(8,8,76),
+                        md.XYZ(12,12,79),
                         md.XYZ(2,2,2))
         self.assertEqual(mPopulateCubes.mock_calls, [expected])
 
-        self.assertEqual(args2['x_start'], 256) # 512 / 2
-        self.assertEqual(args2['y_start'], 256)
-        self.assertEqual(args2['z_start'], 8) # 16 / 2
+        self.assertEqual(args2['x_start'], 2496)
+        self.assertEqual(args2['y_start'], 2496)
+        self.assertEqual(args2['z_start'], 616)
 
-        self.assertEqual(args2['x_stop'], 768) # 512 * 3 / 2
-        self.assertEqual(args2['y_stop'], 768)
-        self.assertEqual(args2['z_stop'], 24) # 16 * 3 / 2
+        self.assertEqual(args2['x_stop'], 3008)
+        self.assertEqual(args2['y_stop'], 3008)
+        self.assertEqual(args2['z_stop'], 632)
 
     def test_downsample_channel_before_stop(self, mRandom, mCreateQueue, mPopulateCubes, mLaunchLambdas, mDeleteQueue):
         args1 = self.get_args(type='isotropic',
