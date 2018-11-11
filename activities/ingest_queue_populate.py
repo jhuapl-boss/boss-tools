@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import time
+import math
 from functools import reduce
 
 from bossutils import aws
@@ -22,11 +23,13 @@ from heaviside.activities import fanout
 
 log = logger.BossLogger().logger
 
-POLL_DELAY = 5
+POLL_DELAY = 0
 STATUS_DELAY = 1
-MAX_NUM_PROCESSES = 50
+MAX_NUM_PROCESSES = 120
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
+MAX_NUM_ITEMS_PER_LAMBDA = 45000
+
 
 def ingest_populate(args):
     """Populate the ingest upload SQS Queue with tile information
@@ -41,7 +44,7 @@ def ingest_populate(args):
             'job_id': '',
             'upload_queue': ARN,
             'ingest_queue': ARN,
-
+            'ingest_type': int (0 == TILE, 1 == VOLUMETRIC),
             'resolution': 0,
             'project_info': [col_id, exp_id, ch_id],
 
@@ -59,7 +62,8 @@ def ingest_populate(args):
 
             'z_start': 0,
             'z_stop': 0
-            'z_tile_size': 16,
+            'z_tile_size': 1,
+            'z_chunk_size': 16 for Tile or Probably 64 for Volumetric
         }
 
     Returns:
@@ -68,23 +72,51 @@ def ingest_populate(args):
     """
     log.debug("Starting to populate upload queue")
 
+    args['MAX_NUM_ITEMS_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
+
+    if (args["ingest_type"] != 0) and (args["ingest_type"] != 1):
+        raise ValueError("{}".format("Unknown ingest_type: {}".format(args["ingest_type"])))
+
     clear_queue(args['upload_queue'])
 
     results = fanout(aws.get_session(),
                      args['upload_sfn'],
                      split_args(args),
-                     max_concurrent = MAX_NUM_PROCESSES,
-                     rampup_delay = RAMPUP_DELAY,
-                     rampup_backoff = RAMPUP_BACKOFF,
-                     poll_delay = POLL_DELAY,
-                     status_delay = STATUS_DELAY)
+                     max_concurrent=MAX_NUM_PROCESSES,
+                     rampup_delay=RAMPUP_DELAY,
+                     rampup_backoff=RAMPUP_BACKOFF,
+                     poll_delay=POLL_DELAY,
+                     status_delay=STATUS_DELAY)
+    messages_uploaded = sum(results)
 
-    total_sent = reduce(lambda x, y: x+y, results, 0)
+    if args["ingest_type"] == 0:
+        tile_count = get_tile_count(args)
+        if tile_count != messages_uploaded:
+            log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
+                      .format(tile_count, messages_uploaded))
+        else:
+            log.debug("tile count and messages uploaded match: {}".format(tile_count))
 
-    return {
-        'arn': args['upload_queue'],
-        'count': total_sent,
-    }
+        return {
+            'arn': args['upload_queue'],
+            'count': tile_count,
+        }
+    elif args["ingest_type"] == 1:
+        vol_count = get_volumetric_count(args)
+        if vol_count != messages_uploaded:
+            log.warning("Messages uploaded do not match volumetric count.  volumetric count: {} messages uploaded: {}"
+                        .format(vol_count, messages_uploaded))
+        else:
+            log.debug("volumetric count and messages uploaded match: {}".format(vol_count))
+
+        return {
+            'arn': args['upload_queue'],
+            'count': vol_count,
+        }
+
+
+
+
 
 def clear_queue(arn):
     """Delete any existing messages in the given SQS queue
@@ -98,24 +130,46 @@ def clear_queue(arn):
     client.purge_queue(QueueUrl = arn)
     time.sleep(60)
 
+
+def get_tile_count(args):
+    tile_size = lambda v: args[v + "_tile_size"]
+    extent = lambda v: args[v + '_stop'] - args[v + '_start']
+    num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
+
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in('z') * num_tiles_in('t')
+    return tile_count
+
+
+def get_volumetric_count(args):
+    tile_size = lambda v: args[v + "_tile_size"]
+    extent = lambda v: args[v + '_stop'] - args[v + '_start']
+    num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
+
+    num_tiles_in_z = math.ceil(extent('z') / args['z_chunk_size'])
+
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in_z * num_tiles_in('t')
+    return tile_count
+
+
 def split_args(args):
-    range_ = lambda v: range(args[v + '_start'], args[v + '_stop'], args[v + '_tile_size'])
+    if args["ingest_type"] == 0:
+        # Compute # of tiles in the job
+        count = get_tile_count(args)
+        log.debug("Total Tile Count: " + str(count))
+    else:
+        # Compute # of volumetric chunks
+        count = get_volumetric_count(args)
+        log.debug("Total Chunk Count: " + str(count))
+    offset_count = math.ceil(count / MAX_NUM_ITEMS_PER_LAMBDA)
 
-    for t in range_('t'):
-        for z in range_('z'):
-            args_ = args.copy()
+    for item_count_offset in range(offset_count):
+        args_ = args.copy()
+        args_['items_to_skip'] = item_count_offset * MAX_NUM_ITEMS_PER_LAMBDA
+        yield args_
 
-            args_['t_start'] = t
-            args_['t_stop'] = t + args['t_tile_size']
-
-            args_['z_start'] = z
-            args_['z_stop'] = z + args['z_tile_size']
-            args_['final_z_stop'] = args['z_stop']
-
-            yield args_
 
 def verify_count(args):
-    """Verify that the number of messages in a queue is the given number
+    """Verify that the number of messages in a queue is at least the given number
 
     Args:
         args: {
@@ -127,7 +181,7 @@ def verify_count(args):
         int: The total number of messages in the queue
 
     Raises:
-        Error: If the count doesn't match the messages in the queue
+        Error: If the messages in the queue is less then the count
     """
 
     session = aws.get_session()
@@ -136,8 +190,11 @@ def verify_count(args):
                                        AttributeNames = ['ApproximateNumberOfMessages'])
     messages = int(resp['Attributes']['ApproximateNumberOfMessages'])
 
-    if messages != args['count']:
-        raise Exception('Counts do not match')
+    if messages > args['count']:
+      log.debug("More SQS messages then expected: required tiles {}, actual messages {}".format(args['count'],
+                                                                                                messages))
+    elif messages < args['count']:
+        raise Exception('Not enough messages in queue')
 
-    return args['count']
+    return messages
 

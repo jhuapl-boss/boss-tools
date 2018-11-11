@@ -58,3 +58,9 @@ target/
 .idea
 .DS_Store
 bossutils/t.py
+
+# Vim files
+*.swp
+
+# directory for testing lambdas locally
+bossnames/
