@@ -66,7 +66,7 @@ def handler(event, context):
     chunk = tile_index_db.getCuboid(metadata["chunk_key"], int(metadata["ingest_job"]))
     if chunk:
         if tile_index_db.cuboidReady(metadata["chunk_key"], chunk["tile_uploaded_map"]):
-            print("Chunk {} already has all its tiles, aborting.".format(metadata["chunk_key"]))
+            print("Chunk already has all its tiles, aborting for: {}".format(metadata["chunk_key"]))
             return
         print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
         chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))

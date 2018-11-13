@@ -85,9 +85,11 @@ def handler(event, context):
     # tile_index_result (dict): keys are S3 object keys of the tiles comprising the chunk.
     tile_index_result = tile_index_db.getCuboid(msg_data["chunk_key"], int(msg_data["ingest_job"]))
     if tile_index_result is None:
+        # If chunk_key is gone, another lambda uploaded the cuboids and deleted the chunk_key afterwards.
         # Remove message so it's not redelivered.
         ingest_queue.deleteMessage(msg_id, msg_rx_handle)
-        sys.exit("Aborting due to chunk key missing from tile index table")
+        print("Aborting due to chunk key missing from tile index table")
+        return
 
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
