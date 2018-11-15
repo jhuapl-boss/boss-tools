@@ -67,6 +67,8 @@ def handler(event, context):
     if chunk:
         if tile_index_db.cuboidReady(metadata["chunk_key"], chunk["tile_uploaded_map"]):
             print("Chunk already has all its tiles, aborting for: {}".format(metadata["chunk_key"]))
+            upload_queue = UploadQueue(proj_info)
+            upload_queue.deleteMessage(message_id, receipt_handle)
             return
         print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
         chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
@@ -95,13 +97,9 @@ def handler(event, context):
 
         # Invoke Ingest lambda function
 
-        # While the ingest lambda is still part of the multiLambda, pass the
-        # name here since the ingest lambda won't have access to the normal context
-        # object.  Once ingest is no longer part of the multiLambda, both
-        # 'function-name' and 'lambda-name' may be removed.
         names = AWSNames.create_from_lambda_name(context.function_name)
         lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
-        response = lambda_client.invoke(
+        lambda_client.invoke(
             FunctionName=names.tile_ingest_lambda,
             InvocationType='Event',
             Payload=json.dumps(metadata).encode())
