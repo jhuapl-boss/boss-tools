@@ -66,12 +66,13 @@ def handler(event, context):
     chunk = tile_index_db.getCuboid(metadata["chunk_key"], int(metadata["ingest_job"]))
     if chunk:
         if tile_index_db.cuboidReady(metadata["chunk_key"], chunk["tile_uploaded_map"]):
-            print("Chunk already has all its tiles, aborting for: {}".format(metadata["chunk_key"]))
-            upload_queue = UploadQueue(proj_info)
-            upload_queue.deleteMessage(message_id, receipt_handle)
-            return
-        print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
-        chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
+            print("Chunk already has all its tiles: {}".format(metadata["chunk_key"]))
+            # Go ahead and setup to fire another ingest lambda so this tile
+            # entry will be deleted on successful execution of the ingest lambda.
+            chunk_ready = True
+        else:
+            print("Updating tile index for chunk_key: {}".format(metadata["chunk_key"]))
+            chunk_ready = tile_index_db.markTileAsUploaded(metadata["chunk_key"], tile_key, int(metadata["ingest_job"]))
     else:
         # First tile in the chunk
         print("Creating first entry for chunk_key: {}".format(metadata["chunk_key"]))
