@@ -28,7 +28,7 @@ STATUS_DELAY = 1
 MAX_NUM_PROCESSES = 120
 RAMPUP_DELAY = 15
 RAMPUP_BACKOFF = 0.8
-MAX_NUM_TILES_PER_LAMBDA = 45000
+MAX_NUM_ITEMS_PER_LAMBDA = 45000
 
 
 def ingest_populate(args):
@@ -44,7 +44,7 @@ def ingest_populate(args):
             'job_id': '',
             'upload_queue': ARN,
             'ingest_queue': ARN,
-
+            'ingest_type': int (0 == TILE, 1 == VOLUMETRIC),
             'resolution': 0,
             'project_info': [col_id, exp_id, ch_id],
 
@@ -63,6 +63,7 @@ def ingest_populate(args):
             'z_start': 0,
             'z_stop': 0
             'z_tile_size': 1,
+            'z_chunk_size': 16 for Tile or Probably 64 for Volumetric
         }
 
     Returns:
@@ -71,33 +72,50 @@ def ingest_populate(args):
     """
     log.debug("Starting to populate upload queue")
 
-    args['MAX_NUM_TILES_PER_LAMBDA'] = MAX_NUM_TILES_PER_LAMBDA
-    args['z_chunk_size'] = 16
-    args['z_tile_size'] = 1
+    args['MAX_NUM_ITEMS_PER_LAMBDA'] = MAX_NUM_ITEMS_PER_LAMBDA
+
+    if (args["ingest_type"] != 0) and (args["ingest_type"] != 1):
+        raise ValueError("{}".format("Unknown ingest_type: {}".format(args["ingest_type"])))
 
     clear_queue(args['upload_queue'])
 
     results = fanout(aws.get_session(),
                      args['upload_sfn'],
                      split_args(args),
-                     max_concurrent = MAX_NUM_PROCESSES,
-                     rampup_delay = RAMPUP_DELAY,
-                     rampup_backoff = RAMPUP_BACKOFF,
-                     poll_delay = POLL_DELAY,
-                     status_delay = STATUS_DELAY)
-
-    tile_count = get_tile_count(args)
+                     max_concurrent=MAX_NUM_PROCESSES,
+                     rampup_delay=RAMPUP_DELAY,
+                     rampup_backoff=RAMPUP_BACKOFF,
+                     poll_delay=POLL_DELAY,
+                     status_delay=STATUS_DELAY)
     messages_uploaded = sum(results)
-    if tile_count != messages_uploaded:
-        log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
-                  .format(tile_count, messages_uploaded))
-    else:
-        log.debug("tile count and messages uploaded match: {}".format(tile_count))
 
-    return {
-        'arn': args['upload_queue'],
-        'count': tile_count,
-    }
+    if args["ingest_type"] == 0:
+        tile_count = get_tile_count(args)
+        if tile_count != messages_uploaded:
+            log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
+                      .format(tile_count, messages_uploaded))
+        else:
+            log.debug("tile count and messages uploaded match: {}".format(tile_count))
+
+        return {
+            'arn': args['upload_queue'],
+            'count': tile_count,
+        }
+    elif args["ingest_type"] == 1:
+        vol_count = get_volumetric_count(args)
+        if vol_count != messages_uploaded:
+            log.warning("Messages uploaded do not match volumetric count.  volumetric count: {} messages uploaded: {}"
+                        .format(vol_count, messages_uploaded))
+        else:
+            log.debug("volumetric count and messages uploaded match: {}".format(vol_count))
+
+        return {
+            'arn': args['upload_queue'],
+            'count': vol_count,
+        }
+
+
+
 
 
 def clear_queue(arn):
@@ -122,16 +140,31 @@ def get_tile_count(args):
     return tile_count
 
 
+def get_volumetric_count(args):
+    tile_size = lambda v: args[v + "_tile_size"]
+    extent = lambda v: args[v + '_stop'] - args[v + '_start']
+    num_tiles_in = lambda v: math.ceil(extent(v) / tile_size(v))
+
+    num_tiles_in_z = math.ceil(extent('z') / args['z_chunk_size'])
+
+    tile_count = num_tiles_in('x') * num_tiles_in('y') * num_tiles_in_z * num_tiles_in('t')
+    return tile_count
+
+
 def split_args(args):
-    # Compute # of tiles in the job
-    tile_count = get_tile_count(args)
-    log.debug("Total Tile Count: " + str(tile_count))
+    if args["ingest_type"] == 0:
+        # Compute # of tiles in the job
+        count = get_tile_count(args)
+        log.debug("Total Tile Count: " + str(count))
+    else:
+        # Compute # of volumetric chunks
+        count = get_volumetric_count(args)
+        log.debug("Total Chunk Count: " + str(count))
+    offset_count = math.ceil(count / MAX_NUM_ITEMS_PER_LAMBDA)
 
-    offset_count = math.ceil(tile_count / MAX_NUM_TILES_PER_LAMBDA)
-
-    for tiles_count_offset in range(offset_count):
+    for item_count_offset in range(offset_count):
         args_ = args.copy()
-        args_['tiles_to_skip'] = tiles_count_offset * MAX_NUM_TILES_PER_LAMBDA
+        args_['items_to_skip'] = item_count_offset * MAX_NUM_ITEMS_PER_LAMBDA
         yield args_
 
 

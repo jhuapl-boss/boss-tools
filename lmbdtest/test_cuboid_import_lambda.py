@@ -21,6 +21,7 @@ from lambdafcns.cuboid_import_lambda import run, get_object_store_cfg
 from moto import mock_s3
 import unittest
 from unittest.mock import patch
+import tempfile
 
 class Context:
     """
