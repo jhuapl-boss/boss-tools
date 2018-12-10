@@ -48,7 +48,7 @@ def handler(event, context):
 
     if sqs_triggered :
         # Lambda invoked by an SQS trigger.
-        msg_data = json.loads(event['Records'][0].body)
+        msg_data = json.loads(event['Records'][0]['body'])
         # Load the project info from the chunk key you are processing
         chunk_key = msg_data['chunk_key']
         proj_info = BossIngestProj.fromSupercuboidKey(chunk_key)
