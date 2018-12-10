@@ -44,11 +44,10 @@ def handler(event, context):
 
     # Used as a guard against trying to delete the SQS message when lambda is
     # triggered by SQS.
-    sqs_triggered = False
+    sqs_triggered = 'Records' in event and len(event['Records']) > 0
 
-    if 'Records' in event and len(event['Records']) > 0:
+    if sqs_triggered :
         # Lambda invoked by an SQS trigger.
-        sqs_triggered = True
         msg_data = json.loads(event['Records'][0].body)
         # Load the project info from the chunk key you are processing
         chunk_key = msg_data['chunk_key']
