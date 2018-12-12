@@ -117,7 +117,8 @@ def handler(event, context):
     tile_key_list = [x.rsplit("&", 2) for x in tile_index_result["tile_uploaded_map"].keys()]
     if len(tile_key_list) < tiles_in_chunk:
         print("Not a full set of 16 tiles. Assuming it has handled already, tiles: {}".format(len(tile_key_list)))
-        ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+        if not sqs_triggered:
+            ingest_queue.deleteMessage(msg_id, msg_rx_handle)
         return
     tile_key_list = sorted(tile_key_list, key=lambda x: int(x[1]))
     tile_key_list = ["&".join(x) for x in tile_key_list]
