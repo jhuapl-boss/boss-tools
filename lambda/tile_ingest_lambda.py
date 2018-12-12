@@ -92,7 +92,7 @@ def handler(event, context):
 
 
     print("Ingesting Chunk {}".format(chunk_key))
-    tiles_in_chunk = chunk_key.split('&')[1]
+    tiles_in_chunk = int(chunk_key.split('&')[1])
 
     # Setup SPDB instance
     sp = SpatialDB(msg_data['parameters']["KVIO_SETTINGS"],
