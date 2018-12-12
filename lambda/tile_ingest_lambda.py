@@ -92,6 +92,7 @@ def handler(event, context):
 
 
     print("Ingesting Chunk {}".format(chunk_key))
+    tiles_in_chunk = chunk_key.split('&')[1]
 
     # Setup SPDB instance
     sp = SpatialDB(msg_data['parameters']["KVIO_SETTINGS"],
@@ -114,7 +115,7 @@ def handler(event, context):
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
     tile_key_list = [x.rsplit("&", 2) for x in tile_index_result["tile_uploaded_map"].keys()]
-    if len(tile_key_list) < 16:
+    if len(tile_key_list) < tiles_in_chunk:
         print("Not a full set of 16 tiles. Assuming it has handled already, tiles: {}".format(len(tile_key_list)))
         ingest_queue.deleteMessage(msg_id, msg_rx_handle)
         return
