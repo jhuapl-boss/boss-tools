@@ -87,7 +87,7 @@ def ingest_populate(args):
                      rampup_backoff=RAMPUP_BACKOFF,
                      poll_delay=POLL_DELAY,
                      status_delay=STATUS_DELAY)
-    messages_uploaded = sum(results)
+    messages_uploaded = sum_with_nones(results)
 
     if args["ingest_type"] == 0:
         tile_count = get_tile_count(args)
@@ -115,6 +115,24 @@ def ingest_populate(args):
         }
 
 
+def sum_with_nones(arr):
+    """
+    Totals up the arr, array can have ints or Nones.
+    Args:
+        arr[int|None]:
+
+    Returns: total of ints in arr
+
+    """
+    total = 0
+    if arr is None:
+        return 0;
+    for i in arr:
+        if i is None:
+            continue
+        else:
+            total += i
+    return total
 
 
 
