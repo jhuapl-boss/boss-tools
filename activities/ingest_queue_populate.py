@@ -88,6 +88,7 @@ def ingest_populate(args):
                      poll_delay=POLL_DELAY,
                      status_delay=STATUS_DELAY)
 
+    # At least one None values in the return of fanout. This avoids an exception in those cases.
     if results is None:
         messages_uploaded = 0
     else:
