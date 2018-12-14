@@ -87,7 +87,12 @@ def ingest_populate(args):
                      rampup_backoff=RAMPUP_BACKOFF,
                      poll_delay=POLL_DELAY,
                      status_delay=STATUS_DELAY)
-    messages_uploaded = sum(results)
+
+    # At least one None values in the return of fanout. This avoids an exception in those cases.
+    if results is None:
+        messages_uploaded = 0
+    else:
+        messages_uploaded = sum(filter(None, results))
 
     if args["ingest_type"] == 0:
         tile_count = get_tile_count(args)
@@ -113,9 +118,6 @@ def ingest_populate(args):
             'arn': args['upload_queue'],
             'count': vol_count,
         }
-
-
-
 
 
 def clear_queue(arn):
