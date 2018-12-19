@@ -31,6 +31,7 @@ from ndingest.util.bossutil import BossUtil
 from bossnames.names import AWSNames
 
 from io import BytesIO
+import json
 from PIL import Image
 import numpy as np
 import math
@@ -41,40 +42,57 @@ def handler(event, context):
     # Load settings
     SETTINGS = BossSettings.load()
 
-    # Load the project info from the chunk key you are processing
-    proj_info = BossIngestProj.fromSupercuboidKey(event["chunk_key"])
-    proj_info.job_id = event["ingest_job"]
+    # Used as a guard against trying to delete the SQS message when lambda is
+    # triggered by SQS.
+    sqs_triggered = 'Records' in event and len(event['Records']) > 0
 
-    # Get message from SQS ingest queue, try for ~2 seconds
-    rx_cnt = 0
-    msg_data = None
-    msg_id = None
-    msg_rx_handle = None
-    while rx_cnt < 6:
-        ingest_queue = IngestQueue(proj_info)
-        msg = [x for x in ingest_queue.receiveMessage()]
-        if msg:
-            msg = msg[0]
-            print("MESSAGE: {}".format(msg))
-            print(len(msg))
-            msg_id = msg[0]
-            msg_rx_handle = msg[1]
-            msg_data = json.loads(msg[2])
-            print("MESSAGE DATA: {}".format(msg_data))
-            break
-        else:
-            rx_cnt += 1
-            print("No message found. Try {} of 6".format(rx_cnt))
-            time.sleep(1)
+    if sqs_triggered :
+        # Lambda invoked by an SQS trigger.
+        msg_data = json.loads(event['Records'][0]['body'])
+        # Load the project info from the chunk key you are processing
+        chunk_key = msg_data['chunk_key']
+        proj_info = BossIngestProj.fromSupercuboidKey(chunk_key)
+        proj_info.job_id = msg_data['ingest_job']
+    else:
+        # Standard async invoke of this lambda.
 
-    if not msg_id:
-        # No tiles ready to ingest.
-        print("No ingest message available")
-        return
+        # Load the project info from the chunk key you are processing
+        proj_info = BossIngestProj.fromSupercuboidKey(event["chunk_key"])
+        proj_info.job_id = event["ingest_job"]
 
-    # Get the chunk key of the tiles to ingest.
-    chunk_key = msg_data['chunk_key']
+        # Get message from SQS ingest queue, try for ~2 seconds
+        rx_cnt = 0
+        msg_data = None
+        msg_id = None
+        msg_rx_handle = None
+        while rx_cnt < 6:
+            ingest_queue = IngestQueue(proj_info)
+            msg = [x for x in ingest_queue.receiveMessage()]
+            if msg:
+                msg = msg[0]
+                print("MESSAGE: {}".format(msg))
+                print(len(msg))
+                msg_id = msg[0]
+                msg_rx_handle = msg[1]
+                msg_data = json.loads(msg[2])
+                print("MESSAGE DATA: {}".format(msg_data))
+                break
+            else:
+                rx_cnt += 1
+                print("No message found. Try {} of 6".format(rx_cnt))
+                time.sleep(1)
+
+        if not msg_id:
+            # No tiles ready to ingest.
+            print("No ingest message available")
+            return
+
+        # Get the chunk key of the tiles to ingest.
+        chunk_key = msg_data['chunk_key']
+
+
     print("Ingesting Chunk {}".format(chunk_key))
+    tiles_in_chunk = int(chunk_key.split('&')[1])
 
     # Setup SPDB instance
     sp = SpatialDB(msg_data['parameters']["KVIO_SETTINGS"],
@@ -87,14 +105,21 @@ def handler(event, context):
     tile_index_result = tile_index_db.getCuboid(msg_data["chunk_key"], int(msg_data["ingest_job"]))
     if tile_index_result is None:
         # If chunk_key is gone, another lambda uploaded the cuboids and deleted the chunk_key afterwards.
-        # Remove message so it's not redelivered.
-        ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+        if not sqs_triggered:
+            # Remove message so it's not redelivered.
+            ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+
         print("Aborting due to chunk key missing from tile index table")
         return
 
     # Sort the tile keys
     print("Tile Keys: {}".format(tile_index_result["tile_uploaded_map"]))
     tile_key_list = [x.rsplit("&", 2) for x in tile_index_result["tile_uploaded_map"].keys()]
+    if len(tile_key_list) < tiles_in_chunk:
+        print("Not a full set of 16 tiles. Assuming it has handled already, tiles: {}".format(len(tile_key_list)))
+        if not sqs_triggered:
+            ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+        return
     tile_key_list = sorted(tile_key_list, key=lambda x: int(x[1]))
     tile_key_list = ["&".join(x) for x in tile_key_list]
     print("Sorted Tile Keys: {}".format(tile_key_list))
@@ -141,8 +166,9 @@ def handler(event, context):
         except KeyError:
             print('Key: {} not found in tile bucket, assuming redelivered SQS message and aborting.'.format(
                 tile_key))
-            # Remove message so it's not redelivered.
-            ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+            if not sqs_triggered:
+                # Remove message so it's not redelivered.
+                ingest_queue.deleteMessage(msg_id, msg_rx_handle)
             print("Aborting due to missing tile in bucket")
             return
 
@@ -288,5 +314,6 @@ def handler(event, context):
         Payload=json.dumps(delete_tile_entry_data).encode()
     )       
 
-    # Delete message since it was processed successfully
-    ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+    if not sqs_triggered:
+        # Delete message since it was processed successfully
+        ingest_queue.deleteMessage(msg_id, msg_rx_handle)
