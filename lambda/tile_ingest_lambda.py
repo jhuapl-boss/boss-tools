@@ -25,6 +25,7 @@ from ndingest.settings.bosssettings import BossSettings
 from ndingest.ndingestproj.bossingestproj import BossIngestProj
 from ndingest.nddynamo.boss_tileindexdb import BossTileIndexDB
 from ndingest.ndqueue.ingestqueue import IngestQueue
+from ndingest.ndqueue.tileerrorqueue import TileErrorQueue
 from ndingest.ndbucket.tilebucket import TileBucket
 from ndingest.util.bossutil import BossUtil
 
@@ -90,6 +91,8 @@ def handler(event, context):
         # Get the chunk key of the tiles to ingest.
         chunk_key = msg_data['chunk_key']
 
+
+    tile_error_queue = TileErrorQueue(proj_info)
 
     print("Ingesting Chunk {}".format(chunk_key))
     tiles_in_chunk = int(chunk_key.split('&')[1])
@@ -190,6 +193,8 @@ def handler(event, context):
 
         if image_size == 0:
             print('TileError: Zero length tile, using black instead: {}'.format(tile_key))
+            error_msg = 'Zero length tile'
+            enqueue_tile_error(tile_error_queue, tile_key, chunk_key, error_msg)
             tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         else:
             try:
@@ -197,10 +202,14 @@ def handler(event, context):
             except TypeError as te:
                 print('TileError: Incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'
                       .format(image_size, tile_key))
+                error_msg = 'Incomplete tile'
+                enqueue_tile_error(tile_error_queue, tile_key, chunk_key, error_msg)
                 tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
             except OSError as oe:
                 print('TileError: OSError, using black instead (tile_size_in_bytes, tile_key): {}, {} ErrorMessage: {}'
                       .format(image_size, tile_key, oe))
+                error_msg = 'OSError: {}'.format(oe)
+                enqueue_tile_error(tile_error_queue, tile_key, chunk_key, error_msg)
                 tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
 
         data.append(tile_img)
@@ -317,3 +326,17 @@ def handler(event, context):
     if not sqs_triggered:
         # Delete message since it was processed successfully
         ingest_queue.deleteMessage(msg_id, msg_rx_handle)
+
+
+def enqueue_tile_error(queue, tile_key, chunk_key, error_msg):
+    """
+    Send info about bad tile to the tile error queue.
+
+    Args:
+        queue (TileErrorQueue):
+        tile_key (str):
+        chunk_key (str):
+        error_msg (str):
+    """
+    msg = {'tile_key': tile_key, 'chunk_key': chunk_key,  'error': error_msg }
+    queue.sendMessage(json.dumps(msg))
