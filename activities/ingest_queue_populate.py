@@ -88,6 +88,12 @@ def ingest_populate(args):
 
     tile_count = get_tile_count(args)
     messages_uploaded = sum(results)
+    # At least one None values in the return of fanout. This avoids an exception in those cases.
+    if results is None:
+        messages_uploaded = 0
+    else:
+        messages_uploaded = sum(filter(None, results))
+
     if tile_count != messages_uploaded:
         log.warning("Messages uploaded do not match tile count.  tile count: {} messages uploaded: {}"
                   .format(tile_count, messages_uploaded))
