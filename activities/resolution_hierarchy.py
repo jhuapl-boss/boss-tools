@@ -468,12 +468,12 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                 # We have noticed that the last few messages are spread across multiple AWS queue servers and
                 # A single lambda requesting 10 messages will only get messages from a single queue server.  So we
                 # pad the number of lambdas by EXTRAS_LAMBDAS to avoid extra looping cycles.
-                needed = ceildiv(count, BUCKET_SIZE) + EXTRA_LAMBDAS
+                needed = ceildiv(count, BUCKET_SIZE)
                 if needed > 0:
                     log.debug("Launching {} more lambdas".format(needed))
 
                     start = datetime.now()
-                    invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
+                    invoke_lambdas(needed + EXTRA_LAMBDAS, lambda_arn, lambda_args, dlq_arn)
                     stop = datetime.now()
                     log.debug("Launched {} lambdas in {}".format(needed, stop - start))
         else:
