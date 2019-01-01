@@ -475,7 +475,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                     start = datetime.now()
                     invoke_lambdas(needed + EXTRA_LAMBDAS, lambda_arn, lambda_args, dlq_arn)
                     stop = datetime.now()
-                    log.debug("Launched {} lambdas in {}".format(needed, stop - start))
+                    log.debug("Launched {} + {} lambdas in {}".format(needed, EXTRA_LAMBDAS, stop - start))
         else:
             previous_count = count
             count_count = 1
