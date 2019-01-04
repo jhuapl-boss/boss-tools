@@ -253,7 +253,7 @@ while run_cnt < 1:   # Adjusted count down to 1 as lambda is crashing with full 
 
     lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
 
-    names = AWSNames.create_from_lambda_name(event['function-name'])
+    names = AWSNames.from_lambda(event['function-name'])
 
     delete_tiles_data = {
         'tile_key_list': tile_key_list,
