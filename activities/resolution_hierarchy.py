@@ -74,7 +74,7 @@ POOL_SIZE = int(cpu_count() * 2)
 ZERO_COUNT = 3
 
 # int: The number of extra lambdas to fire off each round
-EXTRA_LAMBDAS = 100
+EXTRA_LAMBDAS = 0
 
 ###########################################################
 
@@ -217,7 +217,7 @@ def downsample_channel(args):
             cube_count = populate_cubes(cubes_arn, cubes_start, cubes_stop, step)
 
             log.debug("Invoking downsample lambdas")
-            lambda_count = ceildiv(cube_count, BUCKET_SIZE) + EXTRA_LAMBDAS
+            lambda_count = ceildiv(cube_count, BUCKET_SIZE)
             lambda_args = {
                 'bucket_size': BUCKET_SIZE,
                 'args': args,
@@ -475,7 +475,7 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                     start = datetime.now()
                     invoke_lambdas(needed + EXTRA_LAMBDAS, lambda_arn, lambda_args, dlq_arn)
                     stop = datetime.now()
-                    log.debug("Launched {} lambdas in {}".format(needed, stop - start))
+                    log.debug("Launched {} lambdas with {} extra in {}".format(needed, EXTRA_LAMBDAS, stop - start))
         else:
             previous_count = count
             count_count = 1
