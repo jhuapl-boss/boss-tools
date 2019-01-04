@@ -169,6 +169,15 @@ def downsample_channel(args):
             'frame_stop_key': '{}_stop',
         })
 
+        # if this iteration will split into aniso and iso downsampling, copy the coordinate frame
+        if resolution == args['iso_resolution']:
+            def copy(var):
+                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+            copy('x')
+            copy('y')
+            copy('z')
+
         if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             configs.append({
                 'name': 'isotropic',
@@ -247,15 +256,6 @@ def downsample_channel(args):
         finally:
             delete_queue(dlq_arn)
             delete_queue(cubes_arn)
-
-    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
-    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
-        def copy(var):
-            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
-        copy('x')
-        copy('y')
-        copy('z')
 
     # Advance the loop and recalculate the conditional
     # Using max - 1 because resolution_max should not be a valid resolution
