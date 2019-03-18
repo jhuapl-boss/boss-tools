@@ -16,12 +16,9 @@ from botocore.exceptions import ClientError
 from bossutils.multidimensional import XYZ, Buffer
 from bossutils.multidimensional import range as xyz_range
 
-log_handler = logging.StreamHandler()
-log_handler.setLevel(logging.DEBUG)
-
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
-log.addHandler(log_handler)
+
 
 
 LOOKUP_KEY_MAX_N = 100 # DP NOTE: Taken from spdb.spatialdb.object
