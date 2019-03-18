@@ -38,18 +38,23 @@ data = {
 """
 import boto3
 import bossutils
+from collections import namedtuple
 import hashlib
 import json
 import pymysql.cursors
 import uuid
 import pprint
-import pymysql.cursors
+from spdb.spatialdb.object import INGEST_ID_MAX_N, AWSObjectStore
 from datetime import datetime, timedelta
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
+INGEST_ID_INDEX = 'ingest-id-index'
 MAX_ITEMS_PER_SHARD = 100
+
+# Use this value for cuboids added via cutouts (instead of ingests).
+CUTOUT_JOB_ID = 0
 
 DELETED_STATUS_FINISHED = 'finished'
 DELETED_STATUS_START = 'start'
@@ -64,6 +69,9 @@ class DeleteError(Exception):
     """
     pass
 
+
+"""Resolution and id of an ingest job."""
+ResJobId = namedtuple('ResJobId', ['res', 'job_id'])
 
 def get_db_connection(data):
     """
@@ -783,9 +791,182 @@ def merge_parallel_outputs(data):
         merge.update(items)
     return merge
 
+class S3IndexExtractor:
+    """
+    Searches the s3 index table for all cuboids that are part of the channel
+    to be deleted.  Uses the GSI named by the constant INGEST_ID_INDEX to find
+    cuboids from the various ingest jobs.
+
+    Attributes:
+        data (dict): Step function input data.
+        session (Session): Open Boto3 session.
+        s3client (S3.Client): Boto3 S3 client.
+        dynamo (DynamoDB.Client): Boto3 DynamoDB client.
+        paginator (DynamoDB.Paginator.Query): Paginator for DynamoDB query results.
+        s3_index_table (str): Name of DynamoDB s3 index table.
+
+    """
+    def __init__(self, data, session=None):
+        """
+        Constructor.
+
+        Args:
+            data (dict): Step function input data.
+            session (optional[Session]): Boto3 session.
+        """
+        self.session = session
+        if self.session is None:
+            self.session = bossutils.aws.get_session()
+
+        self.data = data
+        self.s3client = self.session.client('s3')
+        self.delete_bucket = self.data['delete_bucket']
+        self.s3_index_table = self.data['s3-index-table']
+        self.dynamo = self.session.client('dynamodb')
+        self.paginator = self.dynamo.get_paginator('query')
+
+    def start(self, shard_index, max_id_suffix, max_items_per_shard):
+        """
+        Main entry point.  Starts query of s3 index table and writes cuboid object
+        keys to delete bucket.
+
+        Args:
+            shard_index (list[str]): Stores object keys of shards in the delete bucket.
+            max_id_suffix (int): Max number (inclusive) that could be appended to key in the s3 index's GSI.
+            max_items_per_shard (int): Max number of cuboid object keys to store in one shard.
+
+        Returns:
+            (dict): The original step function input with a new key: delete_shard_index_key.  This holds the object key of the shard list.
+        """
+        lookup_key = self.data["lookup_key"]
+        col, exp, chan = lookup_key.split("&")
+
+        # Check cuboids added via cutouts.
+        cutout_cuboids = [ResJobId(res=0, job_id=CUTOUT_JOB_ID)]
+        res_job_ids = self._get_resolutions_and_job_ids(col, exp, chan)
+
+        # Combine lists of cutout and ingest job cuboids.
+        res_job_ids = cutout_cuboids + res_job_ids
+
+        shard_list = []
+        item_count = 0
+        for res_id in res_job_ids:
+            for i in range(max_id_suffix+1):
+                key = AWSObjectStore.get_ingest_id_hash(col, exp, chan, res_id.res, res_id.job_id, i) 
+                resp_iter = self._query_ingest_id_index(key)
+                for resp in resp_iter:
+                    for item in resp["Items"]:
+                        shard_list.append(get_primary_key(item))
+                        item_count += 1
+                        if item_count == max_items_per_shard:
+                            shard_key = '{}-del'.format(uuid.uuid4().hex)
+                            shard_index.append(shard_key)
+                            put_json_in_s3(self.s3client, self.delete_bucket, shard_key, shard_list)
+                            shard_list = []
+                            item_count = 0
+
+        if item_count != 0:
+            shard_key = '{}-del'.format(uuid.uuid4().hex)
+            shard_index.append(shard_key)
+            put_json_in_s3(self.s3client, self.delete_bucket, shard_key, shard_list)
+
+
+        # Write master index to s3.
+        delete_shard_index_key = "{}-index-del".format(uuid.uuid4().hex)
+        put_json_in_s3(self.s3client, self.delete_bucket, delete_shard_index_key, shard_index)
+
+        self.data['delete_shard_index_key'] = delete_shard_index_key
+        return self.data
+
+    def _get_resolutions_and_job_ids(self, col, exp, chan):
+        """
+        Queries the ingest job table and gets all jobs associated with the given
+        channel.
+
+        Args:
+            col (int): Collection id.
+            exp (int): Experiment id.
+            chan (int): Channel id.
+
+        Returns:
+            (list[ResJobId])
+        """
+        sql_conn = get_db_connection(self.data)
+        exp_query = 'SELECT num_hierarchy_levels FROM experiment WHERE id = %s'
+        job_query_args = dict(col=col, exp=exp, chan=chan)
+        job_query = (
+            'SELECT id, resolution FROM ingest_job ' + 
+            'WHERE collection_id = %(col)s AND ' +
+            'experiment_id = %(exp)s AND ' +
+            'channel_id = %(chan)s'
+            )
+
+        num_hierarchy_levels = 1
+        res_job_ids = []
+
+        try:
+            with sql_conn.cursor(pymysql.cursors.SSCursor) as cursor:
+                num_rows = cursor.execute(exp_query, str(exp))
+                if num_rows > 0:
+                    exp_row = cursor.fetchone()
+                    num_hierarchy_levels = exp_row[0]
+
+                num_rows = cursor.execute(job_query, job_query_args)
+                if num_rows == 0:
+                    return res_job_ids
+                for row in cursor.fetchall_unbuffered():
+                    res_job_ids.append(ResJobId(job_id=row[0], res=row[1]))
+                    for i in range(row[1]+1, num_hierarchy_levels):
+                        res_job_ids.append(ResJobId(job_id=row[0], res=i))
+        finally:
+            sql_conn.close()
+
+        return res_job_ids
+
+    def _query_ingest_id_index(self, key):
+        """
+        Query ingest-id-index of the s3 index table to retrieve all s3 object keys
+        associated with a particular ingest.
+
+        Args:
+            key (str): Value of ingest-id-hash to search for.
+
+        Returns:
+            (list[response])
+        """
+        return self.paginator.paginate(
+            TableName=self.s3_index_table, 
+            IndexName=INGEST_ID_INDEX,
+            KeyConditionExpression="#ingest_id_hash = :ingest_id_val",
+            ExpressionAttributeNames={ "#ingest_id_hash": "ingest-id-hash" },
+            ExpressionAttributeValues={ ":ingest_id_val": { "S": key } }
+        )
+
 
 def find_s3_index(data, session=None):
-    """backoff rate
+    """
+    Search the s3 index for all cuboids stored in the s3 bucket.  Writes 
+    batches of MAX_ITEMS_PER_SHARD s3 object keys to "shards" in the delete
+    bucket so that they can be later deleted by another step function.
+
+    Args:
+        data (dict): Data passed into the step function.
+        session (optional[Session]):
+
+    Returns:
+        (dict): The original step function input with a new key: delete_shard_index_key.  This holds the object key of the shard list.
+    """
+    s3_ind_ex = S3IndexExtractor(data, session)
+
+    # Use the original deprecated GSI to find any old ingests related to the
+    # deleted channel.
+    shard_index = find_s3_index_using_legacy_index(data, s3_ind_ex.session)
+
+    # Use new GSI to find ingests related to the deleted channel.
+    return s3_ind_ex.start(shard_index, INGEST_ID_MAX_N, MAX_ITEMS_PER_SHARD)
+
+def find_s3_index_using_legacy_index(data, session):
+    """
     Find s3 index keys containing the lookup key write them to s3 to be deleted.  Split the list into
     s3 objects with KEYS_PER_S3_OBJECT each.  Also write an index Object contining the list of other objects.
     Args:
@@ -793,18 +974,15 @@ def find_s3_index(data, session=None):
         session(Session): AWS boto3 Session
 
     Returns:
-        (Dict): data dictionary passed in
+        (list[str]): list of shards written to s3
     """
-    LOG.debug("find_s3_index() entering.")
-    if session is None:
-        session = bossutils.aws.get_session()
+    LOG.debug("find_s3_index_using_legacy_index() entering.")
     client = session.client('dynamodb')
     s3client = session.client('s3')
 
     s3_index_table = data["s3-index-table"]
     lookup_key = data["lookup_key"]
     delete_bucket = data["delete_bucket"]
-    delete_shard_index_key = "{}-index-del".format(uuid.uuid4().hex)
 
     col, exp, ch = lookup_key.split("&")
     query_params = {'TableName': s3_index_table,
@@ -840,6 +1018,7 @@ def find_s3_index(data, session=None):
                 shard_index.append(shard_key)
                 put_json_in_s3(s3client, delete_bucket, shard_key, shard_list)
                 shard_list = []
+                shard_count = 0
 
         # Keep querying to make sure we have them all.
         query_params['ExclusiveStartKey'] = exclusive_start_key
@@ -852,11 +1031,9 @@ def find_s3_index(data, session=None):
         shard_key = "{}-del".format(uuid.uuid4().hex)
         shard_index.append(shard_key)
         put_json_in_s3(s3client, delete_bucket, shard_key, shard_list)
-    put_json_in_s3(s3client, delete_bucket, delete_shard_index_key, shard_index)
-    data["delete_shard_index_key"] = delete_shard_index_key
     LOG.debug("found {} s3_index items".format(count))
-    LOG.debug("find_s3_index() exiting.")
-    return data
+    LOG.debug("find_s3_index_using_legacy_index() exiting.")
+    return shard_index
 
 
 def get_key_list(shard_list):

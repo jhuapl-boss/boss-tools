@@ -81,24 +81,21 @@ event["delete-coord-frame-sfn-arn"] = None
 event["delete-coll-sfn-arn"] = None
 
 #======== for testing locally ================
-# from delete_cuboid import *
-# event = {
-#     "lambda-name": "delete_lambda",
-#     "db": "endpoint-db.hiderrt1.boss",
-#     "meta-db": "bossmeta.hiderrt1.boss",
-#     "s3-index-table": "s3index.hiderrt1.boss",
-#     "id-index-table": "idIndex.hiderrt1.boss",
-#     "id-count-table": "idCount.hiderrt1.boss",
-#     "cuboid_bucket": "cuboids.hiderrt1.boss",
-#     "delete_bucket": "delete.hiderrt1.boss",
-#     "query-deletes-sfn-name": "QueryDeletesHiderrt1Boss",
-#     "delete-sfn-name": "DeleteCuboidHiderrt1Boss",
-#     "delete-exp-sfn-name": "DeleteExperimentHiderrt1Boss",
-#     "delete-coord-frame-sfn-name": "DeleteCoordframeHiderrt1Boss",
-#     "delete-coll-sfn-name": "DeleteCollectionHiderrt1Boss",
-#     "topic-arn": "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
-# }
-#===========================================
+event["lambda-name"] = "delete_lambda"
+event["db"] = "endpoint-db.giontc1.boss"
+event["meta-db"] = "bossmeta.giontc1.boss"
+event["s3-index-table"] = "s3index.giontc1.boss"
+event["id-index-table"] = "idIndex.giontc1.boss"
+event["id-count-table"] = "idCount.giontc1.boss"
+event["cuboid_bucket"] = "cuboids.giontc1.boss"
+event["delete_bucket"] = "delete.giontc1.boss"
+event["query-deletes-sfn-name"] = "QueryDeletesGiontc1Boss"
+event["delete-sfn-name"] = "DeleteCuboidGiontc1Boss"
+event["delete-exp-sfn-name"] = "DeleteExperimentGiontc1Boss"
+event["delete-coord-frame-sfn-name"] = "DeleteCoordframeGiontc1Boss"
+event["delete-coll-sfn-name"] = "DeleteCollectionGiontc1Boss"
+event["topic-arn"] = "arn:aws:sns:us-east-1:256215146792:ProductionMicronsMailingList"
+#==========================================
 
 
 log = logging.getLogger()
