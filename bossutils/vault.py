@@ -63,10 +63,7 @@ class Vault:
         pkcs7 = utils.read_url(utils.DYNAMIC_URL + 'instance-identity/pkcs7').replace('\n', '')
         role = self.config['system']['type']
 
-        # DP NOTE: Current version of hvac client (0.2.15) does not contain the auth_ec2 method
-        #response = self.client.auth_ec2(pkcs7, role = role)
-        data = {'pkcs7': pkcs7, 'role': role, 'nonce': 'BOSS Vault Client'}
-        response = self.client.auth('/v1/auth/aws-ec2/login', json = data)
+        response = self.client.auth_ec2(pkcs7=pkcs7,role=role,nonce='BOSS Vault Client', mount_point='aws')
 
         if not self.client.is_authenticated():
             raise Exception("Could not authenticate with ec2 Vault token")
