@@ -56,7 +56,10 @@ def upload_to_s3(session, zip_file, bucket):
     """
     key = os.path.basename(zip_file)
     s3 = session.client('s3')
-    s3.create_bucket(Bucket=bucket)
+    try:
+        s3.create_bucket(Bucket=bucket)
+    except s3.exceptions.BucketAlreadyOwnedByYou:
+        pass
     s3.put_object(Bucket=bucket, Key=key, Body=open(zip_file, 'rb'))
 
 
