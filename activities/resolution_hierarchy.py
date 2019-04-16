@@ -72,6 +72,10 @@ POOL_SIZE = int(cpu_count() * 2)
 # int: The number of status poll cycles that have a count of 0 (zero) before the
 #      polling loop exits
 ZERO_COUNT = 3
+
+# int: The number of extra lambdas to fire off each round
+EXTRA_LAMBDAS = 10
+
 ###########################################################
 
 class ResolutionHierarchyError(Exception):
@@ -165,6 +169,15 @@ def downsample_channel(args):
             'frame_stop_key': '{}_stop',
         })
 
+        # if this iteration will split into aniso and iso downsampling, copy the coordinate frame
+        if resolution == args['iso_resolution']:
+            def copy(var):
+                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
+                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+            copy('x')
+            copy('y')
+            copy('z')
+
         if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             configs.append({
                 'name': 'isotropic',
@@ -213,7 +226,7 @@ def downsample_channel(args):
             cube_count = populate_cubes(cubes_arn, cubes_start, cubes_stop, step)
 
             log.debug("Invoking downsample lambdas")
-            lambda_count = ceildiv(cube_count, BUCKET_SIZE)
+            lambda_count = ceildiv(cube_count, BUCKET_SIZE) + EXTRA_LAMBDAS
             lambda_args = {
                 'bucket_size': BUCKET_SIZE,
                 'args': args,
@@ -243,15 +256,6 @@ def downsample_channel(args):
         finally:
             delete_queue(dlq_arn)
             delete_queue(cubes_arn)
-
-    # if next iteration will split into aniso and iso downsampling, copy the coordinate frame
-    if args['type'] != 'isotropic' and (resolution + 1) == args['iso_resolution']:
-        def copy(var):
-            args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-            args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
-        copy('x')
-        copy('y')
-        copy('z')
 
     # Advance the loop and recalculate the conditional
     # Using max - 1 because resolution_max should not be a valid resolution
@@ -461,14 +465,17 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                         raise FailedLambdaError()
 
             if count_count == UNCHANGING_LAUNCH:
+                # We have noticed that the last few messages are spread across multiple AWS queue servers and
+                # A single lambda requesting 10 messages will only get messages from a single queue server.  So we
+                # pad the number of lambdas by EXTRAS_LAMBDAS to avoid extra looping cycles.
                 needed = ceildiv(count, BUCKET_SIZE)
                 if needed > 0:
                     log.debug("Launching {} more lambdas".format(needed))
 
                     start = datetime.now()
-                    invoke_lambdas(needed, lambda_arn, lambda_args, dlq_arn)
+                    invoke_lambdas(needed + EXTRA_LAMBDAS, lambda_arn, lambda_args, dlq_arn)
                     stop = datetime.now()
-                    log.debug("Launched {} lambdas in {}".format(needed, stop - start))
+                    log.debug("Launched {} lambdas with {} extra in {}".format(needed, EXTRA_LAMBDAS, stop - start))
         else:
             previous_count = count
             count_count = 1
@@ -588,8 +595,8 @@ def check_queue(queue_arn):
                     body = json.loads(msg['Body'])
                     error = body['Records'][0]['Sns']['MessageAttributes']['ErrorMessage']['Value']
                     log.debug("DLQ Error: {}".format(error))
-            except:
-                log.exception("Problem gettting DLQ error message")
+            except Exception as err:
+                log.exception("Problem getting DLQ error message: {}".format(err))
         return message_count
 
 def lambda_throttle_count(lambda_arn):
@@ -628,6 +635,6 @@ def lambda_throttle_count(lambda_arn):
             if 'SampleCount' in resp['Datapoints'][0]:
                 return resp['Datapoints'][0]['SampleCount']
         return 0.0
-    except:
-        log.exception("Problem getting Lambda Throttle Count")
+    except Exception as err:
+        log.exception("Problem getting Lambda Throttle Count: {}".format(err))
         return -1
