@@ -21,7 +21,6 @@
 #       "rampup_backoff": float,
 #       "status_delay": int
 #   },
-#   "operation": ...                        # (str) Op name for deadletter queue.
 # }
 #
 #
@@ -80,7 +79,7 @@ def handler(event, context):
     }
 
     # Add remaining arguments for fanning out.
-    fanout_args['operation'] = event['operation']
+    fanout_args['operation'] = 'Fanout to dequeue cuboid keys'
     fanout_args['sub_sfn'] = event['index_dequeue_cuboids_step_fcn']
     fanout_args['sub_sfn_is_full_arn'] = True,
     fanout_args['common_sub_args'] = fanout_subargs_common
