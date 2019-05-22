@@ -21,7 +21,6 @@
 #       "rampup_backoff": float,
 #       "status_delay": int
 #   },
-#   "operation": ...                        # (str) Op name for deadletter queue.
 # }
 #
 #
@@ -73,7 +72,6 @@ def handler(event, context):
     fanout_subargs_common = {
         'operation': 'start_indexing_cuboid',
         'config': event['config'],
-        'cuboid_ids_bucket': event['cuboid_ids_bucket'],
         'id_cuboid_supervisor_step_fcn': event['id_cuboid_supervisor_step_fcn'],
         'id_index_step_fcn': event['id_index_step_fcn'],
         'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
@@ -81,7 +79,7 @@ def handler(event, context):
     }
 
     # Add remaining arguments for fanning out.
-    fanout_args['operation'] = event['operation']
+    fanout_args['operation'] = 'Fanout to dequeue cuboid keys'
     fanout_args['sub_sfn'] = event['index_dequeue_cuboids_step_fcn']
     fanout_args['sub_sfn_is_full_arn'] = True,
     fanout_args['common_sub_args'] = fanout_subargs_common
