@@ -13,7 +13,9 @@
 # limitations under the License.
 
 """
-Remove tiles associated with a single chunk from the tile bucket.
+Mark for deletion, tiles associated with a single chunk, from the tile bucket.
+Actual deletion will be handled by a bucket life cycle policy that looks for
+the delete tag.
 
 Does not handle errors.  Assumed that this lambda will be invoked
 asynchronously and caller will rely on AWS' automatic retries (3).
@@ -25,15 +27,8 @@ event: {
 }
 """
 
+from bossnames.bucket_object_tags import TAG_DELETE_KEY, TAG_DELETE_VALUE
 import boto3
-
-
-class DeleteFailed(Exception):
-    """
-    Raised when at least one key passed to delete_objects() failed to delete.
-    """
-    def __init__(self, msg):
-        super().__init__(msg)
 
 def handler(event, context):
     """
@@ -42,33 +37,20 @@ def handler(event, context):
     Args:
         event (dict): Lambda input parameters.  See module level comments.
         context (dict): Standard lambda context parameter (ignored).
-
-    Raises:
-        (DeleteFailed): Raised when failed to delete at least one key.
     """
-    resp = delete_keys(event)
-    if 'Errors' in resp:
-        raise DeleteFailed('Error deleting: {}'.format(resp['Errors']))
+    mark_keys_for_deletion(event)
 
-def delete_keys(event):
+def mark_keys_for_deletion(event):
     """
-    Makes S3 API call to delete multiple keys from the given bucket.
+    Makes S3 API call that tags multiple keys with the delete tag.
 
     Args:
         event (dict): Lambda input parameters.  See module level comments.
-
-    Returns:
-        (dict): Response dictionary.
     """
     s3 = boto3.client('s3', region_name=event['region'])
-    keys = [{'Key': key} for key in event['tile_key_list']]
-    resp = s3.delete_objects(
-        Bucket=event['bucket'],
-        Delete={
-            'Objects': keys,
-            'Quiet':True
-        }
-    )
-    print(resp)
-
-    return resp
+    for key in event['tile_key_list']:
+        s3.put_object_tagging(
+            Bucket=event['bucket'], Key=key, Tagging={
+                'TagSet': [{ 'Key': TAG_DELETE_KEY, 'Value': TAG_DELETE_VALUE }]
+            }
+        )

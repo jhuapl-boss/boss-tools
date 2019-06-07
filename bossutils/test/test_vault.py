@@ -15,6 +15,7 @@
 from bossutils.vault import *
 import hvac
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 # The patch decorator mocks hvac.Client and passes it as the second parameter
@@ -62,3 +63,18 @@ class TestVaultClient(unittest.TestCase):
         v = Vault(self.cfg)
         with self.assertRaises(Exception):
             v.read('secrets', 'super')
+
+    def test_retry_logic_calls_login(self, mockClient):
+        instance = mockClient.return_value
+        v = Vault(self.cfg)
+        instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),{ "data" : {"super": ""} }]
+        with patch.object(Vault, 'login') as mock:
+            v.read('secrets','super')
+            mock.assert_called_once_with(v)
+
+    def test_retry_logic_returns(self, mockClient):
+        instance = mockClient.return_value
+        v = Vault(self.cfg)
+        instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),{ "data" : {"super": "this!"} }]
+        with patch.object(Vault, 'login') as mock:
+            self.assertEqual(v.read('secrets', 'super'), "this!")

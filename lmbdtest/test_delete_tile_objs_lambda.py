@@ -16,17 +16,17 @@
 # reserved word, this allows importing lambda functions without
 # updating scripts responsible for deploying the lambda code.
 
-from lambdafcns.delete_tile_objs_lambda import handler, delete_keys, DeleteFailed
+from lambdafcns.delete_tile_objs_lambda import handler
+from bossnames.bucket_object_tags import TAG_DELETE_KEY, TAG_DELETE_VALUE
 import botocore
 import boto3
 import moto
 import unittest
-from unittest.mock import patch
 
 class TestDeleteTileObjsLambda(unittest.TestCase):
 
     # moto issue here: https://github.com/spulec/moto/issues/1581
-    @unittest.skip('moto 1.3.3 incorrect reports an error here')
+    #@unittest.skip('moto 1.3.3 incorrect reports an error here')
     @moto.mock_s3
     def test_delete_non_existent_keys(self):
         keys = ['foo', 'xyz']
@@ -40,7 +40,9 @@ class TestDeleteTileObjsLambda(unittest.TestCase):
         s3 = boto3.resource('s3', region_name=event['region'])
         s3.create_bucket(Bucket=event['bucket'])
 
-        handler(event, context)
+        client = boto3.client('s3', region_name=event['region'])
+        with self.assertRaises(client.exceptions.NoSuchKey):
+            handler(event, context)
 
     @moto.mock_s3
     def test_delete_raises_on_bad_bucket_name(self):
@@ -55,20 +57,35 @@ class TestDeleteTileObjsLambda(unittest.TestCase):
         with self.assertRaises(botocore.exceptions.ClientError):
             handler(event, context)
 
-    @patch('lambdafcns.delete_tile_objs_lambda.delete_keys')
-    def test_delete_raises_on_error_in_resp(self, fake_delete):
-        keys = ['tile1', 'tile2']
+    @moto.mock_s3
+    def test_objects_marked_for_deletion(self):
+        keys = ['tilex', 'tiley']
         event = {
             'region': 'us-east-1',
             'bucket': 'test.bucket.boss',
             'tile_key_list': keys
         }
+
+        s3 = boto3.resource('s3', region_name=event['region'])
+        s3.create_bucket(Bucket=event['bucket'])
+
+        obj1 = s3.Object(event['bucket'], keys[0])
+        obj1.put(Body=b'obj1')
+
+        obj2 = s3.Object(event['bucket'], keys[1])
+        obj2.put(Body=b'obj2')
+
         context = None
 
-        fake_delete.return_value = {
-            'Errors': [{'Key': 'tile1'}],
-            'ResponseMetadata': {'HTTPStatusCode': 200}
-        }
+        handler(event, context)
 
-        with self.assertRaises(DeleteFailed):
-            handler(event, context)
+        client = boto3.client('s3', region_name=event['region'])
+        actual_obj1 = client.get_object_tagging(Bucket=event['bucket'], Key=keys[0])
+        actual_obj2 = client.get_object_tagging(Bucket=event['bucket'], Key=keys[1])
+
+        self.assertEqual(TAG_DELETE_KEY, actual_obj1['TagSet'][0]['Key'])
+        self.assertEqual(TAG_DELETE_VALUE, actual_obj1['TagSet'][0]['Value'])
+
+        self.assertEqual(TAG_DELETE_KEY, actual_obj2['TagSet'][0]['Key'])
+        self.assertEqual(TAG_DELETE_VALUE, actual_obj2['TagSet'][0]['Value'])
+
