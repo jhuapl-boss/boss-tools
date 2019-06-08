@@ -92,7 +92,7 @@ class TestCuboidImportLambda(unittest.TestCase):
         Test with moto's mock s3.
         """
         context = Context()
-        names = AWSNames.create_from_lambda_name(context.function_name)
+        names = AWSNames.from_lambda(context.function_name)
         s3 = boto3.resource('s3', region_name=REGION)
         bucket = s3.create_bucket(Bucket=BUCKET_NAME)
         target_bucket = s3.create_bucket(Bucket=names.cuboid_bucket)

@@ -82,7 +82,7 @@ def run(event, context):
     key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'])
     bucket = event['Records'][0]['s3']['bucket']['name']
 
-    names = AWSNames.create_from_lambda_name(context.function_name)
+    names = AWSNames.from_lambda(context.function_name)
     if bucket != names.ingest_bucket:
         raise ValueError('Error: event fired from unexpected bucket: {}'.format(bucket))
 
