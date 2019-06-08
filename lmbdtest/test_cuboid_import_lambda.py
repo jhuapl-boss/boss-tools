@@ -95,7 +95,7 @@ class TestCuboidImportLambda(unittest.TestCase):
         names = AWSNames.from_lambda(context.function_name)
         s3 = boto3.resource('s3', region_name=REGION)
         bucket = s3.create_bucket(Bucket=BUCKET_NAME)
-        target_bucket = s3.create_bucket(Bucket=names.cuboid_bucket)
+        target_bucket = s3.create_bucket(Bucket=names.cuboid_bucket.s3)
         key = '02e4578abd294eb42c5c625b6340bd59&4&4&30&0&0&8802'
         data = 'my_cuboid'.encode()
         ingest_job = '29'
@@ -115,7 +115,7 @@ class TestCuboidImportLambda(unittest.TestCase):
         run(event, context)
 
         # Check that function to update S3 index called properly.
-        obj_store_cfg = get_object_store_cfg(names.cuboid_bucket, names.s3_index)
+        obj_store_cfg = get_object_store_cfg(names.cuboid_bucket.s3, names.s3_index.ddb)
         mock_update_s3_index.assert_called_with(obj_store_cfg, key, ingest_job)
         
         # Check that S3 object copied to target bucket.

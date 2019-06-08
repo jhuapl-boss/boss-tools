@@ -304,7 +304,7 @@ def handler(event, context):
 
     # Delete tiles from tile bucket.
     lambda_client.invoke(
-        FunctionName=names.delete_tile_objs_lambda,
+        FunctionName=names.delete_tile_objs.lambda_,
         InvocationType='Event',
         Payload=json.dumps(delete_tiles_data).encode()
     )       
@@ -318,7 +318,7 @@ def handler(event, context):
 
     # Delete entry from tile index.
     lambda_client.invoke(
-        FunctionName=names.delete_tile_index_entry_lambda,
+        FunctionName=names.delete_tile_index_entry.lambda_,
         InvocationType='Event',
         Payload=json.dumps(delete_tile_entry_data).encode()
     )       

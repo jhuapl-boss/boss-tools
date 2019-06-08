@@ -135,7 +135,7 @@ def process(msg, context, region):
         names = AWSNames.from_lambda(context.function_name)
         lambda_client = boto3.client('lambda', region_name=region)
         lambda_client.invoke(
-            FunctionName=names.tile_ingest_lambda,
+            FunctionName=names.tile_ingest.lambda_,
             InvocationType='Event',
             Payload=json.dumps(msg).encode())
     else:

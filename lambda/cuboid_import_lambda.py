@@ -83,11 +83,11 @@ def run(event, context):
     bucket = event['Records'][0]['s3']['bucket']['name']
 
     names = AWSNames.from_lambda(context.function_name)
-    if bucket != names.ingest_bucket:
+    if bucket != names.ingest_bucket.s3:
         raise ValueError('Error: event fired from unexpected bucket: {}'.format(bucket))
 
     source = { 'Bucket': bucket, 'Key': key }
-    target_bucket = names.cuboid_bucket
+    target_bucket = names.cuboid_bucket.s3
     region = event['region']
 
     metadata = get_object_metadata(bucket, key, region)
@@ -98,7 +98,7 @@ def run(event, context):
     s3_copy(target_bucket, source, region)
 
     logger.info('Updating S3 index table')
-    s3_index = names.s3_index
+    s3_index = names.s3_index.ddb
     update_s3_index(get_object_store_cfg(target_bucket, s3_index), key, ingest_job)
 
     logger.info('Cuboid in ingest bucket marked for deletion')
