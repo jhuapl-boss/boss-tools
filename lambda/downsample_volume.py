@@ -265,7 +265,6 @@ def downsample_volume(args, target, step, dim, use_iso_key):
                              '{}&{}&{}&{}&{}'.format(col_id, exp_id, chan_id, resolution + 1, randrange(LOOKUP_KEY_MAX_N)))
         s3_index.put(idx_key)
 
-
 def downsample_cube(volume, cube, is_annotation):
     """Downsample the given Buffer into the target Buffer
 
@@ -314,7 +313,6 @@ def handler(args, context):
 
     sqs = boto3.resource('sqs')
     cubes = sqs.Queue(args['cubes_arn'])
-
     msgs = cubes.receive_messages(MaxNumberOfMessages = args['bucket_size'],
                                   WaitTimeSeconds = 5)
 
