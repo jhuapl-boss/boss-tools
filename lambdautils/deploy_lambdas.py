@@ -59,7 +59,7 @@ def upload_to_s3(session, zip_file, bucket):
     try:
         s3.create_bucket(Bucket=bucket)
     except s3.exceptions.BucketAlreadyOwnedByYou:
-        pass
+        pass # Only us-east-1 will not throw an exception if the bucket already exists
     s3.put_object(Bucket=bucket, Key=key, Body=open(zip_file, 'rb'))
 
 
