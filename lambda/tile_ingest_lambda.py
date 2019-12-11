@@ -294,7 +294,7 @@ def handler(event, context):
 
     lambda_client = boto3.client('lambda', region_name=SETTINGS.REGION_NAME)
 
-    names = AWSNames.create_from_lambda_name(context.function_name)
+    names = AWSNames.from_lambda(context.function_name)
 
     delete_tiles_data = {
         'tile_key_list': tile_key_list,
@@ -304,7 +304,7 @@ def handler(event, context):
 
     # Delete tiles from tile bucket.
     lambda_client.invoke(
-        FunctionName=names.delete_tile_objs_lambda,
+        FunctionName=names.delete_tile_objs.lambda_,
         InvocationType='Event',
         Payload=json.dumps(delete_tiles_data).encode()
     )       
@@ -318,7 +318,7 @@ def handler(event, context):
 
     # Delete entry from tile index.
     lambda_client.invoke(
-        FunctionName=names.delete_tile_index_entry_lambda,
+        FunctionName=names.delete_tile_index_entry.lambda_,
         InvocationType='Event',
         Payload=json.dumps(delete_tile_entry_data).encode()
     )       

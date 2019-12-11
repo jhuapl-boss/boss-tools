@@ -17,6 +17,7 @@ from bossutils.vault import Vault
 import boto3
 import botocore
 from . import configuration
+from . import aws
 import hvac
 import json
 
@@ -53,11 +54,10 @@ class IngestCredentials:
         vault (bossutils.Vault): Wrapper to access Vault secret store.
     """
 
-    def __init__(self, config=None, region_name='us-east-1'):
+    def __init__(self, config=None):
         """
         Args:
             config (optional[configuration.BossConfig]): Boss configuration.  Defaults to loading from /etc/boss/boss.config.
-            region_name (optional[string]): AWS region to use.  Defaults to us-east-1.
         """
         if config is None:
             self.config = configuration.BossConfig()
@@ -66,7 +66,7 @@ class IngestCredentials:
         self.vault = Vault(config)
         # Get the domain the endpoint lives in.
         self.domain = self.config['system']['fqdn'].split('.', 1)[1]
-        self.iam = boto3.resource('iam', region_name=region_name)
+        self.iam = boto3.resource('iam', region_name=aws.get_region())
 
     def create_policy(self, policy_document, job_id, description=''):
         """Create a new IAM policy for the given ingest job.

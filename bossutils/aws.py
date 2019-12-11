@@ -161,16 +161,13 @@ class AWSManager:
     by the deployment software.  It is located at /etc/boss/boss.config
 
     These sessions are accessible via a globally available generator "get_aws_manager()"
-
-    :ivar region: the AWS region, currently set to us-east-1 by default if omitted
     """
 
-    def __init__(self, region='us-east-1'):
+    def __init__(self):
         # Load boss config file
         config = configuration.BossConfig()
 
         # Set Properties
-        self.region = region
         self.__sessions = queue.Queue()
 
         if config['aws_mngr']['num_sessions'] == 'auto':

@@ -132,10 +132,10 @@ def process(msg, context, region):
         ingest_queue.sendMessage(json.dumps(msg))
 
         # Invoke Ingest lambda function
-        names = AWSNames.create_from_lambda_name(context.function_name)
+        names = AWSNames.from_lambda(context.function_name)
         lambda_client = boto3.client('lambda', region_name=region)
         lambda_client.invoke(
-            FunctionName=names.tile_ingest_lambda,
+            FunctionName=names.tile_ingest.lambda_,
             InvocationType='Event',
             Payload=json.dumps(msg).encode())
     else:

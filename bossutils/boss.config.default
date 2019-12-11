@@ -21,6 +21,8 @@ cache-db=0
 cache-state-db=0
 s3-bucket=
 s3-index-table=
+tile-index-table=
+ingest_bucket=
 
 [auth]
 OIDC_VERIFY_SSL =
@@ -28,6 +30,8 @@ OIDC_VERIFY_SSL =
 [lambda]
 page_in_function=
 flush_function=
+ingest_function=
+tile_uploaded_function=
 
 [sfn]
 populate_upload_queue =
