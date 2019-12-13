@@ -134,7 +134,11 @@ while run_cnt < 2:
         existing_cube.from_blosc(existing_cube_bytes, new_cube.time_range)
 
         # Merge cuboids
-        existing_cube.overwrite(new_cube.data, new_cube.time_range)
+        if new_cube.is_bool():
+            # Runs the cutout_to_black 
+            existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
+        else: 
+            existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
         # Get bytes
         cuboid_bytes = existing_cube.to_blosc()
