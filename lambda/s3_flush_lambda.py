@@ -174,7 +174,11 @@ while run_cnt < 2:
             new_cube.from_blosc(write_cuboid_bytes)
 
             # Merge data
-            existing_cube.overwrite(new_cube.data, existing_cube.time_range)
+            if new_cube.is_bool():
+                # Runs the cutout_to_black 
+                existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
+            else: 
+                existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
         # Update bytes to send to s3 and bytes scanned for ids
         cuboid_bytes = existing_cube.to_blosc()
