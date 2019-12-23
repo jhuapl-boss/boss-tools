@@ -86,6 +86,11 @@ while run_cnt < 2:
         # Create resource instance
         resource = BossResourceBasic()
         resource.from_dict(flush_msg_data["resource"])
+
+        # Check if cuboid is black overwrite
+        to_black = False 
+        if flush_msg_data["to_black"] == "True":
+            to_black = True
     else:
         # Nothing to flush. Exit.
         print("No flush message available")
@@ -134,7 +139,7 @@ while run_cnt < 2:
         existing_cube.from_blosc(existing_cube_bytes, new_cube.time_range)
 
         # Merge cuboids
-        if new_cube.is_bool():
+        if to_black:
             # Runs the cutout_to_black 
             existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
         else: 
@@ -174,7 +179,7 @@ while run_cnt < 2:
             new_cube.from_blosc(write_cuboid_bytes)
 
             # Merge data
-            if new_cube.is_bool():
+            if to_black:
                 # Runs the cutout_to_black 
                 existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
             else: 
