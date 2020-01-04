@@ -48,7 +48,7 @@ from spdb.spatialdb.object import INGEST_ID_MAX_N, AWSObjectStore
 from datetime import datetime, timedelta
 
 bossutils.utils.set_excepthook()
-LOG = bossutils.logger.BossLogger().logger
+LOG = bossutils.logger.bossLogger()
 S3_INDEX_TABLE_INDEX = 'ingest-job-index'
 INGEST_ID_INDEX = 'ingest-id-index'
 MAX_ITEMS_PER_SHARD = 100

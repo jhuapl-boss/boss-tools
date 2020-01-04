@@ -21,7 +21,7 @@ from bossutils import logger
 
 from heaviside.activities import fanout
 
-log = logger.BossLogger().logger
+log = logger.bossLogger()
 
 POLL_DELAY = 0
 STATUS_DELAY = 1

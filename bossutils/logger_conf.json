@@ -49,7 +49,7 @@
       "format": "Log_level:%(levelname)s , Message:%(message)s"
     },
     "bossFormatter": {
-      "()":  "bossutils.logger.bossFormatterFactory"
+      "format": "{%(levelname)s : {Timestamp:%(asctime)s, PID:%(process)d, Message:%(message)s}}"
     }
   }
 }

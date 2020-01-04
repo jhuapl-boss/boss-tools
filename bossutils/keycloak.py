@@ -20,9 +20,9 @@ Author:
 import json
 import requests
 from bossutils.vault import Vault
-from bossutils.logger import BossLogger
+from bossutils.logger import bossLogger
 
-LOG = BossLogger().logger
+LOG = bossLogger()
 
 class KeyCloakError(Exception):
     def __init__(self, status, data):

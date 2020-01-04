@@ -12,90 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# __init__
-
-
+import logging
 import logging.config
 import json
 from pkg_resources import resource_filename
 
-from .formats import *
+def configure(json_config_file=None):
+    """Configure the logging module for use by Boss code
 
-
-class BossLogger:
-    """Custom logger for Boss.
-
-    Attributes:
-        logger (Logger): A configured python logging.logger instance
-
-    Example usage:
-        log = BossLogger().logger
-        logger.info('my log msg')
+    Args:
+        json_config_file (optional[str]): Path to json file defining logging configuration
     """
+    if not json_config_file:
+        json_config_file = resource_filename('bossutils', 'logger_conf.json')
 
+    with open(json_config_file) as f:
+        cfgDict = json.load(f)
+    logging.config.dictConfig(cfgDict)
 
-    def __init__(self, json_config_file=None):
-        """Constructor.
+def bossLogger():
+    """Get the logger for Boss code
 
-        Args:
-            json_config_file (optional[string]): A JSON config file to configure the logger.  Defaults to resource_filename('bossutils', 'logger_conf.json').
-
-        Returns:
-            (BossLogger)
-        """
-        if not json_config_file:
-            json_config_file = resource_filename('bossutils', 'logger_conf.json')
-
-        with open(json_config_file) as f:
-            cfgDict = json.load(f)
-        logging.config.dictConfig(cfgDict)
-
-        self.logger = logging.getLogger('boss')
-
-    def setLevel(self, level):
-        """
-        Set the level of the root logger
-        :param level:  String representing the desired debug level
-        :return:
-        """
-        if level.lower() == "error":
-            self.logger.setLevel(logging.ERROR)
-        elif level.lower() == "warning":
-            self.logger.setLevel(logging.WARNING)
-        elif level.lower() == "debug":
-            self.logger.setLevel(logging.DEBUG)
-        elif level.lower() == "info":
-            self.logger.setLevel(logging.INFO)
-        elif level.lower() == "critical":
-            self.logger.setLevel(logging.CRITICAL)
-
-
-def bossFormatterFactory():
-    """Create a BossFormatter with formats defined in .formats.
-
-    This factory allows use of BossFormatter from config files.
+    Returns:
+        logging.Logger
     """
-    return BossFormatter(FORMATS)
+    return logging.getLogger('boss')
 
+def lambdaLogger(level=logging.INFO):
+    """Get the logger for Boss code running in AWS Lambda
 
-class BossFormatter(logging.Formatter):
-    """ A custom formatter that defined a format for each log level. """
-    default_formatter = logging.Formatter('%(levelname)s: Message: %(message)s')
-
-    def __init__(self, formats):
-        """ Initialize the formatter class
-        :param formats: dict { loglevel : logformat }
-        """
-        self.formatters = {}
-        for loglevel in formats:
-            self.formatters[loglevel] = logging.Formatter(formats[loglevel])
-
-    def format(self, record):
-
-        """
-        Format the log record based using the formats specified in BossFormatter
-        :param record: Log record to be formatted
-        :return: Formatted record
-        """
-        formatter = self.formatters.get(record.levelno, self.default_formatter)
-        return formatter.format(record)
+    Returns:
+        logging.Logger
+    """
+    log = logging.getLogger()
+    log.setLevel(level)
+    return log

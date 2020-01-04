@@ -45,7 +45,7 @@ def execute(cmd, whole=False, shell=False):
     Returns:
         (int) Return code from command executed.
     """
-    log = logger.BossLogger().logger
+    log = logger.bossLogger()
     log.info("Executing command: {}".format(cmd))
     if whole:
         proc = subprocess.Popen(cmd,
@@ -80,7 +80,7 @@ def stop_firstboot():
     execute("/usr/sbin/update-rc.d -f {} remove".format(proc_name()))
 
 def set_excepthook():
-    log = logger.BossLogger().logger
+    log = logger.bossLogger()
     name = proc_name()
 
     def ex_handler(ex_cls, ex, tb):

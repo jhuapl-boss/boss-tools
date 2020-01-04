@@ -23,7 +23,7 @@ import hvac
 from . import configuration
 from . import utils
 import functools
-from bossutils.logger import BossLogger
+from bossutils.logger import bossLogger
 
 VAULT_SECTION = "vault"
 VAULT_URL_KEY = "url"
@@ -36,7 +36,7 @@ def catch_expire(function):
         try:
             return function(self, *args, **kwargs)
         except hvac.exceptions.Forbidden as e:
-            blog = BossLogger().logger
+            blog = bossLogger()
             blog.info(str(e))
             msg = "Your token had expired.  Dynamically creating a new one."
             blog.info(msg)
