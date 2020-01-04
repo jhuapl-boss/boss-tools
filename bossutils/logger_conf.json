@@ -17,6 +17,12 @@
       "qualname": "djangooidc",
       "propagate": 0
     },
+    "spdb": {
+      "level": "DEBUG",
+      "handlers": ["fileHandler", "criticalHandler"],
+      "qualname": "spdb",
+      "propagate": 0
+    },
     "heaviside.activities": {
       "level": "DEBUG",
       "handlers": ["fileHandler", "criticalHandler"],
