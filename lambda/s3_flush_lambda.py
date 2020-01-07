@@ -89,7 +89,7 @@ while run_cnt < 2:
 
         # Check if cuboid is black overwrite
         to_black = False 
-        if flush_msg_data["to_black"] == "True":
+        if flush_msg_data["to_black"] == "true":
             to_black = True
     else:
         # Nothing to flush. Exit.
