@@ -121,8 +121,8 @@ class IngestCredentials:
         """
 
         # Create Vault role and associate with an IAM policy.
-        sanitized_domain = self.domain.replace('.', '-')
         role_path = INGEST_ROLE_NAME.format(job_id)
+
         self.vault.write(role_path, arn=iam_policy_arn)
 
         # Generate temporary credentials for that role.
@@ -142,7 +142,6 @@ class IngestCredentials:
             (dict|None): Contains keys: access_key and secret_key.
 
         """
-        sanitized_domain = self.domain.replace('.', '-')
         path = INGEST_CREDS_NAME.format(job_id)
         try:
             return self.vault.read_dict(path, raw=False)
@@ -157,7 +156,6 @@ class IngestCredentials:
         Args:
             job_id (int): Get new credentials for this ingest job.
         """
-        sanitized_domain = self.domain.replace('.', '-')
         creds_path = INGEST_CREDS_NAME.format(job_id)
         self.vault.revoke_secret_prefix(creds_path)
 

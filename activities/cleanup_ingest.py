@@ -133,11 +133,21 @@ class IngestCleaner:
         """
         Delete all the queues used by the ingest job.
         """
-        UploadQueue.deleteQueue(self.nd_proj, endpoint_url=None)
+        delete_list = [UploadQueue]
+        #UploadQueue.deleteQueue(self.nd_proj, endpoint_url=None)
         if int(self.job['ingest_type']) == TILE_INGEST:
-            IngestQueue.deleteQueue(self.nd_proj, endpoint_url=None)
-            TileIndexQueue.deleteQueue(self.nd_proj, endpoint_url=None, delete_deadletter_queue=True)
-            TileErrorQueue.deleteQueue(self.nd_proj, endpoint_url=None)
+            delete_list.append(IngestQueue)
+            delete_list.append(TileIndexQueue)
+            delete_list.append(TileErrorQueue)
+            #IngestQueue.deleteQueue(self.nd_proj, endpoint_url=None)
+            #TileIndexQueue.deleteQueue(self.nd_proj, endpoint_url=None, delete_deadletter_queue=True)
+            #TileErrorQueue.deleteQueue(self.nd_proj, endpoint_url=None)
+
+        for queue in delete_list:
+            try:
+                queue.deleteQueue(self.nd_proj, endpoint_url=None)
+            except Exception as ex:
+                log.warn('Caught exception deleting: {} - {}'.format(queue.url, ex))
 
     def delete_credentials(self):
         """

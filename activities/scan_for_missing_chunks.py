@@ -17,7 +17,7 @@ import json
 import pymysql
 import pymysql.cursors
 import time
-from .boss_db import get_db_connection
+from boss_db import get_db_connection
 from bossutils import logger
 from bossutils.utils import set_excepthook
 from ndingest.nddynamo.boss_tileindexdb import TASK_INDEX, MAX_TASK_ID_SUFFIX
@@ -70,16 +70,19 @@ def activity_entry_point(args):
 
     Returns:
         (dict): Returns incoming args so they can be passed to the next activity.
+                Also adds 'quit' key.  Sets 'quit' to True if missing tiles
+                were found.  Otherwise, sets 'quit' to False.
     """
 
     # This should only run on tile ingests.
     if args['job']['ingest_type'] != TILE_INGEST:
+        args['quit'] = False
         return args
 
     dynamo = boto3.client('dynamodb', region_name=args['region'])
-    sqs = boto3.client('sqs', region_name=args['region'])
+    sqs = boto3.resource('sqs', region_name=args['region'])
     cs = ChunkScanner(dynamo, sqs, args['tile_index_table'], args['db_host'], args['job'])
-    cs.run()
+    args['quit'] = cs.run()
 
     return args
 
@@ -114,6 +117,8 @@ class ChunkScanner:
         self.db_host = db_host
         self.job = job
 
+        self.found_missing_tiles = False
+
         # Validate job parameter.
         for field in ChunkScanner.JOB_FIELDS:
             if field not in job:
@@ -132,9 +137,14 @@ class ChunkScanner:
         """
         Scan all DynamoDB partitions for remaining chunks in the tile index.
         Tiles missing from chunks are put back in the tile upload queue.
+
+        Returns:
+            (bool): True if missing tiles found.
         """
         for i in range(0, MAX_TASK_ID_SUFFIX):
             self.run_scan(i)
+
+        return self.found_missing_tiles
 
     def run_scan(self, partition_num):
         """
@@ -148,6 +158,8 @@ class ChunkScanner:
         state of the ingest job to UPLOADING.  This is done after each batch
         in case the ingest client clears the upload queue and tries to restart
         the complete process.
+
+        self.found_missing_tiles set to True if missing tiles found.
 
         Args:
             dynamo (boto3.Dynamodb): Dynamo client.
@@ -178,6 +190,7 @@ class ChunkScanner:
                 for item in resp['Items']:
                     missing_msgs = self.check_tiles(item[CHUNK_KEY]['S'], item[TILE_UPLOADED_MAP]['M'])
                     if self.enqueue_missing_tiles(upload_queue, missing_msgs):
+                        self.found_missing_tiles = True
                         self.set_uploading_status(db_connection)
         finally:
             db_connection.close()
