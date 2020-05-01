@@ -12,16 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from bossutils.vault import *
+from bossutils.vault import Vault, VAULT_SECTION, VAULT_URL_KEY, VAULT_TOKEN_KEY
 import hvac
 import unittest
-from unittest import mock
 from unittest.mock import patch
 
 # The patch decorator mocks hvac.Client and passes it as the second parameter
 # to each test method.  Setting autospec true forces the signature of the
 # mock's methods match that of hvac.Client.
-@patch('hvac.Client', autospec = True)
+@patch('hvac.Client', autospec=True)
 class TestVaultClient(unittest.TestCase):
     def setUp(self):
         """ Create a dummy configuration. """
@@ -32,11 +31,17 @@ class TestVaultClient(unittest.TestCase):
             }
         }
 
+        patch_wrapper = patch('bossutils.vault.utils.read_url')
+        magic_mock = patch_wrapper.start()
+        magic_mock.return_value = ''
+        # This ensures the patch is removed when the test is torn down.
+        self.addCleanup(patch_wrapper.stop)
+
     def test_exception_if_cant_auth_to_vault(self, mockClient):
         instance = mockClient.return_value
         instance.is_authenticated.return_value = False
         with self.assertRaises(Exception):
-            v = Vault(self.cfg)
+            Vault(self.cfg)
 
     def test_logout_destroys_hvac_client(self, mockClient):
         v = Vault(self.cfg)
@@ -76,5 +81,5 @@ class TestVaultClient(unittest.TestCase):
         instance = mockClient.return_value
         v = Vault(self.cfg)
         instance.read.side_effect = [hvac.exceptions.Forbidden('Token has expired'),{ "data" : {"super": "this!"} }]
-        with patch.object(Vault, 'login') as mock:
+        with patch.object(Vault, 'login'):
             self.assertEqual(v.read('secrets', 'super'), "this!")

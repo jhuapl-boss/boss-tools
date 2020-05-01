@@ -19,7 +19,6 @@ import pymysql.cursors
 import time
 from boss_db import get_db_connection
 from bossutils import logger
-from bossutils.utils import set_excepthook
 from ndingest.nddynamo.boss_tileindexdb import TASK_INDEX, MAX_TASK_ID_SUFFIX
 from ingestclient.core.backend import BossBackend
 
@@ -29,8 +28,6 @@ tiles are missing, they are placed back in the upload queue for that ingest
 job.  If there are missing tiles, the ingest job's state is reset to UPLOADING.
 """
 
-# Hook up Boss exception handler.
-set_excepthook()
 log = logger.BossLogger().logger
 
 # Tile index attributes defined in ndingest.git/nddynamo/schemas/boss_tile_index.json.

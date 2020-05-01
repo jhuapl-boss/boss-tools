@@ -86,7 +86,8 @@ class S3IndexExtractorTest(unittest.TestCase):
         data = {
             'delete_bucket': 'delbuck',
             's3-index-table': 's3.example.com',
-            'lookup_key': '{}&{}&{}'.format(coll_id, exp_id, chan_id)
+            'lookup_key': '{}&{}&{}'.format(coll_id, exp_id, chan_id),
+            'db': 'db-host'
         }
         res = 0
         job_id = 21

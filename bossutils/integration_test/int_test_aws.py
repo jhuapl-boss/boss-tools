@@ -18,13 +18,6 @@ import unittest
 import boto3
 import os
 
-if os.environ.get('NOSE_UNIT_TESTS_RUNNING') is None:
-    run_tests = True
-else:
-    run_tests = False
-
-
-@unittest.skipUnless(run_tests, 'Skipping integration tests.')
 class TestAWSManager(unittest.TestCase):
 
     def test_creation(self):
