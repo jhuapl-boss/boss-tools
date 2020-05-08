@@ -19,7 +19,7 @@ import pymysql.cursors
 import time
 from boss_db import get_db_connection
 from bossutils import logger
-from ndingest.nddynamo.boss_tileindexdb import TASK_INDEX, MAX_TASK_ID_SUFFIX
+from ndingest.nddynamo.boss_tileindexdb import TASK_INDEX, MAX_TASK_ID_SUFFIX, TILE_UPLOADED_MAP_KEY
 from ingestclient.core.backend import BossBackend
 
 """
@@ -34,13 +34,10 @@ log = logger.BossLogger().logger
 APPENDED_TASK_ID = 'appended_task_id'
 CHUNK_KEY = 'chunk_key'
 
-# This string is just hard coded in ndingest.git/nddynamo/boss_tileindexdb.py.
-TILE_UPLOADED_MAP = 'tile_uploaded_map'
-
 SQS_BATCH_SIZE = 10
 SQS_RETRY_TIMEOUT = 15
 
-# These values is defined in boss.git/django/bossingest/models.py.
+# These values are defined in boss.git/django/bossingest/models.py.
 UPLOADING_STATUS = 1
 TILE_INGEST = 0
 
@@ -170,7 +167,7 @@ class ChunkScanner:
             'ExpressionAttributeNames': {
                 '#appended_task_id': APPENDED_TASK_ID,
                 '#chunk_key': CHUNK_KEY,
-                '#tile_uploaded_map': TILE_UPLOADED_MAP
+                '#tile_uploaded_map': TILE_UPLOADED_MAP_KEY
             },
             'ExpressionAttributeValues': { ':appended_task_id': appended_task_id },
             'ProjectionExpression': '#chunk_key, #tile_uploaded_map'
@@ -185,7 +182,7 @@ class ChunkScanner:
             resp_iter = query.paginate(**query_args)
             for resp in resp_iter:
                 for item in resp['Items']:
-                    missing_msgs = self.check_tiles(item[CHUNK_KEY]['S'], item[TILE_UPLOADED_MAP]['M'])
+                    missing_msgs = self.check_tiles(item[CHUNK_KEY]['S'], item[TILE_UPLOADED_MAP_KEY]['M'])
                     if self.enqueue_missing_tiles(upload_queue, missing_msgs):
                         self.found_missing_tiles = True
                         self.set_uploading_status(db_connection)
