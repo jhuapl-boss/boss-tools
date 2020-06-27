@@ -1,0 +1,127 @@
+version: 2.1
+orbs:
+  python: circleci/python@0.2.1
+
+commands:
+  # Should be able to remove this when 2.1 released on PyPi.
+  install_heaviside:
+    description: "Get heaviside from GitHub"
+    parameters:
+      pyversion:
+        type: string
+    steps:
+      - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/heaviside
+      - run: git clone https://github.com/jhuapl-boss/heaviside.git
+      - run: cd heaviside && pip install -r requirements.txt
+      - run: mv heaviside/heaviside /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/heaviside
+
+  install_ndingest:
+    description: "Get ndingest from GitHub"
+    parameters:
+      pyversion:
+        type: string
+    steps:
+      - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest
+      - run: git clone https://github.com/jhuapl-boss/ndingest.git /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest
+      - run: cp /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest/settings/settings.ini.test /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest/settings/settings.ini
+
+  install_spdb:
+    description: "Clone spdb and install"
+    parameters:
+      pyversion:
+        type: string
+    steps:
+      - run: git clone https://github.com/jhuapl-boss/spdb.git
+      - run: cd spdb && python setup.py build_ext --inplace
+      - run: cd spdb && pip install --user -r requirements-test.txt
+      - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/spdb
+      - run: mv spdb/spdb /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages
+
+  install:
+    description: "Install Python dependencies"
+    parameters:
+      pyversion:
+        type: string
+    steps:
+      - checkout
+      - python/load-cache
+      - python/install-deps
+      - install_heaviside:
+          pyversion: << parameters.pyversion >>
+      - install_ndingest:
+          pyversion: << parameters.pyversion >>
+      - install_spdb:
+          pyversion: << parameters.pyversion >>
+      - python/save-cache
+
+  setup:
+    description: "Miscellaneous setup for testing"
+    steps:
+      - run: sudo mkdir -p /var/log/boss
+      - run: sudo chown circleci /var/log/boss
+      - run: sudo mkdir -p /etc/boss
+      - run: sudo chown circleci /etc/boss
+      - run: cp /home/circleci/project/cachemgr/test/boss.config /etc/boss
+
+  test_activities:
+    description: "Test the step function activitities"
+    steps:
+      - run: python3 -m unittest discover activities
+
+  test_bossutils:
+    description: "Test the bossutils code"
+    steps:
+      - run: python3 -m unittest discover bossutils
+    
+  test_cachemgr:
+    description: "Test the cache manager code"
+    steps:
+      - run: python3 -m unittest discover cachemgr
+
+  # ToDo: still need to figure out how we want to link bossnames to
+  # boss-manage/lib.
+  test_lambdafcns:
+    description: "Test the lambda functions"
+    steps:
+      - run: python3 -m unittest discover lmbdtest
+
+jobs:
+  test_py3_7:
+    docker:
+      - image: circleci/python:3.7
+    environment:
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+    steps:
+      - install:
+          pyversion: python3.7
+      - setup
+      - test_activities
+      - test_bossutils
+      - test_cachemgr
+      #- test_lambdafcns
+
+  test_py3_5:
+    docker:
+      - image: circleci/python:3.5
+    environment:
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+    steps:
+      - install:
+          pyversion: python3.5
+      - setup
+      - test_activities
+      - test_bossutils
+      - test_cachemgr
+      #- test_lambdafcns
+
+workflows:
+  test:
+    jobs:
+      - test_py3_7
+        #- test_py3_5

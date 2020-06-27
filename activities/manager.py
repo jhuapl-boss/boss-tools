@@ -24,6 +24,8 @@ import delete_cuboid as dc
 #import populate_upload_queue as puq
 import ingest_queue_populate as iqp
 import resolution_hierarchy as rh
+import scan_for_missing_chunks as chunk_scanner
+import cleanup_ingest
 
 class BossActivityManager(ActivityManager):
     def __init__(self):
@@ -68,6 +70,12 @@ class BossActivityManager(ActivityManager):
 
             # Resolution Hierarchy StepFunction
             key('DownsampleChannel') : rh.downsample_channel,
+
+            # Ingest missing chunk scanner StepFunction
+            key('ScanForMissingChunks') : chunk_scanner.activity_entry_point,
+
+            # Inget cleaner StepFunction
+            key('IngestCleaner') : cleanup_ingest.activity_entry_point
         }
 
 if __name__ == '__main__':

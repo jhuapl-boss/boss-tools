@@ -24,6 +24,7 @@ import types
 import unittest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timedelta
+from bossutils.multidimensional import ceildiv
 
 import boto3
 from moto import mock_sqs
@@ -44,7 +45,8 @@ from moto import mock_sqs
 ACCOUNT_ID = '123456789012'
 REGION = 'us-east-1'
 SESSION = boto3.session.Session(region_name = REGION)
-SQS_URL = 'http://sqs.{}.amazonaws.com/{}/'.format(REGION, ACCOUNT_ID)
+#SQS_URL = 'https://sqs.{}.amazonaws.com/{}/'.format(REGION, ACCOUNT_ID)
+SQS_URL = 'https://queue.amazonaws.com/{}/'.format(ACCOUNT_ID)
 
 # Stub XYZMorton implementation that returns a unique number when called
 def XYZMorton(xyz):
@@ -199,7 +201,7 @@ class TestDownsampleChannel(unittest.TestCase):
             'dlq_arn': SQS_URL + 'downsample-dlq-1234',
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
         }
-        expected = call(mPopulateCubes.return_value,
+        expected = call(ceildiv(mPopulateCubes.return_value, rh.BUCKET_SIZE) + rh.EXTRA_LAMBDAS,
                         args1['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
@@ -240,7 +242,7 @@ class TestDownsampleChannel(unittest.TestCase):
             'dlq_arn': SQS_URL + 'downsample-dlq-1234',
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
         }
-        expected = call(mPopulateCubes.return_value,
+        expected = call(ceildiv(mPopulateCubes.return_value, rh.BUCKET_SIZE) + rh.EXTRA_LAMBDAS,
                         args1['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
@@ -261,7 +263,7 @@ class TestDownsampleChannel(unittest.TestCase):
         self.assertEqual(mDeleteQueue.mock_calls, expected)
 
     def test_downsample_channel_aniso_split(self, mRandom, mCreateQueue, mPopulateCubes, mLaunchLambdas, mDeleteQueue):
-        args1 = self.get_args(type='anisotropic', iso_resolution=1)
+        args1 = self.get_args(type='anisotropic', iso_resolution=1, resolution=1)
 
         args2 = rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
@@ -269,7 +271,7 @@ class TestDownsampleChannel(unittest.TestCase):
 
         self.assertEqual(args2['iso_x_stop'], 512)
         self.assertEqual(args2['iso_y_stop'], 512)
-        self.assertEqual(args2['iso_z_stop'], 32)
+        self.assertEqual(args2['iso_z_stop'], 16)
 
     def test_downsample_channel_aniso_post_split(self, mRandom, mCreateQueue, mPopulateCubes, mLaunchLambdas, mDeleteQueue):
         args1 = self.get_args(type='anisotropic',

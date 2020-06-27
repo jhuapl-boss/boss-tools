@@ -46,6 +46,7 @@ import uuid
 import pprint
 from spdb.spatialdb.object import INGEST_ID_MAX_N, AWSObjectStore
 from datetime import datetime, timedelta
+from boss_db import get_db_connection
 
 bossutils.utils.set_excepthook()
 LOG = bossutils.logger.BossLogger().logger
@@ -73,39 +74,6 @@ class DeleteError(Exception):
 """Resolution and id of an ingest job."""
 ResJobId = namedtuple('ResJobId', ['res', 'job_id'])
 
-def get_db_connection(data):
-    """
-    connects to vault to get db information and then makes a pymysql connection
-    Args:
-        data(dict): dictionary containing db key.
-
-    Returns:
-        (pymysql.Connection) connection to pymysql
-    """
-    vault = bossutils.vault.Vault()
-    LOG.debug("get_db_connection(): made connection to Vault")
-
-    # ------ get values from Vault -----------
-    host = data["db"]
-    user = vault.read('secret/endpoint/django/db', 'user')
-    password = vault.read('secret/endpoint/django/db', 'password')
-    db_name = vault.read('secret/endpoint/django/db', 'name')
-    port = int(vault.read('secret/endpoint/django/db', 'port'))
-
-    # ---- debug locally -------
-    # host = "localhost"
-    # user = "testuser"
-    # password = ""
-    # db_name = "boss"
-    # port = 3306
-
-    return pymysql.connect(host=host,
-                           user=user,
-                           password=password,
-                           db=db_name,
-                           port=port,
-                           charset='utf8mb4',
-                           cursorclass=pymysql.cursors.DictCursor)
 
 
 def send_sns_alert(topic_arn, message, session=None, subject=None):
@@ -186,7 +154,7 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
     lookup table is not checked.
 
     Args:
-        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        data(Dict): Dictionary containing following keys: lookup_key, db
         session(Session): AWS boto3 Session
         sfn_client(StepFunction): AWS step function client
 
@@ -194,7 +162,7 @@ def query_for_deletes_coord_frames(data, session, sfn_client):
         (dict): Returns data dictionary that was passed in.
     """
     LOG.debug("query_for_deletes_coord_frames() entering.")
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as cf_cursor:
@@ -240,7 +208,7 @@ def query_for_deletes_collections(data, session, sfn_client):
     Finds collections marked for deletion and starts delete step function.
 
     Args:
-        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        data(Dict): Dictionary containing following keys: lookup_key, db
         session(Session): AWS boto3 Session
         sfn_client(StepFunction): AWS step function client
 
@@ -248,7 +216,7 @@ def query_for_deletes_collections(data, session, sfn_client):
         (dict): Returns data dictionary that was passed in.
     """
     LOG.debug("query_for_deletes_collections() entering.")
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as coll_cursor:
@@ -323,7 +291,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
     Finds experiments marked for deletion and starts delete step function.
 
     Args:
-        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        data(Dict): Dictionary containing following keys: lookup_key, db
         session(Session): AWS boto3 Session
         sfn_client(StepFunction): AWS step function client
 
@@ -331,7 +299,7 @@ def query_for_deletes_experiments(data, session, sfn_client):
         (dict): Returns data dictionary that was passed in.
     """
     LOG.debug("query_for_deletes_experiments() entering.")
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as exp_cursor:
@@ -411,7 +379,7 @@ def query_for_deletes_channels(data, session, sfn_client):
             "lookup_key_id": "1",
 
     Args:
-        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        data(Dict): Dictionary containing following keys: lookup_key, db
         session(Session): AWS boto3 Session
         sfn_client(StepFunction): AWS step function client
 
@@ -419,7 +387,7 @@ def query_for_deletes_channels(data, session, sfn_client):
         (Dict): Data dictionary passed in.
     """
     LOG.debug("query_for_deletes_channels() entering.")
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
     LOG.debug("created pymysql connection")
     try:
         with connection.cursor() as ch_cursor:
@@ -504,7 +472,7 @@ def delete_metadata(data, session=None):
     """
     Deletes all metadata from DynamoDB table
     Args:
-        data(Dict): Dictionary containing following keys: lookup_key, meta-db
+        data(Dict): Dictionary containing following keys: lookup_key, meta-db, db
         session(Session): AWS boto3 Session
 
     Returns:
@@ -891,7 +859,7 @@ class S3IndexExtractor:
         Returns:
             (list[ResJobId])
         """
-        sql_conn = get_db_connection(self.data)
+        sql_conn = get_db_connection(self.data["db"])
         exp_query = 'SELECT num_hierarchy_levels FROM experiment WHERE id = %s'
         job_query_args = dict(col=col, exp=exp, chan=chan)
         job_query = (
@@ -1117,7 +1085,7 @@ def delete_clean_up(data, session=None):
         session = bossutils.aws.get_session()
     s3client = session.client('s3')
 
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
 
     try:
         with connection.cursor() as cursor:
@@ -1192,7 +1160,7 @@ def delete_experiment(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
 
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
 
     try:
         with connection.cursor() as cursor:
@@ -1239,7 +1207,7 @@ def delete_coordinate_frame(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
 
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
 
     try:
         with connection.cursor() as cursor:
@@ -1283,7 +1251,7 @@ def delete_collection(data, session=None):
     if session is None:
         session = bossutils.aws.get_session()
 
-    connection = get_db_connection(data)
+    connection = get_db_connection(data["db"])
 
     try:
         with connection.cursor() as cursor:

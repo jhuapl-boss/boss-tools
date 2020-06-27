@@ -130,18 +130,37 @@ class Vault:
         self.client.delete(path)
 
     @catch_expire
-    def revoke_secret(self, lease_id):
+    def revoke_lease(self, lease_id):
         """Revoke the given Vault secret."""
-        self.client.revoke_secret(lease_id)
+        self.client.sys.revoke_lease(lease_id)
 
     @catch_expire
-    def revoke_secret_prefix(self, prefix):
+    def revoke_secret(self, lease_id):
+        """Revoke the given Vault secret.
+
+        This is a legacy method.
+        """
+        self.revoke_lease(lease_id)
+
+    @catch_expire
+    def revoke_prefix(self, prefix):
         """Revoke Vault secret(s) starting with the given prefix.
 
         Args:
             prefix (string): Prefix that the vault secret begins with.
         """
-        self.client.revoke_secret_prefix(prefix)
+        self.client.sys.revoke_prefix(prefix)
+
+    @catch_expire
+    def revoke_secret_prefix(self, prefix):
+        """Revoke Vault secret(s) starting with the given prefix.
+
+        This is a legacy method.
+
+        Args:
+            prefix (string): Prefix that the vault secret begins with.
+        """
+        self.revoke_prefix(prefix)
 
     @catch_expire
     def renew_secret(self, lease_id):
