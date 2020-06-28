@@ -28,7 +28,7 @@ tiles are missing, they are placed back in the upload queue for that ingest
 job.  If there are missing tiles, the ingest job's state is reset to UPLOADING.
 """
 
-log = logger.BossLogger().logger
+log = logger.bossLogger()
 
 # Tile index attributes defined in ndingest.git/nddynamo/schemas/boss_tile_index.json.
 APPENDED_TASK_ID = 'appended_task_id'

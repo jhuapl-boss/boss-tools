@@ -38,7 +38,7 @@ Assumptions:
 
 # Hook up Boss exception handler.
 set_excepthook()
-log = logger.BossLogger().logger
+log = logger.bossLogger()
 
 # Accepted status values to IngestCleaner.
 COMPLETE_STATUS = 'complete'

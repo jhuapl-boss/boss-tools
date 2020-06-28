@@ -15,7 +15,7 @@
 import pymysql.cursors
 import bossutils
 
-LOG = bossutils.logger.BossLogger().logger
+LOG = bossutils.logger.bossLogger()
 
 def get_db_connection(host):
     """
