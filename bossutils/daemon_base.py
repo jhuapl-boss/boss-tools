@@ -53,7 +53,7 @@ class DaemonBase:
     """
     def __init__(self, pid_file_name, pid_dir="/var/run"):
         self.pid_file = os.path.join(pid_dir, pid_file_name)
-        self.log = bossutils.logger.BossLogger().logger
+        self.log = bossutils.logger.bossLogger()
         self.running = False
         self.pid = None
 

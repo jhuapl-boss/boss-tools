@@ -15,7 +15,8 @@
 
 import bossutils
 bossutils.utils.set_excepthook()
-log = bossutils.logger.BossLogger().logger
+bossutils.logger.configure()
+log = bossutils.logger.bossLogger()
 
 from heaviside.activities import ActivityManager
 

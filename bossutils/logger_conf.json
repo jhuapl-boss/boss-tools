@@ -17,6 +17,12 @@
       "qualname": "djangooidc",
       "propagate": 0
     },
+    "spdb": {
+      "level": "DEBUG",
+      "handlers": ["fileHandler", "criticalHandler"],
+      "qualname": "spdb",
+      "propagate": 0
+    },
     "heaviside.activities": {
       "level": "DEBUG",
       "handlers": ["fileHandler", "criticalHandler"],
@@ -49,7 +55,7 @@
       "format": "Log_level:%(levelname)s , Message:%(message)s"
     },
     "bossFormatter": {
-      "()":  "bossutils.logger.bossFormatterFactory"
+      "format": "{%(levelname)s : {Timestamp:%(asctime)s, PID:%(process)d, Message:%(message)s}}"
     }
   }
 }

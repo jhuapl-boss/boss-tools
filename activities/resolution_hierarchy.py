@@ -25,7 +25,7 @@ import random
 from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
 
-log = logger.BossLogger().logger
+log = logger.bossLogger()
 
 ######################################################
 ### Configure Remote Debugging via SIGUSR1 trigger ###

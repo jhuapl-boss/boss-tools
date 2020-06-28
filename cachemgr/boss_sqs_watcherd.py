@@ -46,7 +46,7 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
 
     def __init__(self, pid_file_name, pid_dir="/var/run"):
         super().__init__(pid_file_name, pid_dir)
-        self.log = logger.BossLogger().logger
+        self.log = logger.bossLogger()
 
         self.config = configuration.BossConfig()
         # kvio settings
@@ -80,7 +80,7 @@ class SqsWatcherDaemon(daemon_base.DaemonBase):
 class SqsWatcher:
     def __init__(self, lambda_data):
         self.lambda_data = lambda_data
-        self.log = logger.BossLogger().logger
+        self.log = logger.bossLogger()
         self.old_message_num = 0
         self.message_num = 0
 

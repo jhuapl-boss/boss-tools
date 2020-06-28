@@ -16,7 +16,7 @@
 import boto3
 from urllib.error import URLError
 from bossutils import configuration, utils
-from bossutils.logger import BossLogger
+from bossutils.logger import bossLogger
 import multiprocessing
 import queue
 import os
@@ -194,7 +194,7 @@ class AWSManager:
         """
         temp_session = get_session()
 
-        blog = BossLogger().logger
+        blog = bossLogger()
         blog.info("AWSManager - Created new boto3 session and added to the pool")
         self.__sessions.put(temp_session)
 
@@ -216,7 +216,7 @@ class AWSManager:
 
             except queue.Empty:
                 # No session was available so generate one
-                blog = BossLogger().logger
+                blog = bossLogger()
                 blog.info("AWSManager - No session was available while trying to execute get_session.  Dynamically creating a new session.")
                 self.__create_session()
 
