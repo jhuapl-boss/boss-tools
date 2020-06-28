@@ -4,15 +4,15 @@
 # It expects to get from events dictionary
 # {
 #   "lambda-name": "s3_flush",
-#   "cache-state": "cache-state.hiderrt1.boss",
+#   "cache-state": "cache-state.bosslet.boss",
 #   "cache-state-db": "0"
-#   "s3-flush-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/S3flushHiderrt1Boss"
-#   "s3-flush-deadletter-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/DeadletterHiderrt1Boss"
-#   "cuboid-bucket": "cuboids.hiderrt1.boss"
-#   "s3-index-table": "s3Index.hiderrt1.boss"
+#   "s3-flush-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/S3flushBossletBoss"
+#   "s3-flush-deadletter-queue": "https://sqs.us-east-1.amazonaws.com/<aws_account>/DeadletterBossletBoss"
+#   "cuboid-bucket": "cuboids.bosslet.boss"
+#   "s3-index-table": "s3Index.bosslet.boss"
 # }
 #
-# It expects to get from events dictionary
+# It expects to get from message data
 # {
 #   "lambda-name": "s3_flush",
 #   "config": {'kv_config': {...}
@@ -20,8 +20,14 @@
 #              'object_store_config': {...}},
 #   "write_cuboid_key": "...",
 #   "resource": {...}
+#   "to_black": true/false
 # }
 #
+#   lambda-name (str): Lambda to be invoked
+#   config_data (dict): Dictionary of configuration dictionaries
+#   write_cuboid_key (str): Unique write-cuboid to be flushed to S3
+#   resource (dict): resource for the given write cuboid key
+#   is_black (bool): message flag for black overwrite
 
 import sys
 import json
@@ -86,6 +92,12 @@ while run_cnt < 2:
         # Create resource instance
         resource = BossResourceBasic()
         resource.from_dict(flush_msg_data["resource"])
+
+        # Check if cuboid is black overwrite
+        try:
+            to_black = flush_msg_data["to_black"]
+        except KeyError:
+            to_black = False
     else:
         # Nothing to flush. Exit.
         print("No flush message available")
@@ -134,7 +146,11 @@ while run_cnt < 2:
         existing_cube.from_blosc(existing_cube_bytes, new_cube.time_range)
 
         # Merge cuboids
-        existing_cube.overwrite(new_cube.data, new_cube.time_range)
+        if to_black:
+            # Runs the cutout_to_black 
+            existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
+        else: 
+            existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
         # Get bytes
         cuboid_bytes = existing_cube.to_blosc()
@@ -170,7 +186,11 @@ while run_cnt < 2:
             new_cube.from_blosc(write_cuboid_bytes)
 
             # Merge data
-            existing_cube.overwrite(new_cube.data, existing_cube.time_range)
+            if to_black:
+                # Runs the cutout_to_black 
+                existing_cube.overwrite_to_black(new_cube.data, new_cube.time_range)
+            else: 
+                existing_cube.overwrite(new_cube.data, new_cube.time_range)
 
         # Update bytes to send to s3 and bytes scanned for ids
         cuboid_bytes = existing_cube.to_blosc()
