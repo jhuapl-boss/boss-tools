@@ -7,3 +7,4 @@ hvac>=0.8.1
 boss-ingest
 pymysql
 moto
+numpy
