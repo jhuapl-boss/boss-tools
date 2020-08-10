@@ -73,6 +73,7 @@ class KeyCloakClient:
         self.https = https
         self.verify_ssl = verify_ssl
         self.vault_path = "secret/keycloak"
+        self.logged_in = False
 
     def login(self, username=None, password=None, client_id=None, login_realm=None):
         """Log the user in by Retrieve tokens for the user with the specified username and password.
@@ -87,11 +88,17 @@ class KeyCloakClient:
 
         Note: Login realm can be different from the realm that the client is used to manage
         """
+        vault = None
+
         # Get the password from vault
-        vault = Vault()
         if username is None:
+            vault = Vault()
             username = vault.read(self.vault_path, 'username')
             password = vault.read(self.vault_path, 'password')
+
+
+        if vault is None and (client_id is None or login_realm is None):
+            vault = Vault()
 
         # Save the client_id and login realm for logging out
         self.client_id = client_id or vault.read(self.vault_path, 'client_id')
@@ -107,6 +114,7 @@ class KeyCloakClient:
         response = requests.post(url, data=data, verify=self.https and self.verify_ssl)
         KeyCloakError.raise_for_status(response)
         self.token = response.json()
+        self.logged_in = True
 
         return response
 
@@ -129,10 +137,12 @@ class KeyCloakClient:
         self.token = None
         self.client_id = None
         self.login_realm = None
+        self.logged_in = False
 
     def __enter__(self):
         """The start of the context manager, which handles login / logout from Keycloak."""
-        self.login()
+        if not self.logged_in:
+            self.login()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
