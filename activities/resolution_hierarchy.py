@@ -12,6 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+The activities in this file manage a downsample.
+See boss-manage.git/cloud_formation/stepfunctions/resolution_hierarchy.hsd
+as well as boss-manage.git/docs/downsample.
+
+Note that there are several SQS queues used during downsample.  There is the
+downsample job queue which holds independent downsample jobs waiting for
+processing.  This queue is "permanent".
+
+Other SQS queues are created while running a downsample job.  These hold
+cuboids waiting for downsampling.
+"""
+
 from bossutils import aws, logger
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
@@ -24,8 +37,25 @@ import time
 import random
 from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
+import pymysql.cursors
+from boss_db import get_db_connection
 
 log = logger.bossLogger()
+
+class DownsampleStatus:
+    """
+    String values are actual values stored in DB.
+
+    Taken from boss.git/django/bosscore/models.py
+
+    ToDo: consider making a separate shared repo with constants that the
+    Django repo, step functions, and lambdas can all import.
+    """
+    NOT_DOWNSAMPLED = 'NOT_DOWNSAMPLED'
+    IN_PROGRESS = 'IN_PROGRESS'
+    DOWNSAMPLED = 'DOWNSAMPLED'
+    FAILED = 'FAILED'
+    QUEUED = 'QUEUED'
 
 ######################################################
 ### Configure Remote Debugging via SIGUSR1 trigger ###
@@ -51,6 +81,10 @@ BUCKET_SIZE = 8
 
 # datetime.delta: The runtime of the downsample_volume lambda
 MAX_LAMBDA_TIME = timedelta(seconds=120)
+
+# Periodically update downsample job's SQS visibility timeout so it doesn't
+# get redelivered.
+NEW_VISIBILITY_TIMEOUT = MAX_LAMBDA_TIME * 2
 
 # int: The number of status poll cycles that have the same count for more
 #      lambdas to be launched (total time is UNCHANGING_LAUNCH * MAX_LAMBDA_TIME)
@@ -88,6 +122,131 @@ class FailedLambdaError(ResolutionHierarchyError):
     def __init__(self):
         msg = "A Lambda failed execution"
         super().__init__(msg)
+
+def check_downsample_queue(args):
+    """
+    Check queue for downsample jobs.
+
+    Also marks downsample as in progress if message found.
+
+    Args:
+        (dict): { 'queue_url': <URL of SQS queue>, 'sfn_arn': <arn of the downsample step fcn> }
+
+    Returns:
+        (dict): {
+            'start_downsample': True | False,
+            'queue_url': <URL of SQS queue>,
+            'sfn_arn': <arn of the downsample step fcn>,
+            'status': 'IN_PROGRESS',
+            ... }
+            if start_downsample, then args for downsample_channel() provided including
+            job_receipt_handle so message's visibility timeout can be
+            adjusted or be deleted from the queue.
+    """
+    session = aws.get_session()
+    sqs = session.client('sqs')
+    resp = client.receive_message(QueueUrl=args['queue_url'], WaitTimeSeconds=2, MaxNumberOfMessages=1)
+    if 'Messages' not in resp or len(resp['Messages']) == 0:
+        return { 'start_downsample': False }
+
+    msg = resp['Messages'][0]
+    job = json.loads(msg['Body'])
+    job['start_downsample'] = True
+    job['job_receipt_handle'] = msg['ReceiptHandle']
+    job['queue_url'] = args['queue_url']
+    job['sfn_arn'] = args['sfn_arn']
+    job['status'] = DownsampleStatus.IN_PROGRESS
+    return job
+
+def delete_downsample_job(args):
+    """
+    Delete the message for the finished downsample job from SQS.
+
+    Returns a dict that allows the last state to start a new instance of the
+    downsample step function.
+
+    Args:
+        args (dict): { 'queue_url': <URL of SQS queue>, 'job_receipt_handle': <msg's receipt handle, ... }
+
+    Returns:
+        (dict): { 'queue_url': <URL of SQS queue>, 'sfn_arn': <arn of the downsample step fcn>, 'db_host': MySQL host name, 'status': 'DOWNSAMPLED' }
+    """
+    try:
+        session = aws.get_session()
+        sqs = session.client('sqs')
+        sqs.delete_message(QueueUrl=args['queue_url'], ReceiptHandle=args['job_receipt_handle'])
+        return {
+            'sfn_arn': args['sfn_arn'],
+            'queue_url': args['queue_url'],
+            'db_host': args['db_host'],
+            'status': DownsampleStatus.DOWNSAMPLED,
+        }
+    except Exception as ex:
+        logger.error(f'Error trying to downsample job from SQS: {ex}')
+        raise
+
+def update_visibility_timeout(queue_url, receipt_handle):
+    """
+    Update the visibility timeout of the message for the current downsample job.
+
+    This keeps the message from getting redelivered while the downsample is
+    still running.
+
+    Args:
+        queue_url (str): URL of SQS queue.
+        receipt_handle (str): Message's receipt handle.
+
+    Returns:
+
+    Raises:
+    """
+    try:
+        client = session.client('sqs')
+        client.change_message_visibility(
+            QueueUrl=queue_url,
+            ReceiptHandle=receipt_handle,
+            VisibilityTimeout=NEW_VISIBILITY_TIMEOUT.seconds)
+    except Exception as ex:
+        logger.error(f'Error trying to update visibilty timeout of downsample job: {ex}')
+        raise
+
+def update_downsample_status_in_db(args):
+    """
+    Update the downsample status in the MySQL database.
+
+    Args:
+        args (dict):
+            db_host (str): MySQL host name.
+            channel_id (int): ID of channel for downsample.
+            status (str): String from DownsampleStatus class.
+
+    Returns:
+        (dict): Returns input args for passing to next SFN state.
+    """
+    sql = """
+        UPDATE channel
+        SET status = %(status)s
+        WHERE id = %(chan_id)s
+        """
+
+    db_host = args['db_host']
+    chan_id = args['channel_id']
+    status = args['status']
+
+    sql_args = dict(status=status, chan_id=str(chan_id))
+
+    try:
+        db_connection = get_db_connection(self.db_host)
+        with db_connection.cursor(pymysql.cursors.SSCursor) as cursor:
+            rows = cursor.execute(sql, sql_args)
+            if rows < 1:
+                log.error(
+                    f'DB said no rows updated when trying to set downsample status to {status} for channel {chan_id}'
+                )
+    except Exception as ex:
+        log.error(f'Failed to set downsample status to {status} for channel {chan_id}: {ex}')
+
+    return args
 
 def downsample_channel(args):
     """
@@ -130,6 +289,12 @@ def downsample_channel(args):
             iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
 
             aws_region (str) AWS region to run in such as us-east-1
+
+            start_downsample (bool) Used by previous state to indicate that a downsample job exists
+            job_receipt_handle (str) Used by downstream state to delete the downsample job from queue
+            queue_url (str) URL of downsample queue; downstream state deletes from this queue
+            sfn_arn (str) <arn of the downsample step fcn>
+            db_host (str) Host of MySQL database.
         }
 
     Return:
@@ -241,7 +406,9 @@ def downsample_channel(args):
                            args['downsample_volume_lambda'],
                            json.dumps(lambda_args).encode('UTF8'),
                            dlq_arn,
-                           cubes_arn)
+                           cubes_arn,
+                           args['queue_url'],
+                           args['job_receipt_handle'])
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
@@ -373,7 +540,7 @@ def enqueue_cubes(queue_arn, cubes):
         log.exception("Error caught in process, raising to controller")
         raise ResolutionHierarchyError(str(ex))
 
-def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
+def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn, downsample_queue_url, receipt_handle):
     """Launch lambdas to process all of the target cubes to downsample
 
     Launches an initial set of lambdas and monitors the cubes SQS queue to
@@ -391,6 +558,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         dlq_arn (str): ARN of the SQS DLQ to monitor for error messages
         cubes_arn (str): ARN of the input cubes SQS queue to monitor for
                          completion of the downsample
+        downsample_queue_url (str): URL of downsample job queue
+        receipt_handle (str): Handle of message from downsample queue
     """
     per_lambda = ceildiv(total_count, POOL_SIZE)
     d,m = divmod(total_count, per_lambda)
@@ -459,6 +628,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                         # Don't update count is there was an error getting the current count
                         prev_throttle = throttle
 
+                    # Tell SQS we're still alive
+                    update_visibility_timeout(downsample_queue_url, receipt_handle)
                     time.sleep(MAX_LAMBDA_TIME.seconds)
 
                     if check_queue(dlq_arn) > 0:
@@ -490,6 +661,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         else:
             zero_count = 0
 
+        # Tell SQS we're still alive
+        update_visibility_timeout(downsample_queue_url, receipt_handle)
         time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):

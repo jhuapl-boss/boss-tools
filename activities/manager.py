@@ -69,8 +69,11 @@ class BossActivityManager(ActivityManager):
             key('IngestPopulate') : iqp.ingest_populate,
             key('VerifyCount') : iqp.verify_count,
 
-            # Resolution Hierarchy StepFunction
+            # Resolution Hierarchy (downsample) StepFunctions
+            key('CheckDownsampleQueue') : rh.check_downsample_queue,
             key('DownsampleChannel') : rh.downsample_channel,
+            key('DeleteDownsampleJob'): rh.delete_downsample_job,
+            key('UpdateDownsampleStatus'): rh.update_downsample_status_in_db,
 
             # Ingest missing chunk scanner StepFunction
             key('ScanForMissingChunks') : chunk_scanner.activity_entry_point,

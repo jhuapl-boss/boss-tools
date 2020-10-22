@@ -47,6 +47,8 @@ REGION = 'us-east-1'
 SESSION = boto3.session.Session(region_name = REGION)
 #SQS_URL = 'https://sqs.{}.amazonaws.com/{}/'.format(REGION, ACCOUNT_ID)
 SQS_URL = 'https://queue.amazonaws.com/{}/'.format(ACCOUNT_ID)
+DOWNSAMPLE_QUEUE_URL = SQS_URL + 'downsample_queue'
+RECEIPT_HANDLE = '987654321'
 
 # Stub XYZMorton implementation that returns a unique number when called
 def XYZMorton(xyz):
@@ -145,11 +147,11 @@ Test passing in downsample_id
 Always create / delete the queue or create it when creating the downsample_id and delete when res_lt_max is False?
 """
 
-@patch.object(rh, 'delete_queue')
-@patch.object(rh, 'launch_lambdas')
-@patch.object(rh, 'populate_cubes', return_value = 1)
-@patch.object(rh, 'create_queue', side_effect = lambda name: SQS_URL + name)
-@patch.object(rh.random, 'random', return_value = 0.1234)
+@patch.object(rh, 'delete_queue', autospec=True)
+@patch.object(rh, 'launch_lambdas', autospec=True)
+@patch.object(rh, 'populate_cubes', return_value = 1, autospec=True)
+@patch.object(rh, 'create_queue', side_effect = lambda name: SQS_URL + name, autospec=True)
+@patch.object(rh.random, 'random', return_value = 0.1234, autospec=True)
 class TestDownsampleChannel(unittest.TestCase):
     def get_args(self, scale=2, **kwargs):
         cube_size = md.XYZ(*CUBOIDSIZE()[0])
@@ -173,6 +175,9 @@ class TestDownsampleChannel(unittest.TestCase):
 
             'type': 'isotropic',
             'iso_resolution': 3,
+
+            'queue_url': DOWNSAMPLE_QUEUE_URL,
+            'job_receipt_handle': RECEIPT_HANDLE,
         }
         args.update(kwargs)
 
@@ -205,7 +210,9 @@ class TestDownsampleChannel(unittest.TestCase):
                         args1['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
-                        SQS_URL + 'downsample-cubes-1234')
+                        SQS_URL + 'downsample-cubes-1234',
+                        DOWNSAMPLE_QUEUE_URL,
+                        RECEIPT_HANDLE)
         self.assertEqual(mLaunchLambdas.mock_calls, [expected])
 
         self.assertEqual(args2['x_stop'], 512)
@@ -246,7 +253,9 @@ class TestDownsampleChannel(unittest.TestCase):
                         args1['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
-                        SQS_URL + 'downsample-cubes-1234')
+                        SQS_URL + 'downsample-cubes-1234',
+                        DOWNSAMPLE_QUEUE_URL,
+                        RECEIPT_HANDLE)
         self.assertEqual(mLaunchLambdas.mock_calls, [expected])
 
         self.assertEqual(args2['x_stop'], 512)
@@ -500,107 +509,123 @@ class TestEnqueue(unittest.TestCase):
             rh.enqueue_cubes(self.arn, self.chunk)
 
 class TestInvoke(unittest.TestCase):
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 0, cubes_arn = [5,4,3,2,1]))
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 0, cubes_arn = [5,4,3,2,1]), autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE)
         self.assertEqual(len(mCheckQueue.mock_calls), (5 + rh.ZERO_COUNT) * 2) # (5+) for cubes_arn, (*2) for both queues
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 0, cubes_arn = 0))
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_empty(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 0, cubes_arn = 0), autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_empty(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE)
         self.assertEqual(len(mCheckQueue.mock_calls), rh.ZERO_COUNT * 2) # * 2, one for each queue
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 1, cubes_arn = 0))
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_dlq(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', side_effect = make_check_queue(dlq_arn = 1, cubes_arn = 0), autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_dlq(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         count = 10
 
         with self.assertRaises(rh.FailedLambdaError):
-            rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+            rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE)
         self.assertEqual(len(mCheckQueue.mock_calls), 1) # single dlq check_queue call
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue')
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_relaunch(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_relaunch(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         cubes_count = [5] * rh.UNCHANGING_LAUNCH + [4,3,2,1]
         mCheckQueue.side_effect = make_check_queue(dlq_arn = 0, cubes_arn = cubes_count)
 
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE + 1) # +1 relaunch
         self.assertEqual(len(mCheckQueue.mock_calls), (len(cubes_count) + rh.ZERO_COUNT) * 2) # (*2) for both queues
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue')
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_relaunch_multi(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_relaunch_multi(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         cubes_count = [5] * rh.UNCHANGING_LAUNCH + [4] * rh.UNCHANGING_LAUNCH + [3,2,1]
         mCheckQueue.side_effect = make_check_queue(dlq_arn = 0, cubes_arn = cubes_count)
 
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE + 2) # +2 relaunches
         self.assertEqual(len(mCheckQueue.mock_calls), (len(cubes_count) + rh.ZERO_COUNT) * 2) # (*2) for both queues
 
-    @patch.object(rh, 'lambda_throttle_count')
-    @patch.object(rh, 'check_queue')
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_throttle(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', autospec=True)
+    @patch.object(rh, 'check_queue', autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_throttle(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         cubes_count = [5] * rh.UNCHANGING_THROTTLE + [4,3,2,1]
         throttle_count = [2] * rh.UNCHANGING_THROTTLE + [2,2,2,1,0,0,0,0,0,0,0,0,0]
         mCheckQueue.side_effect = make_check_queue(dlq_arn = 0, cubes_arn = cubes_count)
         mLambdaThrottleCount.side_effect = throttle_count
 
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE + 1) # +1 relaunch
         self.assertEqual(len(mCheckQueue.mock_calls), ((len(cubes_count) + rh.ZERO_COUNT) * 2) + 2) # (+2) for 2 extra dlq polls in throttling loop, (*2) for both queues
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue')
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_no_throttle(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_no_throttle(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         cubes_count = [5] * rh.UNCHANGING_THROTTLE + [4,3,2,1]
         mCheckQueue.side_effect = make_check_queue(dlq_arn = 0, cubes_arn = cubes_count)
 
         count = 10
-        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+        rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE + 1) # +1 relaunch
         self.assertEqual(len(mCheckQueue.mock_calls), (len(cubes_count) + rh.ZERO_COUNT) * 2) # (*2) for both queues
 
-    @patch.object(rh, 'lambda_throttle_count', return_value = 0)
-    @patch.object(rh, 'check_queue')
-    @patch.object(rh, 'invoke_lambdas')
-    def test_launch_unchanging_max(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount):
+    @patch.object(rh, 'update_visibility_timeout', autospec=True)
+    @patch.object(rh, 'lambda_throttle_count', return_value = 0, autospec=True)
+    @patch.object(rh, 'check_queue', autospec=True)
+    @patch.object(rh, 'invoke_lambdas', autospec=True)
+    def test_launch_unchanging_max(self, mInvokeLambdas, mCheckQueue, mLambdaThrottleCount, mUpdateVisibility):
         cubes_count = [5] * rh.UNCHANGING_MAX
         mCheckQueue.side_effect = make_check_queue(dlq_arn = 0, cubes_arn = cubes_count)
 
         with self.assertRaises(rh.ResolutionHierarchyError):
             count = 10
-            rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn')
+            rh.launch_lambdas(count, 'lambda_arn', {}, 'dlq_arn', 'cubes_arn',
+                                DOWNSAMPLE_QUEUE_URL, RECEIPT_HANDLE)
 
         self.assertEqual(len(mInvokeLambdas.mock_calls), rh.POOL_SIZE + 1) # +1 relaunch
         self.assertEqual(len(mCheckQueue.mock_calls), len(cubes_count) * 2) # (*2) for both queues
 
-    @patch.object(SESSION, 'client')
+    @patch.object(SESSION, 'client', autospec=True)
     def test_invoke(self, mClient):
         invoke = mClient.return_value.invoke
 
@@ -614,7 +639,7 @@ class TestInvoke(unittest.TestCase):
         self.assertEqual(len(invoke.mock_calls), count)
         self.assertEqual(invoke.mock_calls[0], expected)
 
-    @patch.object(SESSION, 'client')
+    @patch.object(SESSION, 'client', autospec=True)
     def test_invoke_error(self, mClient):
         invoke = mClient.return_value.invoke
         invoke.side_effect = Exception("Could not invoke lambda")
@@ -623,8 +648,8 @@ class TestInvoke(unittest.TestCase):
             count = 2
             rh.invoke_lambdas(count, 'lambda_arn', '{}', 'dlq_arn')
 
-    @patch.object(rh, 'check_queue', return_value = 1)
-    @patch.object(SESSION, 'client')
+    @patch.object(rh, 'check_queue', return_value = 1, autospec=True)
+    @patch.object(SESSION, 'client', autospec=True)
     def test_invoke_dlq(self, mClient, mCheckQueue):
         invoke = mClient.return_value.invoke
 
@@ -700,7 +725,7 @@ class TestQueue(unittest.TestCase):
 
         self.assertEqual(count, 2)
 
-@patch.object(SESSION, 'client')
+@patch.object(SESSION, 'client', autospec=True)
 class TestThrottle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

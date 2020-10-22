@@ -56,7 +56,7 @@ def get_session():
     return boto3.session.Session(region_name=get_region())
 
 # DP NOTE: StepFunction methods adapted from heaviside library
-def sfn_execute(session, name, input_ = None):
+def sfn_execute(session, name, input_={}):
     """Start executing a StepFunction
 
     Args:
