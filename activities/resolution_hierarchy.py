@@ -145,7 +145,7 @@ def check_downsample_queue(args):
     """
     session = aws.get_session()
     sqs = session.client('sqs')
-    resp = client.receive_message(QueueUrl=args['queue_url'], WaitTimeSeconds=2, MaxNumberOfMessages=1)
+    resp = sqs.receive_message(QueueUrl=args['queue_url'], WaitTimeSeconds=2, MaxNumberOfMessages=1)
     if 'Messages' not in resp or len(resp['Messages']) == 0:
         return { 'start_downsample': False }
 
@@ -182,7 +182,7 @@ def delete_downsample_job(args):
             'status': DownsampleStatus.DOWNSAMPLED,
         }
     except Exception as ex:
-        logger.error(f'Error trying to downsample job from SQS: {ex}')
+        log.exception(f'Error trying to downsample job from SQS: {ex}')
         raise
 
 def update_visibility_timeout(queue_url, receipt_handle):
@@ -201,13 +201,14 @@ def update_visibility_timeout(queue_url, receipt_handle):
     Raises:
     """
     try:
-        client = session.client('sqs')
-        client.change_message_visibility(
+        session = aws.get_session()
+        sqs = session.client('sqs')
+        sqs.change_message_visibility(
             QueueUrl=queue_url,
             ReceiptHandle=receipt_handle,
             VisibilityTimeout=NEW_VISIBILITY_TIMEOUT.seconds)
     except Exception as ex:
-        logger.error(f'Error trying to update visibilty timeout of downsample job: {ex}')
+        log.exception(f'Error trying to update visibilty timeout of downsample job: {ex}')
         raise
 
 def update_downsample_status_in_db(args):
@@ -244,7 +245,7 @@ def update_downsample_status_in_db(args):
                     f'DB said no rows updated when trying to set downsample status to {status} for channel {chan_id}'
                 )
     except Exception as ex:
-        log.error(f'Failed to set downsample status to {status} for channel {chan_id}: {ex}')
+        log.exception(f'Failed to set downsample status to {status} for channel {chan_id}: {ex}')
 
     return args
 

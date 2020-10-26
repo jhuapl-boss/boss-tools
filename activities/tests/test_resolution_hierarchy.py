@@ -35,6 +35,7 @@ import unittest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timedelta
 from bossutils.multidimensional import ceildiv
+from ._test_case_with_patch_object import TestCaseWithPatchObject
 
 import boto3
 from moto import mock_sqs
@@ -137,32 +138,6 @@ sys.path.pop(0)
 
 ################## END CUSTOM MOCKING ##################
 ########################################################
-
-
-class TestCaseWithPatchObject(unittest.TestCase):
-    """
-    Provide alternative way to setup mocks w/o need for decorator and extra
-    arguments for each test method.
-    """
-
-    def patch_object(self, obj, name, **kwargs):
-        """
-        Setup mocks without need for decorator and extra arguments for each test.
-
-        Args:
-            obj (object): Object or module that will have one of its members mocked.
-            name (str): Name of member to mock.
-            kwargs (keyword args): Additional arguments passed to patch.object().
-
-        Returns:
-            (MagicMock)
-        """
-        patch_wrapper = patch.object(obj, name, autospec=True, **kwargs)
-        magic_mock = patch_wrapper.start()
-        # This ensures the patch is removed when the test is torn down.
-        self.addCleanup(patch_wrapper.stop)
-        return magic_mock
-
 
 
 """
