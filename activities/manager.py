@@ -25,6 +25,7 @@ import delete_cuboid as dc
 #import populate_upload_queue as puq
 import ingest_queue_populate as iqp
 import resolution_hierarchy as rh
+import boss_db
 import scan_for_missing_chunks as chunk_scanner
 import cleanup_ingest
 
@@ -73,7 +74,7 @@ class BossActivityManager(ActivityManager):
             key('CheckDownsampleQueue') : rh.check_downsample_queue,
             key('DownsampleChannel') : rh.downsample_channel,
             key('DeleteDownsampleJob'): rh.delete_downsample_job,
-            key('UpdateDownsampleStatus'): rh.update_downsample_status_in_db,
+            key('UpdateDownsampleStatus'): boss_db.update_downsample_status_in_db,
 
             # Ingest missing chunk scanner StepFunction
             key('ScanForMissingChunks') : chunk_scanner.activity_entry_point,

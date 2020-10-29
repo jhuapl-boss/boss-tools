@@ -37,8 +37,6 @@ import time
 import random
 from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
-import pymysql.cursors
-from boss_db import get_db_connection
 
 log = logger.bossLogger()
 
@@ -210,44 +208,6 @@ def update_visibility_timeout(queue_url, receipt_handle):
     except Exception as ex:
         log.exception(f'Error trying to update visibilty timeout of downsample job: {ex}')
         raise
-
-def update_downsample_status_in_db(args):
-    """
-    Update the downsample status in the MySQL database.
-
-    Args:
-        args (dict):
-            db_host (str): MySQL host name.
-            channel_id (int): ID of channel for downsample.
-            status (str): String from DownsampleStatus class.
-
-    Returns:
-        (dict): Returns input args for passing to next SFN state.
-    """
-    sql = """
-        UPDATE channel
-        SET status = %(status)s
-        WHERE id = %(chan_id)s
-        """
-
-    db_host = args['db_host']
-    chan_id = args['channel_id']
-    status = args['status']
-
-    sql_args = dict(status=status, chan_id=str(chan_id))
-
-    try:
-        db_connection = get_db_connection(self.db_host)
-        with db_connection.cursor(pymysql.cursors.SSCursor) as cursor:
-            rows = cursor.execute(sql, sql_args)
-            if rows < 1:
-                log.error(
-                    f'DB said no rows updated when trying to set downsample status to {status} for channel {chan_id}'
-                )
-    except Exception as ex:
-        log.exception(f'Failed to set downsample status to {status} for channel {chan_id}: {ex}')
-
-    return args
 
 def downsample_channel(args):
     """
