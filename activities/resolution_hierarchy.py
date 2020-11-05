@@ -164,10 +164,22 @@ def delete_downsample_job(args):
     downsample step function.
 
     Args:
-        args (dict): { 'queue_url': <URL of SQS queue>, 'job_receipt_handle': <msg's receipt handle, ... }
+        args (dict): {
+            'queue_url': <URL of SQS queue>,
+            'job_receipt_handle': <msg's receipt handle,
+            'db_host':
+            'channel_id': <channel id>,
+            ...
+        }
 
     Returns:
-        (dict): { 'queue_url': <URL of SQS queue>, 'sfn_arn': <arn of the downsample step fcn>, 'db_host': MySQL host name, 'status': 'DOWNSAMPLED' }
+        (dict): {
+            'queue_url': <URL of SQS queue>,
+            'sfn_arn': <arn of the downsample step fcn>,
+            'db_host': MySQL host name,
+            'channel_id': <channel id>,
+            'status': 'DOWNSAMPLED'
+        }
     """
     try:
         session = aws.get_session()
@@ -177,6 +189,7 @@ def delete_downsample_job(args):
             'sfn_arn': args['sfn_arn'],
             'queue_url': args['queue_url'],
             'db_host': args['db_host'],
+            'channel_id': args['channel_id'],
             'status': DownsampleStatus.DOWNSAMPLED,
         }
     except Exception as ex:

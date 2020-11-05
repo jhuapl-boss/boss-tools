@@ -24,13 +24,32 @@ import json
 from datetime import datetime
 
 
+def get_account_id():
+    """
+    Get AWS account id from the ec2 instance's metadata.
+
+    Returns:
+        (str|None): Account id.
+    """
+    try:
+        raw_metadata = utils.read_url(utils.DYNAMIC_URL + 'instance-identity/document')
+        metadata = json.loads(raw_metadata)
+        return metadata['accountId']
+    except NotImplementedError:
+        # If you get here, you are mocking and metadata is not supported, so 
+        # return fake account id.
+        return "184319448511"
+    except URLError:
+        return None
+
 def get_region():
     """
-    Return the  aws region based on the machine's meta data
+    Return the aws region based on the machine's meta data
 
     If mocking with moto, metadata is not supported and "us-east-1" is always returned
 
-    Returns: aws region
+    Returns:
+        (str|None): aws region
 
     """
     if 'LOCAL_DYNAMODB_URL' in os.environ:
