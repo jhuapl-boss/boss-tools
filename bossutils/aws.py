@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2016 The Johns Hopkins University Applied Physics Laboratory
+# Copyright 2020 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -80,11 +80,14 @@ def sfn_execute(session, name, input_={}):
 
     Args:
         session (Session): Boto3 session
-        name (string): Name of the StepFunction to execute
+        name (str): Name of the StepFunction to execute
         input_ (Json): Json input data for the first state to process
 
     Returns:
-        string: ARN of the state machine execution, used to get status and output data
+        (str): ARN of the state machine execution, used to get status and output data
+
+    Raises:
+        (Exception): If step function not found
     """
     client = session.client('stepfunctions')
 
@@ -97,12 +100,26 @@ def sfn_execute(session, name, input_={}):
     if arn is None:
         raise Exception("StepFunction '{}' doesn't exist".format(name))
 
-    input_ = json.dumps(input_)
-    name = name + "-" + datetime.now().strftime("%Y%m%d%H%M%s%f")
+    return sfn_run(session, arn, input)
 
-    resp = client.start_execution(stateMachineArn = arn,
-                                  name = name,
-                                  input = input_)
+def sfn_run(session, arn, input_={}):
+    """Start executing a StepFunction
+
+    Args:
+        session (Session): Boto3 session
+        arn (str): ARN of the StepFunction to execute
+        input_ (Json): Json input data for the first state to process
+
+    Returns:
+        string: ARN of the state machine execution, used to get status and output data
+    """
+
+    name = arn.rsplit(':', 1)[1] + '-' + datetime.now().strftime('%Y%m%d%H%M%s%f')
+    input_ = json.dumps(input_)
+
+    client = session.client('stepfunctions')
+
+    resp = client.start_execution(stateMachineArn=arn, name=name, input=input_)
     arn = resp['executionArn']
     return arn
 
@@ -280,7 +297,3 @@ def get_aws_manager():
         return aws_mngr
     else:
         return get_aws_manager()
-
-
-
-
