@@ -1,4 +1,4 @@
-# Copyright 2016 The Johns Hopkins University Applied Physics Laboratory
+# Copyright 2020 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,12 +26,14 @@ cuboids waiting for downsampling.
 """
 
 from bossutils import aws, logger
+from bossutils.configuration import BossConfig
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
 from bossutils.multidimensional import XYZ, ceildiv
 from bossutils.multidimensional import range as xyz_range
 
-import types
+from spdb.spatialdb.rediskvio import RedisKVIO
+
 import json
 import time
 import random
@@ -39,6 +41,7 @@ from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
 
 log = logger.bossLogger()
+
 
 class DownsampleStatus:
     """
@@ -110,16 +113,20 @@ EXTRA_LAMBDAS = 10
 
 ###########################################################
 
+
 class ResolutionHierarchyError(Exception):
     pass
 
+
 class LambdaLaunchError(ResolutionHierarchyError):
     pass
+
 
 class FailedLambdaError(ResolutionHierarchyError):
     def __init__(self):
         msg = "A Lambda failed execution"
         super().__init__(msg)
+
 
 def check_downsample_queue(args):
     """
@@ -156,6 +163,7 @@ def check_downsample_queue(args):
     job['status'] = DownsampleStatus.IN_PROGRESS
     return job
 
+
 def delete_downsample_job(args):
     """
     Delete the message for the finished downsample job from SQS.
@@ -169,6 +177,7 @@ def delete_downsample_job(args):
             'job_receipt_handle': <msg's receipt handle,
             'db_host':
             'channel_id': <channel id>,
+            'lookup_key': <full lookup key of channel>,
             ...
         }
 
@@ -178,6 +187,7 @@ def delete_downsample_job(args):
             'sfn_arn': <arn of the downsample step fcn>,
             'db_host': MySQL host name,
             'channel_id': <channel id>,
+            'lookup_key': <full lookup key of channel>,
             'status': 'DOWNSAMPLED'
         }
     """
@@ -185,16 +195,61 @@ def delete_downsample_job(args):
         session = aws.get_session()
         sqs = session.client('sqs')
         sqs.delete_message(QueueUrl=args['queue_url'], ReceiptHandle=args['job_receipt_handle'])
+        log.info(f"Deleting SQS message for downsample of {args['lookup_key']}")
         return {
             'sfn_arn': args['sfn_arn'],
             'queue_url': args['queue_url'],
             'db_host': args['db_host'],
             'channel_id': args['channel_id'],
+            'lookup_key': args['lookup_key'],
             'status': DownsampleStatus.DOWNSAMPLED,
         }
     except Exception as ex:
         log.exception(f'Error trying to downsample job from SQS: {ex}')
         raise
+
+
+def clear_cache(args):
+    """
+    Clear any cuboids for the newly downsampled channel from the Redis cache.
+
+    Args:
+        args (dict): {
+            'sfn_arn': args['sfn_arn'],
+            'queue_url': args['queue_url'],
+            'lookup_key': <full lookup key of channel>,
+        }
+
+    Returns:
+        args (dict): {
+            'sfn_arn': args['sfn_arn'],
+            'queue_url': args['queue_url'],
+        }
+    """
+    config = BossConfig()
+    kvio_settings = {"cache_host": config['aws']['cache'],
+                     "cache_db": int(config['aws']['cache-db']),
+                     "read_timeout": 1209600}  # two weeks.
+
+    lookup_key = args['lookup_key']
+    log.info(f'Clearing cuboid cache for {lookup_key}')
+    for pattern in ("CACHED-CUBOID&"+lookup_key+"&*",
+                    "CACHED-CUBOID&ISO&"+lookup_key+"&*"):
+        log.debug("Clearing cache of {} cubes".format(pattern))
+        try:
+            cache = RedisKVIO(kvio_settings)
+            pipe = cache.cache_client.pipeline()
+            for key in cache.cache_client.scan_iter(match=pattern):
+                pipe.delete(key)
+            pipe.execute()
+        except Exception as ex:
+            log.exception(f"Problem clearing cache after downsample finished: {ex}")
+
+    return {
+        'sfn_arn': args['sfn_arn'],
+        'queue_url': args['queue_url'],
+    }
+
 
 def update_visibility_timeout(queue_url, receipt_handle):
     """
@@ -221,6 +276,7 @@ def update_visibility_timeout(queue_url, receipt_handle):
     except Exception as ex:
         log.exception(f'Error trying to update visibilty timeout of downsample job: {ex}')
         raise
+
 
 def downsample_channel(args):
     """
