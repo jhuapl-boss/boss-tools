@@ -172,32 +172,45 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         mock_rand = self.patch_object(self.rh.random, 'random', return_value=0.1234)
 
     def get_args(self, scale=2, **kwargs):
+        """Create args dict for input to the step function.
+
+        Args:
+            scale (int):
+            kwargs (dict): Keywords replace key-values in the 'msg' nested dict
+
+        Returns:
+            (dict)
+        """
         cube_size = md.XYZ(*CUBOIDSIZE()[0])
         frame_stop = cube_size * scale
         args = {
             # Only including keys that the Activity uses, the others are passed
             # to the downsample_volume lambda without inspection
-            'downsample_volume_lambda': 'lambda-arn',
+            'msg': {
+                'downsample_volume_lambda': 'lambda-arn',
 
-            'x_start': 0,
-            'y_start': 0,
-            'z_start': 0,
+                'x_start': 0,
+                'y_start': 0,
+                'z_start': 0,
 
-            'x_stop': int(frame_stop.x), # int() to handle float scale multiplication results
-            'y_stop': int(frame_stop.y),
-            'z_stop': int(frame_stop.z),
+                'x_stop': int(frame_stop.x), # int() to handle float scale multiplication results
+                'y_stop': int(frame_stop.y),
+                'z_stop': int(frame_stop.z),
 
-            'resolution': 0,
-            'resolution_max': 3,
-            'res_lt_max': True,
+                'resolution': 0,
+                'resolution_max': 3,
+                'res_lt_max': True,
 
-            'type': 'isotropic',
-            'iso_resolution': 3,
+                'type': 'isotropic',
+                'iso_resolution': 3,
+
+                'lookup_key': 'fake_lookup_key',
+            },
 
             'queue_url': DOWNSAMPLE_QUEUE_URL,
             'job_receipt_handle': RECEIPT_HANDLE,
         }
-        args.update(kwargs)
+        args['msg'].update(kwargs)
 
         return args
 
@@ -217,7 +230,7 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args = {
             'bucket_size': self.rh.BUCKET_SIZE,
-            'args': self.get_args(type='isotropic'), # Need the original arguments
+            'args': self.get_args(type='isotropic')['msg'], # Need the original arguments
             'step': md.XYZ(2,2,2),
             'dim': md.XYZ(512, 512, 16),
             'use_iso_flag': False,
@@ -225,7 +238,7 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
         }
         expected = call(ceildiv(self.mock_populate_cubes.return_value, self.rh.BUCKET_SIZE) + self.rh.EXTRA_LAMBDAS,
-                        args1['downsample_volume_lambda'],
+                        args1['msg']['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
                         SQS_URL + 'downsample-cubes-1234',
@@ -233,12 +246,12 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
                         RECEIPT_HANDLE)
         self.assertEqual(self.mock_launch_lambdas.mock_calls, [expected])
 
-        self.assertEqual(args2['x_stop'], 512)
-        self.assertEqual(args2['y_stop'], 512)
-        self.assertEqual(args2['z_stop'], 16)
+        self.assertEqual(args2['msg']['x_stop'], 512)
+        self.assertEqual(args2['msg']['y_stop'], 512)
+        self.assertEqual(args2['msg']['z_stop'], 16)
 
-        self.assertEqual(args2['resolution'], 1)
-        self.assertTrue(args2['res_lt_max'])
+        self.assertEqual(args2['msg']['resolution'], 1)
+        self.assertTrue(args2['msg']['res_lt_max'])
 
         expected = [call(SQS_URL + 'downsample-dlq-1234'),
                     call(SQS_URL + 'downsample-cubes-1234')]
@@ -260,7 +273,7 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args = {
             'bucket_size': self.rh.BUCKET_SIZE,
-            'args': self.get_args(type='anisotropic'), # Need the original arguments
+            'args': self.get_args(type='anisotropic')['msg'], # Need the original arguments
             'step': md.XYZ(2,2,1),
             'dim': md.XYZ(512, 512, 16),
             'use_iso_flag': False,
@@ -268,7 +281,7 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
         }
         expected = call(ceildiv(self.mock_populate_cubes.return_value, self.rh.BUCKET_SIZE) + self.rh.EXTRA_LAMBDAS,
-                        args1['downsample_volume_lambda'],
+                        args1['msg']['downsample_volume_lambda'],
                         json.dumps(args).encode('UTF8'),
                         SQS_URL + 'downsample-dlq-1234',
                         SQS_URL + 'downsample-cubes-1234',
@@ -276,14 +289,14 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
                         RECEIPT_HANDLE)
         self.assertEqual(self.mock_launch_lambdas.mock_calls, [expected])
 
-        self.assertEqual(args2['x_stop'], 512)
-        self.assertEqual(args2['y_stop'], 512)
-        self.assertEqual(args2['z_stop'], 32)
+        self.assertEqual(args2['msg']['x_stop'], 512)
+        self.assertEqual(args2['msg']['y_stop'], 512)
+        self.assertEqual(args2['msg']['z_stop'], 32)
 
-        self.assertNotIn('iso_x_start', args2)
+        self.assertNotIn('iso_x_start', args2['msg'])
 
-        self.assertEqual(args2['resolution'], 1)
-        self.assertTrue(args2['res_lt_max'])
+        self.assertEqual(args2['msg']['resolution'], 1)
+        self.assertTrue(args2['msg']['res_lt_max'])
 
         expected = [call(SQS_URL + 'downsample-dlq-1234'),
                     call(SQS_URL + 'downsample-cubes-1234')]
@@ -294,11 +307,11 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
-        self.assertIn('iso_x_start', args2)
+        self.assertIn('iso_x_start', args2['msg'])
 
-        self.assertEqual(args2['iso_x_stop'], 512)
-        self.assertEqual(args2['iso_y_stop'], 512)
-        self.assertEqual(args2['iso_z_stop'], 16)
+        self.assertEqual(args2['msg']['iso_x_stop'], 512)
+        self.assertEqual(args2['msg']['iso_y_stop'], 512)
+        self.assertEqual(args2['msg']['iso_z_stop'], 16)
 
     def test_downsample_channel_aniso_post_split(self):
         args1 = self.get_args(type='anisotropic',
@@ -318,13 +331,13 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
                          md.XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected, expected1])
 
-        self.assertEqual(args2['x_stop'], 512)
-        self.assertEqual(args2['y_stop'], 512)
-        self.assertEqual(args2['z_stop'], 32)
+        self.assertEqual(args2['msg']['x_stop'], 512)
+        self.assertEqual(args2['msg']['y_stop'], 512)
+        self.assertEqual(args2['msg']['z_stop'], 32)
 
-        self.assertEqual(args2['iso_x_stop'], 512)
-        self.assertEqual(args2['iso_y_stop'], 512)
-        self.assertEqual(args2['iso_z_stop'], 16)
+        self.assertEqual(args2['msg']['iso_x_stop'], 512)
+        self.assertEqual(args2['msg']['iso_y_stop'], 512)
+        self.assertEqual(args2['msg']['iso_z_stop'], 16)
 
     def test_downsample_channel_not_even(self):
         args1 = self.get_args(type='isotropic', scale=2.5)
@@ -337,9 +350,9 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
                         md.XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
-        self.assertEqual(args2['x_stop'], 640) # 640 = 512 * 2.5 / 2 (scaled up volume and then downsampled)
-        self.assertEqual(args2['y_stop'], 640)
-        self.assertEqual(args2['z_stop'], 20) # 20 = 16 * 2.5 / 2
+        self.assertEqual(args2['msg']['x_stop'], 640) # 640 = 512 * 2.5 / 2 (scaled up volume and then downsampled)
+        self.assertEqual(args2['msg']['y_stop'], 640)
+        self.assertEqual(args2['msg']['z_stop'], 20) # 20 = 16 * 2.5 / 2
 
     def test_downsample_channel_non_zero_start(self):
         ###### NOTES ######
@@ -362,13 +375,13 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
                         md.XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
-        self.assertEqual(args2['x_start'], 2496)
-        self.assertEqual(args2['y_start'], 2496)
-        self.assertEqual(args2['z_start'], 616)
+        self.assertEqual(args2['msg']['x_start'], 2496)
+        self.assertEqual(args2['msg']['y_start'], 2496)
+        self.assertEqual(args2['msg']['z_start'], 616)
 
-        self.assertEqual(args2['x_stop'], 3008)
-        self.assertEqual(args2['y_stop'], 3008)
-        self.assertEqual(args2['z_stop'], 632)
+        self.assertEqual(args2['msg']['x_stop'], 3008)
+        self.assertEqual(args2['msg']['y_stop'], 3008)
+        self.assertEqual(args2['msg']['z_stop'], 632)
 
     def test_downsample_channel_before_stop(self):
         args1 = self.get_args(type='isotropic',
@@ -376,8 +389,8 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
-        self.assertEqual(args2['resolution'], 1)
-        self.assertTrue(args2['res_lt_max'])
+        self.assertEqual(args2['msg']['resolution'], 1)
+        self.assertTrue(args2['msg']['res_lt_max'])
 
     def test_downsample_channel_at_stop(self):
         args1 = self.get_args(type='isotropic',
@@ -385,8 +398,8 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
-        self.assertEqual(args2['resolution'], 2)
-        self.assertFalse(args2['res_lt_max'])
+        self.assertEqual(args2['msg']['resolution'], 2)
+        self.assertFalse(args2['msg']['res_lt_max'])
 
     def test_downsample_channel_after_stop(self):
         ###### NOTES ######
@@ -396,8 +409,8 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
 
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
-        self.assertEqual(args2['resolution'], 3)
-        self.assertFalse(args2['res_lt_max'])
+        self.assertEqual(args2['msg']['resolution'], 3)
+        self.assertFalse(args2['msg']['res_lt_max'])
 
 class TestChunk(unittest.TestCase):
     @classmethod

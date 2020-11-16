@@ -76,6 +76,8 @@ class TestCheckDownsampleQueue(TestCaseWithPatchObject):
     def test_msg_available(self):
         self.configure()
         msg = {
+            'db_host': 'thedb.boss',
+            'channel_id': '2',
             'some-fake-keys': 'to verify msg contents',
             'are': 'included with in the dict',
             'returned': 'by check_downsample_queue()',
@@ -84,9 +86,10 @@ class TestCheckDownsampleQueue(TestCaseWithPatchObject):
         exp = {
             'start_downsample': True,
             'queue_url': self.url,
+            'sfn_arn': self.sut_args['sfn_arn'],
             'status': self.DownsampleStatus.IN_PROGRESS,
+            'msg': msg,
         }
-        exp.update(msg)
         actual = self.sut(self.sut_args)
         # This is the non-deprecated way of doing self.assertDictContainsSubset().
         self.assertGreaterEqual(actual.items(), exp.items())
@@ -133,17 +136,18 @@ class TestDeleteDownSampleJob(TestCaseWithPatchObject):
         sqs = self.session.client('sqs')
         sqs.send_message(QueueUrl=self.url, MessageBody=json.dumps(msg))
         resp = sqs.receive_message(QueueUrl=self.url)
+        lookup_key = 'fake-lookup-key'
         args = {
             'queue_url': self.url,
             'job_receipt_handle': resp['Messages'][0]['ReceiptHandle'],
             'sfn_arn': self.sfn_arn,
             'db_host': db_host,
+            'lookup_key': lookup_key,
         }
         exp = {
             'queue_url': self.url,
             'sfn_arn': self.sfn_arn,
-            'db_host': db_host,
-            'status': self.DownsampleStatus.DOWNSAMPLED,
+            'lookup_key': lookup_key,
         }
 
         actual = self.sut(args)

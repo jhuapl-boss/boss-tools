@@ -74,6 +74,7 @@ class BossActivityManager(ActivityManager):
             key('CheckDownsampleQueue'): rh.check_downsample_queue,
             key('DownsampleChannel'): rh.downsample_channel,
             key('DeleteDownsampleJob'): rh.delete_downsample_job,
+            key('SetDownsampleArn'): boss_db.set_downsample_arn_in_db,
             key('UpdateDownsampleStatus'): boss_db.update_downsample_status_in_db,
             key('ClearCacheAfterDownsample'): rh.clear_cache,
 

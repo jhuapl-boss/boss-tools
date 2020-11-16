@@ -143,10 +143,13 @@ def check_downsample_queue(args):
             'queue_url': <URL of SQS queue>,
             'sfn_arn': <arn of the downsample step fcn>,
             'status': 'IN_PROGRESS',
+            'db_host': <host name of database>
+            'channel_id': <id of channel for downsample>
             ... }
             if start_downsample, then args for downsample_channel() provided including
             job_receipt_handle so message's visibility timeout can be
-            adjusted or be deleted from the queue.
+            adjusted or be deleted from the queue.  The message's contents are
+            provided in 'msg', if one is available.
     """
     session = aws.get_session()
     sqs = session.client('sqs')
@@ -156,12 +159,18 @@ def check_downsample_queue(args):
 
     msg = resp['Messages'][0]
     job = json.loads(msg['Body'])
-    job['start_downsample'] = True
-    job['job_receipt_handle'] = msg['ReceiptHandle']
-    job['queue_url'] = args['queue_url']
-    job['sfn_arn'] = args['sfn_arn']
-    job['status'] = DownsampleStatus.IN_PROGRESS
-    return job
+    output = {
+        'start_downsample': True,
+        'job_receipt_handle': msg['ReceiptHandle'],
+        'queue_url': args['queue_url'],
+        'sfn_arn': args['sfn_arn'],
+        'status': DownsampleStatus.IN_PROGRESS,
+        'db_host': job['db_host'],
+        'channel_id': job['channel_id'],
+        'msg': job,
+    }
+
+    return output
 
 
 def delete_downsample_job(args):
@@ -173,10 +182,9 @@ def delete_downsample_job(args):
 
     Args:
         args (dict): {
+            'sfn_arn': ARN of this step function,,
             'queue_url': <URL of SQS queue>,
             'job_receipt_handle': <msg's receipt handle,
-            'db_host':
-            'channel_id': <channel id>,
             'lookup_key': <full lookup key of channel>,
             ...
         }
@@ -185,10 +193,7 @@ def delete_downsample_job(args):
         (dict): {
             'queue_url': <URL of SQS queue>,
             'sfn_arn': <arn of the downsample step fcn>,
-            'db_host': MySQL host name,
-            'channel_id': <channel id>,
             'lookup_key': <full lookup key of channel>,
-            'status': 'DOWNSAMPLED'
         }
     """
     try:
@@ -199,10 +204,7 @@ def delete_downsample_job(args):
         return {
             'sfn_arn': args['sfn_arn'],
             'queue_url': args['queue_url'],
-            'db_host': args['db_host'],
-            'channel_id': args['channel_id'],
             'lookup_key': args['lookup_key'],
-            'status': DownsampleStatus.DOWNSAMPLED,
         }
     except Exception as ex:
         log.exception(f'Error trying to downsample job from SQS: {ex}')
@@ -215,7 +217,7 @@ def clear_cache(args):
 
     Args:
         args (dict): {
-            'sfn_arn': args['sfn_arn'],
+            'sfn_arn': ARN of this step function,,
             'queue_url': args['queue_url'],
             'lookup_key': <full lookup key of channel>,
         }
@@ -292,62 +294,62 @@ def downsample_channel(args):
 
     Args:
         args {
-            downsample_volume_lambda (ARN | lambda name)
+            msg { (this holds the contents of the msg from the downsample queue)
+                downsample_volume_lambda (ARN | lambda name)
 
-            collection_id (int)
-            experiment_id (int)
-            channel_id (int)
-            annotation_channel (bool)
-            data_type (str) 'uint8' | 'uint16' | 'uint64'
+                collection_id (int)
+                experiment_id (int)
+                channel_id (int)
+                annotation_channel (bool)
+                data_type (str) 'uint8' | 'uint16' | 'uint64'
 
-            s3_bucket (URL)
-            s3_index (URL)
+                s3_bucket (URL)
+                s3_index (URL)
 
-            x_start (int)
-            y_start (int)
-            z_start (int)
+                x_start (int)
+                y_start (int)
+                z_start (int)
 
-            x_stop (int)
-            y_stop (int)
-            z_stop (int)
+                x_stop (int)
+                y_stop (int)
+                z_stop (int)
 
-            resolution (int) The resolution to downsample. Creates resolution + 1
-            resolution_max (int) The maximum resolution to generate
-            res_lt_max (bool) = args['resolution'] < (args['resolution_max'] - 1)
+                resolution (int) The resolution to downsample. Creates resolution + 1
+                resolution_max (int) The maximum resolution to generate
+                res_lt_max (bool) = args['msg']['resolution'] < (args['msg']['resolution_max'] - 1)
 
-            type (str) 'isotropic' | 'anisotropic'
-            iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
+                type (str) 'isotropic' | 'anisotropic'
+                iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
 
-            aws_region (str) AWS region to run in such as us-east-1
-
-            start_downsample (bool) Used by previous state to indicate that a downsample job exists
+                aws_region (str) AWS region to run in such as us-east-1
+            }
             job_receipt_handle (str) Used by downstream state to delete the downsample job from queue
             queue_url (str) URL of downsample queue; downstream state deletes from this queue
             sfn_arn (str) <arn of the downsample step fcn>
             db_host (str) Host of MySQL database.
         }
 
-    Return:
-        dict: An updated argument dictionary containing the shrunk frame,
-              resolution, and res_lt_max values
+    Returns:
+        (dict): An updated argument dictionary containing the shrunk frame,
+                resolution, res_lt_max values, and lookup_key
     """
 
     # TODO: load downsample_volume_lambda from boss config
 
-    #log.debug("Downsampling resolution " + str(args['resolution']))
+    #log.debug("Downsampling resolution " + str(args['msg']['resolution']))
 
-    resolution = args['resolution']
+    resolution = args['msg']['resolution']
 
     dim = XYZ(*CUBOIDSIZE[resolution])
     #log.debug("Cube dimensions: {}".format(dim))
 
     def frame(key):
-        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
+        return XYZ(args['msg'][key.format('x')], args['msg'][key.format('y')], args['msg'][key.format('z')])
 
     # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
     # downsampling. If both are happening, fanout one and then the other in series.
     configs = []
-    if args['type'] == 'isotropic':
+    if args['msg']['type'] == 'isotropic':
         configs.append({
             'name': 'isotropic',
             'step': XYZ(2,2,2),
@@ -365,15 +367,15 @@ def downsample_channel(args):
         })
 
         # if this iteration will split into aniso and iso downsampling, copy the coordinate frame
-        if resolution == args['iso_resolution']:
+        if resolution == args['msg']['iso_resolution']:
             def copy(var):
-                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+                args['msg']['iso_{}_start'.format(var)] = args['msg']['{}_start'.format(var)]
+                args['msg']['iso_{}_stop'.format(var)] = args['msg']['{}_stop'.format(var)]
             copy('x')
             copy('y')
             copy('z')
 
-        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+        if resolution >= args['msg']['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             configs.append({
                 'name': 'isotropic',
                 'step': XYZ(2,2,2),
@@ -424,7 +426,7 @@ def downsample_channel(args):
             lambda_count = ceildiv(cube_count, BUCKET_SIZE) + EXTRA_LAMBDAS
             lambda_args = {
                 'bucket_size': BUCKET_SIZE,
-                'args': args,
+                'args': args['msg'],
                 'step': step,
                 'dim': dim,
                 'use_iso_flag': use_iso_flag,
@@ -433,7 +435,7 @@ def downsample_channel(args):
             }
 
             launch_lambdas(lambda_count,
-                           args['downsample_volume_lambda'],
+                           args['msg']['downsample_volume_lambda'],
                            json.dumps(lambda_args).encode('UTF8'),
                            dlq_arn,
                            cubes_arn,
@@ -445,8 +447,8 @@ def downsample_channel(args):
             def resize(var, size):
                 start = config['frame_start_key'].format(var)
                 stop = config['frame_stop_key'].format(var)
-                args[start] //= size
-                args[stop] = ceildiv(args[stop], size)
+                args['msg'][start] //= size
+                args['msg'][stop] = ceildiv(args['msg'][stop], size)
             resize('x', step.x)
             resize('y', step.y)
             resize('z', step.z)
@@ -457,8 +459,11 @@ def downsample_channel(args):
     # Advance the loop and recalculate the conditional
     # Using max - 1 because resolution_max should not be a valid resolution
     # and res < res_max will end with res = res_max - 1, which generates res_max resolution
-    args['resolution'] = resolution + 1
-    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
+    args['msg']['resolution'] = resolution + 1
+    args['msg']['res_lt_max'] = args['msg']['resolution'] < (args['msg']['resolution_max'] - 1)
+
+    # Move this up one level for use by states that follow.
+    args['lookup_key'] = args['msg']['lookup_key']
     return args
 
 def chunk(xs, size):
