@@ -99,7 +99,8 @@ def get_fanout_args(event):
         'cuboid_object_key': event['cuboid_object_key'],
         'version': event['version'],
         'max_write_id_index_lambdas': max_execs,
-        'id_index_step_fcn': event['id_index_step_fcn']
+        'id_index_step_fcn': event['id_index_step_fcn'],
+        'num_ids_per_worker': NUM_IDS_PER_WORKER,
     }
 
     fanout_args = event
