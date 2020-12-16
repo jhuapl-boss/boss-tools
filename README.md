@@ -57,6 +57,13 @@ environment variable:
 export PYTHONPATH=~/Documents/MICrONS:~/Documents/MICrONS/spdb:~/Documents/MICrONS/boss-manage/lib/heaviside.git
 ```
 
+In the ndingest repo:
+
+```shell
+cd settings
+cp settings.ini.test settings.ini
+```
+
 #### Running
 
 Run tests from the root of the repo, but run each sub-folder separately.
