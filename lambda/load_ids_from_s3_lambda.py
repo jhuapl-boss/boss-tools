@@ -28,8 +28,7 @@
 #
 # Outputs (modified or added):
 # {
-#   'id_chunks': [...]                # List of ids to update in id index table.
-#   'finished': False
+#   'id_chunks': [[...], [...], ...]    # List of list of ids to update in id index table.
 # }
 
 import boto3
@@ -50,7 +49,6 @@ def handler(event, context):
     if "Item" not in resp or IDSET_ATTR not in resp["Item"]:
         # No ids found, so nothing to do.
         event["id_chunks"] = []
-        event["finished"] = True
         return event
 
     # Allow a KeyError if 'NS' not found.  The step function will abort on
@@ -65,7 +63,6 @@ def handler(event, context):
         ids[get_chunk_indices(start, id_chunk_size, total_ids, i)]
         for i in range(num_chunks)
     ]
-    event["finished"] = False
 
     return event
 

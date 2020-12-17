@@ -72,7 +72,6 @@ class TestLoadIdsFromS3Lambda(unittest.TestCase):
         }
 
         exp = dict(event)
-        exp["finished"] = False
         exp["id_chunks"] = [
             [20, 21, 22, 23, 24],
             [25, 26, 27, 28, 29],
@@ -91,7 +90,7 @@ class TestLoadIdsFromS3Lambda(unittest.TestCase):
 
             self.assertDictEqual(exp, actual)
 
-    def test_without_dynamo_finished(self):
+    def test_without_dynamo_no_ids(self):
         event = {
             "num_ids_per_worker": 20,
             "id_chunk_size": 5,
@@ -106,7 +105,6 @@ class TestLoadIdsFromS3Lambda(unittest.TestCase):
         }
 
         exp = dict(event)
-        exp["finished"] = True
         exp["id_chunks"] = []
 
         with patch(
