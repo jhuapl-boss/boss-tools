@@ -17,7 +17,6 @@
 #              'object_store_config': {...}},
 #   'cuboid_ids_bucket': '...',
 #   'id_index_step_fcn': '...', # arn of step function
-#   'fanout_id_writers_step_fcn': '...',    # step func arn
 #   'cuboid_object_key': '...',
 #   'version': '...',
 #   'max_write_id_index_lambdas': int,
