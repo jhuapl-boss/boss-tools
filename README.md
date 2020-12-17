@@ -33,6 +33,9 @@ Unit tests for the lambda functions.
 
 ### Running Tests
 
+If these directions end up out of date, the CircleCI configuration can be
+inspected for additional guidance: `.circleci/config.yml`
+
 #### Required Symlink
 The lambda functions require Python files contained in `boss-manage.git/lib`.
 Make these available by creating a symlink to that folder on your machine and
@@ -57,12 +60,34 @@ environment variable:
 export PYTHONPATH=~/Documents/MICrONS:~/Documents/MICrONS/spdb:~/Documents/MICrONS/boss-manage/lib/heaviside.git
 ```
 
+##### ndingest Setup
+
 In the ndingest repo:
 
 ```shell
 cd settings
 cp settings.ini.test settings.ini
 ```
+
+##### cachemgr Setup
+
+The cache manager tests need `/etc/boss/boss.config` and they need to be able
+to write log output to `/var/log/boss`.
+
+From the root of this repo:
+
+```shell
+sudo mkdir -p /var/log/boss
+sudo chown <your username> /var/log/boss
+sudo mkdir -p /etc/boss
+sudo chown <your username> /etc/boss
+cp cachemgr/test/boss.config /etc/boss
+```
+
+##### spdb Setup
+
+spdb has a C library that must be compiled.  See its `README.md` for
+instructions on building.
 
 #### Running
 
