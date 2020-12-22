@@ -1,4 +1,4 @@
-# Copyright 2016 The Johns Hopkins University Applied Physics Laboratory
+# Copyright 2020 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+The activities in this file manage a downsample.
+See boss-manage.git/cloud_formation/stepfunctions/resolution_hierarchy.hsd
+as well as boss-manage.git/docs/downsample.
+
+Note that there are several SQS queues used during downsample.  There is the
+downsample job queue which holds independent downsample jobs waiting for
+processing.  This queue is "permanent".
+
+Other SQS queues are created while running a downsample job.  These hold
+cuboids waiting for downsampling.
+"""
+
 from bossutils import aws, logger
+from bossutils.configuration import BossConfig
 from spdb.c_lib.ndtype import CUBOIDSIZE
 
 from bossutils.multidimensional import XYZ, ceildiv
 from bossutils.multidimensional import range as xyz_range
 
-import types
+from spdb.spatialdb.rediskvio import RedisKVIO
+
 import json
 import time
 import random
@@ -26,6 +41,22 @@ from multiprocessing import Pool, cpu_count
 from datetime import timedelta, datetime
 
 log = logger.bossLogger()
+
+
+class DownsampleStatus:
+    """
+    String values are actual values stored in DB.
+
+    Taken from boss.git/django/bosscore/models.py
+
+    ToDo: consider making a separate shared repo with constants that the
+    Django repo, step functions, and lambdas can all import.
+    """
+    NOT_DOWNSAMPLED = 'NOT_DOWNSAMPLED'
+    IN_PROGRESS = 'IN_PROGRESS'
+    DOWNSAMPLED = 'DOWNSAMPLED'
+    FAILED = 'FAILED'
+    QUEUED = 'QUEUED'
 
 ######################################################
 ### Configure Remote Debugging via SIGUSR1 trigger ###
@@ -51,6 +82,10 @@ BUCKET_SIZE = 8
 
 # datetime.delta: The runtime of the downsample_volume lambda
 MAX_LAMBDA_TIME = timedelta(seconds=120)
+
+# Periodically update downsample job's SQS visibility timeout so it doesn't
+# get redelivered.
+NEW_VISIBILITY_TIMEOUT = MAX_LAMBDA_TIME * 2
 
 # int: The number of status poll cycles that have the same count for more
 #      lambdas to be launched (total time is UNCHANGING_LAUNCH * MAX_LAMBDA_TIME)
@@ -78,16 +113,172 @@ EXTRA_LAMBDAS = 10
 
 ###########################################################
 
+
 class ResolutionHierarchyError(Exception):
     pass
 
+
 class LambdaLaunchError(ResolutionHierarchyError):
     pass
+
 
 class FailedLambdaError(ResolutionHierarchyError):
     def __init__(self):
         msg = "A Lambda failed execution"
         super().__init__(msg)
+
+
+def check_downsample_queue(args):
+    """
+    Check queue for downsample jobs.
+
+    Also marks downsample as in progress if message found.
+
+    Args:
+        (dict): { 'queue_url': <URL of SQS queue>, 'sfn_arn': <arn of the downsample step fcn> }
+
+    Returns:
+        (dict): {
+            'start_downsample': True | False,
+            'queue_url': <URL of SQS queue>,
+            'sfn_arn': <arn of the downsample step fcn>,
+            'status': 'IN_PROGRESS',
+            'db_host': <host name of database>
+            'channel_id': <id of channel for downsample>
+            ... }
+            if start_downsample, then args for downsample_channel() provided including
+            job_receipt_handle so message's visibility timeout can be
+            adjusted or be deleted from the queue.  The message's contents are
+            provided in 'msg', if one is available.
+    """
+    session = aws.get_session()
+    sqs = session.client('sqs')
+    resp = sqs.receive_message(QueueUrl=args['queue_url'], WaitTimeSeconds=2, MaxNumberOfMessages=1)
+    if 'Messages' not in resp or len(resp['Messages']) == 0:
+        return { 'start_downsample': False }
+
+    msg = resp['Messages'][0]
+    job = json.loads(msg['Body'])
+    output = {
+        'start_downsample': True,
+        'job_receipt_handle': msg['ReceiptHandle'],
+        'queue_url': args['queue_url'],
+        'sfn_arn': args['sfn_arn'],
+        'status': DownsampleStatus.IN_PROGRESS,
+        'db_host': job['db_host'],
+        'channel_id': job['channel_id'],
+        'msg': job,
+    }
+
+    return output
+
+
+def delete_downsample_job(args):
+    """
+    Delete the message for the finished downsample job from SQS.
+
+    Returns a dict that allows the last state to start a new instance of the
+    downsample step function.
+
+    Args:
+        args (dict): {
+            'sfn_arn': ARN of this step function,,
+            'queue_url': <URL of SQS queue>,
+            'job_receipt_handle': <msg's receipt handle,
+            'lookup_key': <full lookup key of channel>,
+            ...
+        }
+
+    Returns:
+        (dict): {
+            'queue_url': <URL of SQS queue>,
+            'sfn_arn': <arn of the downsample step fcn>,
+            'lookup_key': <full lookup key of channel>,
+        }
+    """
+    try:
+        session = aws.get_session()
+        sqs = session.client('sqs')
+        sqs.delete_message(QueueUrl=args['queue_url'], ReceiptHandle=args['job_receipt_handle'])
+        log.info(f"Deleting SQS message for downsample of {args['lookup_key']}")
+        return {
+            'sfn_arn': args['sfn_arn'],
+            'queue_url': args['queue_url'],
+            'lookup_key': args['lookup_key'],
+        }
+    except Exception as ex:
+        log.exception(f'Error trying to downsample job from SQS: {ex}')
+        raise
+
+
+def clear_cache(args):
+    """
+    Clear any cuboids for the newly downsampled channel from the Redis cache.
+
+    Args:
+        args (dict): {
+            'sfn_arn': ARN of this step function,,
+            'queue_url': args['queue_url'],
+            'lookup_key': <full lookup key of channel>,
+        }
+
+    Returns:
+        args (dict): {
+            'sfn_arn': args['sfn_arn'],
+            'queue_url': args['queue_url'],
+        }
+    """
+    config = BossConfig()
+    kvio_settings = {"cache_host": config['aws']['cache'],
+                     "cache_db": int(config['aws']['cache-db']),
+                     "read_timeout": 1209600}  # two weeks.
+
+    lookup_key = args['lookup_key']
+    log.info(f'Clearing cuboid cache for {lookup_key}')
+    for pattern in ("CACHED-CUBOID&"+lookup_key+"&*",
+                    "CACHED-CUBOID&ISO&"+lookup_key+"&*"):
+        log.debug("Clearing cache of {} cubes".format(pattern))
+        try:
+            cache = RedisKVIO(kvio_settings)
+            pipe = cache.cache_client.pipeline()
+            for key in cache.cache_client.scan_iter(match=pattern):
+                pipe.delete(key)
+            pipe.execute()
+        except Exception as ex:
+            log.exception(f"Problem clearing cache after downsample finished: {ex}")
+
+    return {
+        'sfn_arn': args['sfn_arn'],
+        'queue_url': args['queue_url'],
+    }
+
+
+def update_visibility_timeout(queue_url, receipt_handle):
+    """
+    Update the visibility timeout of the message for the current downsample job.
+
+    This keeps the message from getting redelivered while the downsample is
+    still running.
+
+    Args:
+        queue_url (str): URL of SQS queue.
+        receipt_handle (str): Message's receipt handle.
+
+    Returns:
+
+    Raises:
+    """
+    try:
+        session = aws.get_session()
+        sqs = session.client('sqs')
+        sqs.change_message_visibility(
+            QueueUrl=queue_url,
+            ReceiptHandle=receipt_handle,
+            VisibilityTimeout=NEW_VISIBILITY_TIMEOUT.seconds)
+    except Exception as ex:
+        log.exception(f'Error trying to update visibilty timeout of downsample job: {ex}')
+        raise
+
 
 def downsample_channel(args):
     """
@@ -103,56 +294,62 @@ def downsample_channel(args):
 
     Args:
         args {
-            downsample_volume_lambda (ARN | lambda name)
+            msg { (this holds the contents of the msg from the downsample queue)
+                downsample_volume_lambda (ARN | lambda name)
 
-            collection_id (int)
-            experiment_id (int)
-            channel_id (int)
-            annotation_channel (bool)
-            data_type (str) 'uint8' | 'uint16' | 'uint64'
+                collection_id (int)
+                experiment_id (int)
+                channel_id (int)
+                annotation_channel (bool)
+                data_type (str) 'uint8' | 'uint16' | 'uint64'
 
-            s3_bucket (URL)
-            s3_index (URL)
+                s3_bucket (URL)
+                s3_index (URL)
 
-            x_start (int)
-            y_start (int)
-            z_start (int)
+                x_start (int)
+                y_start (int)
+                z_start (int)
 
-            x_stop (int)
-            y_stop (int)
-            z_stop (int)
+                x_stop (int)
+                y_stop (int)
+                z_stop (int)
 
-            resolution (int) The resolution to downsample. Creates resolution + 1
-            resolution_max (int) The maximum resolution to generate
-            res_lt_max (bool) = args['resolution'] < (args['resolution_max'] - 1)
+                resolution (int) The resolution to downsample. Creates resolution + 1
+                resolution_max (int) The maximum resolution to generate
+                res_lt_max (bool) = args['msg']['resolution'] < (args['msg']['resolution_max'] - 1)
 
-            type (str) 'isotropic' | 'anisotropic'
-            iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
+                type (str) 'isotropic' | 'anisotropic'
+                iso_resolution (int) if resolution >= iso_resolution && type == 'anisotropic' downsample both
 
-            aws_region (str) AWS region to run in such as us-east-1
+                aws_region (str) AWS region to run in such as us-east-1
+            }
+            job_receipt_handle (str) Used by downstream state to delete the downsample job from queue
+            queue_url (str) URL of downsample queue; downstream state deletes from this queue
+            sfn_arn (str) <arn of the downsample step fcn>
+            db_host (str) Host of MySQL database.
         }
 
-    Return:
-        dict: An updated argument dictionary containing the shrunk frame,
-              resolution, and res_lt_max values
+    Returns:
+        (dict): An updated argument dictionary containing the shrunk frame,
+                resolution, res_lt_max values, and lookup_key
     """
 
     # TODO: load downsample_volume_lambda from boss config
 
-    #log.debug("Downsampling resolution " + str(args['resolution']))
+    #log.debug("Downsampling resolution " + str(args['msg']['resolution']))
 
-    resolution = args['resolution']
+    resolution = args['msg']['resolution']
 
     dim = XYZ(*CUBOIDSIZE[resolution])
     #log.debug("Cube dimensions: {}".format(dim))
 
     def frame(key):
-        return XYZ(args[key.format('x')], args[key.format('y')], args[key.format('z')])
+        return XYZ(args['msg'][key.format('x')], args['msg'][key.format('y')], args['msg'][key.format('z')])
 
     # Figure out variables for isotropic, anisotropic, or isotropic and anisotropic
     # downsampling. If both are happening, fanout one and then the other in series.
     configs = []
-    if args['type'] == 'isotropic':
+    if args['msg']['type'] == 'isotropic':
         configs.append({
             'name': 'isotropic',
             'step': XYZ(2,2,2),
@@ -170,15 +367,15 @@ def downsample_channel(args):
         })
 
         # if this iteration will split into aniso and iso downsampling, copy the coordinate frame
-        if resolution == args['iso_resolution']:
+        if resolution == args['msg']['iso_resolution']:
             def copy(var):
-                args['iso_{}_start'.format(var)] = args['{}_start'.format(var)]
-                args['iso_{}_stop'.format(var)] = args['{}_stop'.format(var)]
+                args['msg']['iso_{}_start'.format(var)] = args['msg']['{}_start'.format(var)]
+                args['msg']['iso_{}_stop'.format(var)] = args['msg']['{}_stop'.format(var)]
             copy('x')
             copy('y')
             copy('z')
 
-        if resolution >= args['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
+        if resolution >= args['msg']['iso_resolution']: # DP TODO: Figure out how to launch aniso iso version with mutating arguments
             configs.append({
                 'name': 'isotropic',
                 'step': XYZ(2,2,2),
@@ -229,7 +426,7 @@ def downsample_channel(args):
             lambda_count = ceildiv(cube_count, BUCKET_SIZE) + EXTRA_LAMBDAS
             lambda_args = {
                 'bucket_size': BUCKET_SIZE,
-                'args': args,
+                'args': args['msg'],
                 'step': step,
                 'dim': dim,
                 'use_iso_flag': use_iso_flag,
@@ -238,18 +435,20 @@ def downsample_channel(args):
             }
 
             launch_lambdas(lambda_count,
-                           args['downsample_volume_lambda'],
+                           args['msg']['downsample_volume_lambda'],
                            json.dumps(lambda_args).encode('UTF8'),
                            dlq_arn,
-                           cubes_arn)
+                           cubes_arn,
+                           args['queue_url'],
+                           args['job_receipt_handle'])
 
             # Resize the coordinate frame extents as the data shrinks
             # DP NOTE: doesn't currently work correctly with non-zero frame starts
             def resize(var, size):
                 start = config['frame_start_key'].format(var)
                 stop = config['frame_stop_key'].format(var)
-                args[start] //= size
-                args[stop] = ceildiv(args[stop], size)
+                args['msg'][start] //= size
+                args['msg'][stop] = ceildiv(args['msg'][stop], size)
             resize('x', step.x)
             resize('y', step.y)
             resize('z', step.z)
@@ -260,8 +459,11 @@ def downsample_channel(args):
     # Advance the loop and recalculate the conditional
     # Using max - 1 because resolution_max should not be a valid resolution
     # and res < res_max will end with res = res_max - 1, which generates res_max resolution
-    args['resolution'] = resolution + 1
-    args['res_lt_max'] = args['resolution'] < (args['resolution_max'] - 1)
+    args['msg']['resolution'] = resolution + 1
+    args['msg']['res_lt_max'] = args['msg']['resolution'] < (args['msg']['resolution_max'] - 1)
+
+    # Move this up one level for use by states that follow.
+    args['lookup_key'] = args['msg']['lookup_key']
     return args
 
 def chunk(xs, size):
@@ -373,7 +575,7 @@ def enqueue_cubes(queue_arn, cubes):
         log.exception("Error caught in process, raising to controller")
         raise ResolutionHierarchyError(str(ex))
 
-def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
+def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn, downsample_queue_url, receipt_handle):
     """Launch lambdas to process all of the target cubes to downsample
 
     Launches an initial set of lambdas and monitors the cubes SQS queue to
@@ -391,6 +593,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         dlq_arn (str): ARN of the SQS DLQ to monitor for error messages
         cubes_arn (str): ARN of the input cubes SQS queue to monitor for
                          completion of the downsample
+        downsample_queue_url (str): URL of downsample job queue
+        receipt_handle (str): Handle of message from downsample queue
     """
     per_lambda = ceildiv(total_count, POOL_SIZE)
     d,m = divmod(total_count, per_lambda)
@@ -459,6 +663,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
                         # Don't update count is there was an error getting the current count
                         prev_throttle = throttle
 
+                    # Tell SQS we're still alive
+                    update_visibility_timeout(downsample_queue_url, receipt_handle)
                     time.sleep(MAX_LAMBDA_TIME.seconds)
 
                     if check_queue(dlq_arn) > 0:
@@ -490,6 +696,8 @@ def launch_lambdas(total_count, lambda_arn, lambda_args, dlq_arn, cubes_arn):
         else:
             zero_count = 0
 
+        # Tell SQS we're still alive
+        update_visibility_timeout(downsample_queue_url, receipt_handle)
         time.sleep(MAX_LAMBDA_TIME.seconds)
 
 def invoke_lambdas(count, lambda_arn, lambda_args, dlq_arn):

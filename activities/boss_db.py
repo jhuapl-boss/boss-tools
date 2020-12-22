@@ -50,6 +50,97 @@ def get_db_connection(host):
                            password=password,
                            db=db_name,
                            port=port,
+                           # Don't turn off autocommit w/o visiting every user
+                           # of this connection and ensuring that they use a
+                           # transaction!
                            autocommit=True,
                            charset='utf8mb4',
                            cursorclass=pymysql.cursors.DictCursor)
+
+def update_downsample_status_in_db(args):
+    """
+    Update the downsample status in the MySQL database.
+
+    This supports a state of the resolution hierarchy step function.
+
+    This function is tested in
+    boss.git/django/bossspatialdb/test/test_update_downsample_status.py.
+    Tests live there because Django owns the DB.
+
+    Args:
+        args (dict):
+            db_host (str): MySQL host name.
+            channel_id (int): ID of channel for downsample.
+            status (str): String from DownsampleStatus class.
+
+    Returns:
+        (dict): Returns input args for passing to next SFN state.
+    """
+    sql = """
+        UPDATE channel
+        SET downsample_status = %(status)s
+        WHERE id = %(chan_id)s
+        """
+
+    db_host = args['db_host']
+    chan_id = args['channel_id']
+    status = args['status']
+
+    sql_args = dict(status=status, chan_id=str(chan_id))
+
+    try:
+        db_connection = get_db_connection(db_host)
+        with db_connection.cursor(pymysql.cursors.SSCursor) as cursor:
+            rows = cursor.execute(sql, sql_args)
+            if rows < 1:
+                LOG.error(
+                    f'DB said no rows updated when trying to set downsample status to {status} for channel {chan_id}'
+                )
+    except Exception as ex:
+        LOG.exception(f'Failed to set downsample status to {status} for channel {chan_id}: {ex}')
+
+    return args
+
+def set_downsample_arn_in_db(args):
+    """
+    Set the arn of the running downsample step function in the MySQL database.
+
+    This supports a state of the resolution hierarchy step function.
+
+    This function is tested in
+    boss.git/django/bossspatialdb/test/test_set_downsample_arn.py.
+    Tests live there because Django owns the DB.
+
+    Args:
+        args (dict):
+            db_host (str): MySQL host name.
+            channel_id (int): ID of channel for downsample.
+            exe_sfn_arn (str): ARN of running downsample step function.
+
+    Returns:
+        (dict): Returns input args for passing to next SFN state.
+    """
+    sql = """
+        UPDATE channel
+        SET downsample_arn = %(arn)s
+        WHERE id = %(chan_id)s
+        """
+
+    db_host = args['db_host']
+    chan_id = args['channel_id']
+    arn = args['exe_sfn_arn']
+
+    sql_args = dict(arn=arn, chan_id=str(chan_id))
+
+    try:
+        db_connection = get_db_connection(db_host)
+        with db_connection.cursor(pymysql.cursors.SSCursor) as cursor:
+            rows = cursor.execute(sql, sql_args)
+            if rows < 1:
+                LOG.error(
+                    f'DB said no rows updated when trying to set downsample arn for channel {chan_id}'
+                )
+    except Exception as ex:
+        LOG.exception(f'Failed to set downsample arn for channel {chan_id}: {ex}')
+
+    return args
