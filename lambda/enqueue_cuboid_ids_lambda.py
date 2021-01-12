@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Objectives
-# 1. helper function to create messages
-# 2. seperate function to enque the messages in batch
-# 3. Failure recovery for any failed messages in the SQS
+"""Enueques cuboid IDs for processing by a step function.
+
+   This lambda will distribute the provided cuboid IDs into multiple SQS messages and enqueue them.
+   There
+"""
 
 import boto3
 import json
@@ -24,7 +25,7 @@ import math
 event_fields = ['ids', 'cuboid_object_key', 'config', 'id_index_step_fcn', 'sqs_url', 'num_ids_per_msg']
 
 def handler(event, context=None):
-    """ Handles the enqueue cuboid ids event.
+    """Handles the enqueue cuboid ids event.
 
     This function will create a set of messages and enqueue them in the SQS queue provided in the event. 
     The ids key should contain a list of cuboid IDs and the num_ids_per_msg key is used to distribute
@@ -33,12 +34,12 @@ def handler(event, context=None):
 
     Args:
         event: dict of parameters for the event
-            ids : list
-            cuboid_object_key : str
-            config : dict
-            id_index_step_fcn : str
-            sqs_url : str
-            num_ids_per_msg : int
+            ids: list of str ids for the cuboid
+            num_ids_per_msg: maximum number of IDs per message
+            sqs_url: str
+            cuboid_object_key: 
+            config: dict
+            id_index_step_fcn: str
 
         context: dict of properties of the lambda call e.g. function_name
 
@@ -75,10 +76,13 @@ def create_messages(event):
     # select the constant fields
     base_fields = [f for f in event_fields if f not in ['ids','num_ids_per_msg'] ]
     base_msg = { f : event[f] for f in base_fields }
+    base_msg['id_group'] = []
 
-    ngroups = int(math.ceil(len(ids)/ids_per_msg))
     # add the block of ids to the base message
-    for i in range(ngroups):
-        offset = ids_per_msg*i
-        base_msg['id_group'] = ids[offset:offset+ids_per_msg]
-        yield json.dumps(base_msg)         
+    for i in ids:
+        base_msg['id_group'].append(i)
+        if len(base_msg['id_group']) == ids_per_msg:
+            yield json.dumps(base_msg)
+            base_msg['id_group'] = []
+    if base_msg['id_group']:
+        yield json.dumps(base_msg)        

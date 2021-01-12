@@ -58,31 +58,32 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         e['num_ids_per_msg'] = n
         return { k : e[k] for k in e if e[k] }
 
-    def try_handler(self, e, r, m):
-        try:
-            handler(e, None)
-        except r as e:
-            self.assertTrue(m in str(e))
-        except:
-            self.fail("Unexpected exception")
-
     def test_partial_event(self):
+        # empty event
         self.assertRaisesRegex(ValueError, "Missing event data", handler, None)
+        # event missing control parameters
         e = self.get_fake_event(None, None)
-        self.assertRaisesRegex(ValueError, "Missing fields: ids,.*", handler, e)
+        self.assertRaisesRegex(ValueError, "Missing fields: .*", handler, e)
+        # event missing the num_ids_per_msg field
         e['ids'] = range(10)
         self.assertRaisesRegex(ValueError, "Missing fields: num_ids_per_msg", handler, e)
+        # event with wrong type for num_ids_per_msg
         e['num_ids_per_msg'] = "dummy"
         self.assertRaisesRegex(TypeError, "Expected int.*", handler, e)
+        # event with wrong type for ids 
         e['num_ids_per_msg'] = 10
         e['ids'] = "dummy"
         self.assertRaisesRegex(TypeError, "Expected list.*", handler, e)
  
     def test_message_splitting(self):
-        e = self.get_fake_event([i for i in range(91)],10)
+        # event with 91 IDs should result in 10 messages
+        e = self.get_fake_event(range(91),10)
         msgs = create_messages(e)
+        n = 0 # omits warning for final assertion
         for n,m in enumerate(msgs):
             msg = json.loads(m)
+            # each message should have less than or equal to num_ids_per_msg IDs
             self.assertLessEqual(len(msg['id_group']), e['num_ids_per_msg'])
-        self.assertEqual(n, 10)
+        # enumerator is 0 based
+        self.assertEqual(n+1, 10)
         
