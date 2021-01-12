@@ -23,12 +23,16 @@ import math
 
 event_fields = ['ids', 'cuboid_object_key', 'config', 'id_index_step_fcn', 'sqs_url', 'num_ids_per_msg']
 
-def handler(event, context):
-    """
-    Parameters
-    ----------
-    event : dict 
-        parameters for the event, must include all event_fields
+def handler(event, context=None):
+    """ Handles the enqueue cuboid ids event.
+
+    This function will create a set of messages and enqueue them in the SQS queue provided in the event. 
+    The ids key should contain a list of cuboid IDs and the num_ids_per_msg key is used to distribute
+    the cuboid ids among the messages. The cuboid_object_key, config, and id_index_step_fcn keys will be
+    passed on in the enqueued message.
+
+    Args:
+        event: dict of parameters for the event
             ids : list
             cuboid_object_key : str
             config : dict
@@ -36,15 +40,11 @@ def handler(event, context):
             sqs_url : str
             num_ids_per_msg : int
 
-    context : dict 
-        properties of the lambda call e.g. function_name
+        context: dict of properties of the lambda call e.g. function_name
 
-    Raises
-    -------
-    ValueError
-        Empty event or missing fields
-    TypeError
-        Expected type for event field not found
+    Raises:
+        ValueError: Missing fields in the event
+        TypeError: Expected type for event field not found
     """
 
     if not event:
@@ -65,15 +65,7 @@ def handler(event, context):
 
 # a generator that produces messages from the event data
 def create_messages(event):
-    """
-    Parameters
-    ----------
-    event : dict
-        includes parameters to create the messages
-
-    Returns:
-    generator 
-        iterator of json encoded strings
+    """Create messages from the event data.
     """
 
     # select the control parameters

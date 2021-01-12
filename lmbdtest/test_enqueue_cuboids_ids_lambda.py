@@ -21,7 +21,7 @@ import unittest
 
 import boto3, json
 from moto import mock_sqs
-from lambdafcns.enqueue_cuboids_ids_lambda import handler, create_messages, event_fields
+from lambdafcns.enqueue_cuboid_ids_lambda import handler, create_messages, event_fields
 
 REGION = 'us-east-1'
 
@@ -30,8 +30,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         self.sfn_arn = 'fake-arn'
     
     def configure(self):
-        """
-        Configure an individual test.
+        """Configures this test to use mock AWS objects.
 
         Doesn't use setUp() because this has to run inside the test method for
         proper mocking of AWS resources.
@@ -45,8 +44,8 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         """
         self.session = boto3.session.Session(region_name=REGION)
 
-        mock_aws = self.patch_object(rh, 'aws')
-        mock_aws.get_session.return_value = self.session
+#        mock_aws = self.patch_object(rh, 'aws')
+#       mock_aws.get_session.return_value = self.session
 
         resp = self.session.client('sqs').create_queue(QueueName='fake-downsample-queue')
         self.url = resp['QueueUrl']
@@ -68,19 +67,22 @@ class TestEnqueueCuboidIds(unittest.TestCase):
             self.fail("Unexpected exception")
 
     def test_partial_event(self):
-        self.try_handler(None, ValueError, "Missing")
-        self.try_handler(self.get_fake_event(None, None), ValueError, "Missing")
-        self.try_handler(self.get_fake_event(range(10), None), ValueError, "Missing")
-        self.try_handler(self.get_fake_event(range(10), "dummy"), TypeError, "Expected int")
-        self.try_handler(self.get_fake_event(range(10), "dummy"), TypeError, "Expected list")
+        self.assertRaisesRegex(ValueError, "Missing event data", handler, None)
+        e = self.get_fake_event(None, None)
+        self.assertRaisesRegex(ValueError, "Missing fields: ids,.*", handler, e)
+        e['ids'] = range(10)
+        self.assertRaisesRegex(ValueError, "Missing fields: num_ids_per_msg", handler, e)
+        e['num_ids_per_msg'] = "dummy"
+        self.assertRaisesRegex(TypeError, "Expected int.*", handler, e)
+        e['num_ids_per_msg'] = 10
+        e['ids'] = "dummy"
+        self.assertRaisesRegex(TypeError, "Expected list.*", handler, e)
  
     def test_message_splitting(self):
-        e = self.get_fake_event([i for i in range(100)],10)
+        e = self.get_fake_event([i for i in range(91)],10)
         msgs = create_messages(e)
-        n = 0
-        for m in msgs:
+        for n,m in enumerate(msgs):
             msg = json.loads(m)
             self.assertLessEqual(len(msg['id_group']), e['num_ids_per_msg'])
-            n += 1
         self.assertEqual(n, 10)
         
