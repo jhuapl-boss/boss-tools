@@ -55,14 +55,16 @@ def handler(event, context=None):
     missingFields = [k for k in event_fields if k not in event] 
     if missingFields:
         _ = ",".join(missingFields)
-        raise ValueError(f"Missing fields: {_}")
+        raise KeyError(f"Missing keys: {_}")
     if not type(event['num_ids_per_msg']) is int:
         raise TypeError(f"Expected int for num_ids_per_msg. Found type {type(event['num_ids_per_msg'])}")
     if not type(event['ids']) is list:
         raise TypeError(f"Expected list for ids. Found type {type(event['ids'])}")
 
+    # create message generator
     msgs = create_messages(event)
     # enqueue the messages
+    boto3.client('sqs')
 
 # a generator that produces messages from the event data
 def create_messages(event):
@@ -74,7 +76,7 @@ def create_messages(event):
     ids_per_msg = event['num_ids_per_msg']
 
     # select the constant fields
-    base_fields = [f for f in event_fields if f not in ['ids','num_ids_per_msg'] ]
+    base_fields = [f for f in event_fields if f not in ['ids','num_ids_per_msg','sqs_url'] ]
     base_msg = { f : event[f] for f in base_fields }
     base_msg['id_group'] = []
 

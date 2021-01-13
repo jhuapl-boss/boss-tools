@@ -44,8 +44,8 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         """
         self.session = boto3.session.Session(region_name=REGION)
 
-#        mock_aws = self.patch_object(rh, 'aws')
-#       mock_aws.get_session.return_value = self.session
+ #       mock_aws = self.patch_object(rh, 'aws')
+ #       mock_aws.get_session.return_value = self.session
 
         resp = self.session.client('sqs').create_queue(QueueName='fake-downsample-queue')
         self.url = resp['QueueUrl']
@@ -58,15 +58,24 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         e['num_ids_per_msg'] = n
         return { k : e[k] for k in e if e[k] }
 
+    @mock_sqs
+    def test_sqs_queue(self):
+        self.configure()
+        sqs = boto3.resource('sqs')
+        queue = sqs.Queue(self.url)
+        messages = [ {'Id': str(i), 'MessageBody': "hello", 'DelaySeconds':0} for i in range(5)]
+        resp = queue.send_messages(Entries=messages)
+        print(resp)
+
     def test_partial_event(self):
         # empty event
         self.assertRaisesRegex(ValueError, "Missing event data", handler, None)
         # event missing control parameters
         e = self.get_fake_event(None, None)
-        self.assertRaisesRegex(ValueError, "Missing fields: .*", handler, e)
+        self.assertRaisesRegex(KeyError, "Missing keys: .*", handler, e)
         # event missing the num_ids_per_msg field
         e['ids'] = range(10)
-        self.assertRaisesRegex(ValueError, "Missing fields: num_ids_per_msg", handler, e)
+        self.assertRaisesRegex(KeyError, "Missing keys: num_ids_per_msg", handler, e)
         # event with wrong type for num_ids_per_msg
         e['num_ids_per_msg'] = "dummy"
         self.assertRaisesRegex(TypeError, "Expected int.*", handler, e)
