@@ -53,18 +53,18 @@ def handler(event, context):
         body = json.loads(event["Records"][0]["body"])
         if "sfn_arn" not in body:
             raise KeyError("SQS message does not contain 'sfn_arn'")
-        run_from_sfn(body["sfn_arn"], body)
+        start_sfn(body["sfn_arn"], body)
         return
 
     if "sfn_arn" in event:
-        resp = run_from_sfn(event["sfn_arn"], event)
+        resp = start_sfn(event["sfn_arn"], event)
         event["sfn_output"] = resp
         return event
 
     raise KeyError("event must contain 'sfn_arn' or 'Records[0]'")
 
 
-def run_from_sfn(arn, sfn_args):
+def start_sfn(arn, sfn_args):
     """
     Start the step function.
 

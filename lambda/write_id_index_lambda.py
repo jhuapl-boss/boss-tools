@@ -23,10 +23,8 @@
 
 import botocore
 from bossutils.aws import get_region
-import json
 import random
 from spdb.spatialdb.object_indices import ObjectIndices
-from time import sleep
 
 BASE_DELAY_TIME_SECS = 5
 
