@@ -12,16 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# test strategy
-# 1. Properly split the ids across multiple messages in the queue
-# 2. Handle failures correctly. Expected failures are a) network, 
-# 3. SUT uses the batch enque 
-
+"""Test the enqueue cuboid ids lambda
+"""
 import unittest
 
 import boto3, json
 from moto import mock_sqs
-from lambdafcns.enqueue_cuboid_ids_lambda import handler, create_messages, event_fields
+from lambdafcns.enqueue_cuboid_ids_lambda import handler, create_messages, event_fields, enqueue_messages
 
 REGION = 'us-east-1'
 
@@ -44,28 +41,17 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         """
         self.session = boto3.session.Session(region_name=REGION)
 
- #       mock_aws = self.patch_object(rh, 'aws')
- #       mock_aws.get_session.return_value = self.session
-
         resp = self.session.client('sqs').create_queue(QueueName='fake-downsample-queue')
         self.url = resp['QueueUrl']
-
-        self.sut_args = { 'queue_url': self.url, 'sfn_arn': self.sfn_arn }
     
-    def get_fake_event(self, ids, n):
+    def get_fake_event(self, ids, n, url=None):
         e = { f : "dummy" for f in event_fields }
+        e['config'] = {'dummy':'dummy'}
+        if url:
+            e['sqs_url'] = url
         e['ids'] = ids
         e['num_ids_per_msg'] = n
         return { k : e[k] for k in e if e[k] }
-
-    @mock_sqs
-    def test_sqs_queue(self):
-        self.configure()
-        sqs = boto3.resource('sqs')
-        queue = sqs.Queue(self.url)
-        messages = [ {'Id': str(i), 'MessageBody': "hello", 'DelaySeconds':0} for i in range(5)]
-        resp = queue.send_messages(Entries=messages)
-        print(resp)
 
     def test_partial_event(self):
         # empty event
@@ -78,11 +64,11 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         self.assertRaisesRegex(KeyError, "Missing keys: num_ids_per_msg", handler, e)
         # event with wrong type for num_ids_per_msg
         e['num_ids_per_msg'] = "dummy"
-        self.assertRaisesRegex(TypeError, "Expected int.*", handler, e)
+        self.assertRaisesRegex(TypeError, ".*Expected num_ids_per_msg.*", handler, e)
         # event with wrong type for ids 
         e['num_ids_per_msg'] = 10
         e['ids'] = "dummy"
-        self.assertRaisesRegex(TypeError, "Expected list.*", handler, e)
+        self.assertRaisesRegex(TypeError, ".*Expected ids.*", handler, e)
  
     def test_message_splitting(self):
         # event with 91 IDs should result in 10 messages
@@ -96,3 +82,9 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         # enumerator is 0 based
         self.assertEqual(n+1, 10)
         
+    @mock_sqs
+    def test_sqs_queue(self):
+        self.configure()
+        sqs = boto3.resource('sqs')
+        e = self.get_fake_event(range(91),10,self.url)
+        handler(e)
