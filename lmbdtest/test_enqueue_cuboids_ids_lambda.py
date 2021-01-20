@@ -18,7 +18,7 @@ import unittest
 
 import boto3, json
 from moto import mock_sqs
-from lambdafcns.enqueue_cuboid_ids_lambda import handler, create_messages, event_fields, enqueue_messages
+from lambdafcns.enqueue_cuboid_ids_lambda import handler, create_messages, event_fields, build_retry_response, build_batch_entries
 
 REGION = 'us-east-1'
 
@@ -46,6 +46,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
     
     def get_fake_event(self, ids, n, url=None):
         e = { f : "dummy" for f in event_fields }
+        e['attempt'] = 1
         e['config'] = {'dummy':'dummy'}
         if url:
             e['sqs_url'] = url
@@ -55,7 +56,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
 
     def test_partial_event(self):
         # empty event
-        self.assertRaisesRegex(ValueError, "Missing event data", handler, None)
+        self.assertRaisesRegex(ValueError, "Missing or empty event", handler, None)
         # event missing control parameters
         e = self.get_fake_event(None, None)
         self.assertRaisesRegex(KeyError, "Missing keys: .*", handler, e)
@@ -81,10 +82,28 @@ class TestEnqueueCuboidIds(unittest.TestCase):
             self.assertLessEqual(len(msg['id_group']), e['num_ids_per_msg'])
         # enumerator is 0 based
         self.assertEqual(n+1, 10)
-        
+
+    def test_retry_response(self):
+        totalIds = 91
+        idsPerMessage = 5
+        print(f"Testing retry response with {totalIds} Ids and {idsPerMessage} Ids per message")
+        e = self.get_fake_event(range(totalIds),idsPerMessage)
+        msgs = create_messages(e)
+        batch = build_batch_entries(msgs)
+        print(f"created a batch of {len(batch)} messages")
+        failed = [e for i,e in enumerate(batch) if i%2 == 1]
+        print(f"failed {len(failed)} messages in the batch")
+        unsentFromBatch = len([i for m in failed for i in json.loads(m['MessageBody'])['id_group']])
+        print(f"There are {unsentFromBatch} Ids that have failed to send")
+        numUnsentIds = totalIds - (len(batch) * idsPerMessage) + unsentFromBatch
+        print(f"There are a total of {numUnsentIds} unsent Ids")
+        response = build_retry_response(failed, msgs, 1)
+        self.assertEqual(len(response['ids']), numUnsentIds)
+
     @mock_sqs
     def test_sqs_queue(self):
         self.configure()
         sqs = boto3.resource('sqs')
         e = self.get_fake_event(range(91),10,self.url)
-        handler(e)
+        response = handler(e)
+        self.assertFalse(response)
