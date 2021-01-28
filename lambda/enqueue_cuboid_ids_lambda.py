@@ -22,7 +22,7 @@
 """
 
 from typing import Iterable
-import boto3, json, math, time
+import boto3, json, math, time, random
 
 # TODO: Consider moving these to a common module
 SQS_BATCH_SIZE = 10
@@ -36,6 +36,8 @@ _istype = lambda t: lambda x: type(x) is t
 event_types = [('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "iterable"), 
                ('num_ids_per_msg',_istype(int), False, "integer"),
                ('attempt', _istype(int), False, "integer"),
+               ('done', _istype(bool), False, "bool"),
+               ('wait_time', _istype(int), False, "integer"),
                ('sqs_url',_istype(str), True, "string"), 
                ('cuboid_object_key',_istype(str), True, "string"), 
                ('config', _istype(dict), True, "dictionary"), 
@@ -57,19 +59,23 @@ def handler(event, context=None):
             ids (iterable): ids for the cuboid
             num_ids_per_msg (int): maximum number of IDs per message
             attempt (int): used to adjust the backoff delay
+            done (bool): Should be False. Set to True when all IDs are enqueued
+            wait_time (int): the last wait time used
             sqs_url (str): the aws url for SQS queue
             cuboid_object_key (str): passed to sqs message
             config (dict): passed to sqs message
             id_index_step_fcn (str): passed to sqs message
-            version (str): 
+            version (str): passed to sqs message
 
         context (dict): properties of the lambda call e.g. function_name
 
     Returns:
-        If all messages are enqueued, the handler will return an empty dictionary object.
-        Otherwise, the dictionary object will contain:
-            ids (list):  all of the ids there were not enqueued
-            wait_time (int): the number of seconds to wait before retrying the IDs.
+        The updated event dictionary:
+            ids (iterable): any IDs that were not enqueued due to timeout
+            done (bool): True if all IDs were enqueued
+            wait_time (int): Set to number of seconds to wait before retrying
+
+
     Raises:
         ValueError: Missing or empty event
         KeyError: Missing keys in the event 
@@ -95,7 +101,7 @@ def handler(event, context=None):
     # create message generator
     msgs = create_messages(event)
     # enqueue the messages
-    return enqueue_messages(queue, msgs, event['attempt'])
+    return enqueue_messages(queue, msgs, event)
 
 def get_retry_batch(failed_entries, batch):
     """Return a new batch with failed entries.
@@ -119,7 +125,7 @@ def build_batch_entries(msgs):
             break
     return batch
 
-def build_retry_response(batch, msgs, attempt):
+def build_retry_response(batch, msgs, event):
     """Build the response message for retrying IDs that were not sent.
     """
     def getNextId(msg):
@@ -133,9 +139,19 @@ def build_retry_response(batch, msgs, attempt):
         for m in  msgs:
             for cid in getNextId(m):
                 yield cid 
-    return { "ids" : [i for i in getId()], "wait_time" : attempt * LAMBDA_WAIT_TIME}
+    event['ids'] = [i for i in getId()]
+    event['done'] = len(event['ids']) == 0
+    if event['ids']:
+        attempt = int(event['attempt']) + 1
+        event['attempt'] = attempt
+        last_wait_time = int(event['wait_time'])
+        if last_wait_time < LAMBDA_WAIT_TIME:
+            last_wait_time = LAMBDA_WAIT_TIME
+        event['wait_time'] = round(random.uniform(LAMBDA_WAIT_TIME, last_wait_time*attempt))
+    
+    return event
 
-def enqueue_messages(queue, msgs, attempt):
+def enqueue_messages(queue, msgs, event):
     """Sends messages for id indexing to the queue.
 
     Args:
@@ -144,32 +160,31 @@ def enqueue_messages(queue, msgs, attempt):
         attempt (int): The attempt number 
 
     Returns:
-        If all messages are enqueued, an empty dictionary is returned
-        If there are failed events, the following fields are included:
+        A dictionary with the following fields:
             ids (list): A list of IDs that were not sent
             wait_time (int): Number of seconds to wait before retrying
     """
-    response = {}
-
-    while not response:
+    
+    while True:
         batch = build_batch_entries(msgs)
         if len(batch) == 0:
             break
 
-        retry = 3
+        retry = 1
         while retry > 0:
             resp = queue.send_messages(Entries=batch)
             if 'Failed' in resp and len(resp['Failed']) > 0:
-                time.sleep(SQS_RETRY_TIMEOUT)
                 batch = get_retry_batch(resp['Failed'], batch)
                 retry -= 1
                 if retry == 0:
                     # populate the response with all remaining IDs
-                    return build_retry_response(batch, msgs, attempt)
+                    return build_retry_response(batch, msgs, event)
             else:
                 break
-
-    return response
+        event['ids'] = []
+        event['done'] = True
+        event['wait_time'] = 0
+    return event
 
 # a generator that produces messages from the event data
 def create_messages(event):

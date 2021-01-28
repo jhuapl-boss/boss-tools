@@ -52,7 +52,10 @@ class TestEnqueueCuboidIds(unittest.TestCase):
             e['sqs_url'] = url
         e['ids'] = ids
         e['num_ids_per_msg'] = n
-        return { k : e[k] for k in e if e[k] }
+        filtered = { k : e[k] for k in e if e[k] }
+        filtered['done'] = False
+        filtered['wait_time'] = 0
+        return filtered
 
     def test_partial_event(self):
         # empty event
@@ -97,7 +100,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         print(f"There are {unsentFromBatch} Ids that have failed to send")
         numUnsentIds = totalIds - (len(batch) * idsPerMessage) + unsentFromBatch
         print(f"There are a total of {numUnsentIds} unsent Ids")
-        response = build_retry_response(failed, msgs, 1)
+        response = build_retry_response(failed, msgs, e)
         self.assertEqual(len(response['ids']), numUnsentIds)
 
     @mock_sqs
@@ -106,4 +109,4 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         sqs = boto3.resource('sqs')
         e = self.get_fake_event(range(91),10,self.url)
         response = handler(e)
-        self.assertFalse(response)
+        self.assertTrue(response['done'])
