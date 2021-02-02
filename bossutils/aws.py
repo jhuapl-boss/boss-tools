@@ -100,7 +100,7 @@ def sfn_execute(session, name, input_={}):
     if arn is None:
         raise Exception("StepFunction '{}' doesn't exist".format(name))
 
-    return sfn_run(session, arn, input)
+    return sfn_run(session, arn, input_)
 
 def sfn_run(session, arn, input_={}):
     """Start executing a StepFunction
