@@ -92,12 +92,6 @@ while run_cnt < 2:
         # Create resource instance
         resource = BossResourceBasic()
         resource.from_dict(flush_msg_data["resource"])
-
-        # Check if cuboid is black overwrite
-        try:
-            to_black = flush_msg_data["to_black"]
-        except KeyError:
-            to_black = False
     else:
         # Nothing to flush. Exit.
         print("No flush message available")
@@ -118,6 +112,10 @@ while run_cnt < 2:
     cube_dim = CUBOIDSIZE[resolution]
     time_sample = int(parts.time_sample)
     morton = int(parts.morton_id)
+
+    # check if its a cutout_to_black cuboid
+    to_black = "BLACK" in write_cuboid_key
+
     write_cuboid_keys_to_remove = [write_cuboid_key]
 
     if exist_keys:  # Cuboid Exists
@@ -179,6 +177,8 @@ while run_cnt < 2:
             print("Delayed Write: {}".format(key))
             # Track what keys have been flushed
             write_cuboid_keys_to_remove.append(key)
+            # Check if its a cutout_to_black cuboid
+            to_black = "BLACK" in key
             # Get the data from the buffer
             write_cuboid_bytes = sp.kvio.get_cube_from_write_buffer(key)
             new_cube = Cube.create_cube(resource, cube_dim)
