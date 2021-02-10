@@ -5,7 +5,7 @@ import blosc
 import boto3
 import hashlib
 import numpy as np
-import cv2
+from PIL import Image
 from spdb.c_lib.ndtype import CUBOIDSIZE
 from spdb.c_lib import ndlib
 from spdb.spatialdb import AWSObjectStore
@@ -295,8 +295,14 @@ def downsample_cube(volume, cube, is_annotation):
         for z in range(cube.dim.z):
             # DP NOTE: For isotropic downsample this skips Z slices, instead of trying to merge them
             slice = volume[z * volume.cubes.z, :, :]
-            cube[z, :, :] = cv2.resize(slice, (cube.shape.x, cube.shape.y), interpolation=cv2.INTER_LINEAR)
+            image = Image.frombuffer(image_type,
+                                     (volume.shape.x, volume.shape.y),
+                                     slice.flatten(),
+                                     'raw',
+                                     image_type,
+                                     0, 1)
 
+            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
 
 def handler(args, context):
     def convert(args_, key):
