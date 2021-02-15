@@ -40,7 +40,7 @@ args = {
         'experiment_id': 1,
         'channel_id': 1,
         'annotation_channel': False,
-        'data_type': 'uint8',
+        'data_type': 'uint16',
 
         's3_bucket': 's3_bucket',
         's3_index': 's3_index',
@@ -155,7 +155,7 @@ class TestDownsampleVolumeLambda(unittest.TestCase):
         s3.create_bucket(Bucket = 's3_bucket')
 
         # Create cube of data
-        data = np.zeros([16,512,512], dtype=np.uint8, order='C')
+        data = np.zeros([16,512,512], dtype=np.uint16, order='C')
         data = blosc.compress(data, typesize=8)
 
         # Put cube data for the target cubes
