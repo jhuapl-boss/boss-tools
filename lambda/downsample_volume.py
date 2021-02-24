@@ -195,7 +195,7 @@ def _downsample_xy_bilinear(a, dtype=None):
         [1, 2, 1]
     ]
     for z in range(a.shape[0]):
-        out[z] = conv([a[z]], kernel)[0, ::2,::2]
+        out[z] = _conv([a[z]], kernel)[0, ::2,::2]
     return out.astype(dtype or a.dtype)
 
 def downsample_volume(args, target, step, dim, use_iso_key):
@@ -364,4 +364,3 @@ def handler(args, context):
                           args['dim'],
                           args['use_iso_flag'])
         msg.delete()
-
