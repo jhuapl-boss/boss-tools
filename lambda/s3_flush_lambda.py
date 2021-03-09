@@ -155,12 +155,32 @@ while run_cnt < 2:
         uncompressed_cuboid_bytes = existing_cube.data
 
     else:  # Cuboid Does Not Exist
-        # Get cuboid to flush from write buffer
-        cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
-        new_cube = Cube.create_cube(resource, cube_dim)
-        t_range = [time_sample, time_sample+1]
-        new_cube.from_blosc(cuboid_bytes, t_range)
-        uncompressed_cuboid_bytes = new_cube.data
+        if to_black:
+            # Blacking out a cuboid that doesn't exist. Just delete key and message. 
+            print("Cuboid does not exist and to_black enabled. Ignoring and deleting message.")
+
+            # Delete write-cuboid key
+            for key in write_cuboid_keys_to_remove:
+                sp.kvio.delete_cube(key)
+
+            # Remove page-out entry
+            sp.cache_state.remove_from_page_out(write_cuboid_key)
+
+            # Delete message 
+            sqs_client.delete_message(
+                QueueUrl=event["config"]["object_store_config"]["s3_flush_queue"],
+                ReceiptHandle=rx_handle)
+
+            # Increment run counter
+            run_cnt += 1
+            continue
+        else:
+            # Get cuboid to flush from write buffer
+            cuboid_bytes = sp.kvio.get_cube_from_write_buffer(write_cuboid_key)
+            new_cube = Cube.create_cube(resource, cube_dim)
+            t_range = [time_sample, time_sample+1]
+            new_cube.from_blosc(cuboid_bytes, t_range)
+            uncompressed_cuboid_bytes = new_cube.data
 
 
     # Check for delayed writes for this cuboid
