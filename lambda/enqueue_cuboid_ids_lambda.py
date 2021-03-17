@@ -22,7 +22,7 @@
 """
 
 from typing import Iterable
-import boto3, json, math, time, random
+import boto3, json, os, random
 
 # TODO: Consider moving these to a common module
 SQS_BATCH_SIZE = 10
@@ -32,6 +32,7 @@ LAMBDA_WAIT_TIME = 60
 # lambdas for type checking
 _isIterable = lambda x: hasattr(x,'__iter__')
 _istype = lambda t: lambda x: type(x) is t
+_or = lambda t1, t2: lambda x: t1(x) or t2(x)
 # array of event fields with allowed types and flag to pass through as message field
 event_types = [('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "iterable"), 
                ('num_ids_per_msg',_istype(int), False, "integer"),
@@ -42,7 +43,7 @@ event_types = [('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "
                ('cuboid_object_key',_istype(str), True, "string"), 
                ('config', _istype(dict), True, "dictionary"), 
                ('id_index_step_fcn',_istype(str), True, "string"),
-               ('version',_istype(str), True, "string")]
+               ('version',_or(_istype(str), _istype(int)), True, "string or integer")]
 event_fields = [e[0] for e in event_types]
 message_fields = [e[0] for e in event_types if e[2]]
 
@@ -95,7 +96,8 @@ def handler(event, context=None):
         raise TypeError(";".join([f"Expected {e[0]} as {e[3]}, found {type(event[e[0]])}" for e in invalidTypes]))
     
     # make sure we can access the queue
-    sqs = boto3.resource("sqs")
+    endpoint = os.getenv('SQS_BACKEND', None)
+    sqs = boto3.resource("sqs", endpoint_url=endpoint)
     queue = sqs.Queue(event['sqs_url'])
  
     # create message generator
