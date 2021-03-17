@@ -68,7 +68,11 @@ def handler(event, context):
         msg_rx_handle = None
         while rx_cnt < 6:
             ingest_queue = IngestQueue(proj_info)
-            msg = [x for x in ingest_queue.receiveMessage()]
+            try:
+                msg = [x for x in ingest_queue.receiveMessage()]
+            except StopIteration:
+                msg = None
+
             if msg:
                 msg = msg[0]
                 print("MESSAGE: {}".format(msg))
