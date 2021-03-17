@@ -19,7 +19,11 @@
 #       "rampup_delay": int,
 #       "rampup_backoff": float,
 #       "status_delay": int
-#   }
+#   },
+#   "index_ids_sqs_url": string,
+#   "num_ids_per_msg": int,
+#   "id_chunk_size": int,
+#   "wait_time": int,
 # }
 #
 # Outputs (modified or added):
@@ -101,6 +105,11 @@ def get_fanout_args(event):
         'max_write_id_index_lambdas': max_execs,
         'id_index_step_fcn': event['id_index_step_fcn'],
         'num_ids_per_worker': NUM_IDS_PER_WORKER,
+        'index_deadletter_queue': event['config']['object_store_config']['index_deadletter_queue'],
+        'index_ids_sqs_url': event['index_ids_sqs_url'],
+        'num_ids_per_msg': event['num_ids_per_msg'],
+        'id_chunk_size': event['id_chunk_size'],
+        'wait_time': event['wait_time'],
     }
 
     fanout_args = event

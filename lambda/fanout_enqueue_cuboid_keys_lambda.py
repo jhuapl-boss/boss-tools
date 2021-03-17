@@ -17,7 +17,11 @@
 #       "rampup_backoff": float,
 #       "status_delay": int
 #   },
-#   "operation": ...                        # (str) Op name for deadletter queue.
+#   "operation": ...,                       # (str) Op name for deadletter queue.
+#   "index_ids_sqs_url": string,
+#   "num_ids_per_msg": int,
+#   "id_chunk_size": int,
+#   "wait_time": int,
 # }
 #
 # Outputs:
@@ -67,7 +71,11 @@ def handler(event, context):
         'operation': 'batch_enqueue_cuboids',
         'config': event['config'],
         # Flag to tell step function's choice state that all messages enqueued.
-        'enqueue_done': False
+        'enqueue_done': False,
+        'index_ids_sqs_url': event['index_ids_sqs_url'],
+        'num_ids_per_msg': event['num_ids_per_msg'],
+        'id_chunk_size': event['id_chunk_size'],
+        'wait_time': event['wait_time'],
     }
 
     # Add remaining arguments for fanning out.

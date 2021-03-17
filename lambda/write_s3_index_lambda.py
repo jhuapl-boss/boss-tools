@@ -14,28 +14,15 @@
 #
 # Output (additions/modifications):
 # {
-#   'config': {'kv_config': {...}
-#              'state_config': {...},
-#              'object_store_config': {...}},
-#   'id_index_step_fcn': '...',
-#   'fanout_id_writers_step_fcn': '...',        # arn
-#   'cuboid_object_key': '...',
-#   'version': '...'
 #   'num_ids': int,                     # Number of unique ids in cuboid.
-#   'max_write_id_index_lambdas': int,
-#   'finished': False
+#   'finished': False if num_ids > 0
 # }
 #
 # Step function should abort on these errors:
 #   NoSuchKey
 # }
 
-import boto3
-import botocore
-import json
-
 from bossutils.aws import get_region
-from spdb.spatialdb import SpdbError, ErrorCodes
 from spdb.spatialdb.object_indices import ObjectIndices
 
 def handler(event, context):
@@ -61,14 +48,8 @@ def handler(event, context):
     ids_list = obj_ind.write_s3_index(
         event['cuboid_object_key'], event['version'])
 
-    return { 
-        'config': event['config'],
-        'id_index_step_fcn': event['id_index_step_fcn'],
-        'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
-        'cuboid_object_key': event['cuboid_object_key'],
-        'version': event['version'],
-        'max_write_id_index_lambdas': event['max_write_id_index_lambdas'],
-        'num_ids': len(ids_list),
-        'finished': False
-    }
+    num_ids = len(ids_list)
+    event['num_ids'] = num_ids
+    event['finished'] = num_ids == 0
 
+    return event

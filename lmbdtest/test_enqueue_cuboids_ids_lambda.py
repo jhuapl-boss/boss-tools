@@ -57,6 +57,15 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         filtered['wait_time'] = 0
         return filtered
 
+    def test_message_field_renaming(self):
+        """id_index_step_fcn should be renamed to sfn_arn."""
+        e = self.get_fake_event(range(4), 5)
+        msgs = create_messages(e)
+        for m in msgs:
+            msg = json.loads(m)
+            self.assertIn('sfn_arn', msg)
+            self.assertNotIn('id_index_step_fcn', msg)
+
     def test_partial_event(self):
         # empty event
         self.assertRaisesRegex(ValueError, "Missing or empty event", handler, None)

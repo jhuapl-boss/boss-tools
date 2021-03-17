@@ -22,6 +22,7 @@
 """
 
 from typing import Iterable
+from collections import namedtuple
 import boto3, json, os, random
 
 # TODO: Consider moving these to a common module
@@ -29,23 +30,35 @@ SQS_BATCH_SIZE = 10
 SQS_RETRY_TIMEOUT = 15
 LAMBDA_WAIT_TIME = 60
 
+"""
+Defines expected keys in the events dictionary passed to the lambda handler.
+
+Args:
+    name (str): Name of key in event dictionary.
+    type_guard_fcn (function): Returns true if the key's value is the correct type.
+    include_in_msgs (bool): If true, include this key in the SQS message.
+    type_str (str): Friendly string that identifies the type expected for the key's value.
+    rename_to (str|None): If not None and include_in_msgs, the key will be stored in the SQS message with this name.
+"""
+EventTypes = namedtuple('EventTypes', ['name', 'type_guard_fcn', 'include_in_msgs', 'type_str', 'rename_to'], defaults=(None,))
+
 # lambdas for type checking
 _isIterable = lambda x: hasattr(x,'__iter__')
 _istype = lambda t: lambda x: type(x) is t
 _or = lambda t1, t2: lambda x: t1(x) or t2(x)
 # array of event fields with allowed types and flag to pass through as message field
-event_types = [('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "iterable"), 
-               ('num_ids_per_msg',_istype(int), False, "integer"),
-               ('attempt', _istype(int), False, "integer"),
-               ('done', _istype(bool), False, "bool"),
-               ('wait_time', _istype(int), False, "integer"),
-               ('sqs_url',_istype(str), True, "string"), 
-               ('cuboid_object_key',_istype(str), True, "string"), 
-               ('config', _istype(dict), True, "dictionary"), 
-               ('id_index_step_fcn',_istype(str), True, "string"),
-               ('version',_or(_istype(str), _istype(int)), True, "string or integer")]
-event_fields = [e[0] for e in event_types]
-message_fields = [e[0] for e in event_types if e[2]]
+event_types = [EventTypes('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "iterable"), 
+               EventTypes('num_ids_per_msg',_istype(int), False, "integer"),
+               EventTypes('attempt', _istype(int), False, "integer"),
+               EventTypes('done', _istype(bool), False, "bool"),
+               EventTypes('wait_time', _istype(int), False, "integer"),
+               EventTypes('sqs_url',_istype(str), True, "string"), 
+               EventTypes('cuboid_object_key',_istype(str), True, "string"), 
+               EventTypes('config', _istype(dict), True, "dictionary"), 
+               EventTypes('id_index_step_fcn',_istype(str), True, "string", 'sfn_arn'),
+               EventTypes('version',_or(_istype(str), _istype(int)), True, "string or integer")]
+event_fields = [e.name for e in event_types]
+message_fields = [e for e in event_types if e.include_in_msgs]
 
 def handler(event, context=None):
     """Handles the enqueue cuboid ids event.
@@ -91,9 +104,9 @@ def handler(event, context=None):
     if missingFields:
         _ = ",".join(missingFields)
         raise KeyError(f"Missing keys: {_}")
-    invalidTypes = [e for e in event_types if not e[1](event[e[0]])]
+    invalidTypes = [e for e in event_types if not e.type_guard_fcn(event[e.name])]
     if invalidTypes:
-        raise TypeError(";".join([f"Expected {e[0]} as {e[3]}, found {type(event[e[0]])}" for e in invalidTypes]))
+        raise TypeError(";".join([f"Expected {e.name} as {e.type_str}, found {type(event[e.name])}" for e in invalidTypes]))
     
     # make sure we can access the queue
     endpoint = os.getenv('SQS_BACKEND', None)
@@ -188,6 +201,20 @@ def enqueue_messages(queue, msgs, event):
         event['wait_time'] = 0
     return event
 
+def get_message_name(field):
+    """
+    Returns the name to use for the message field.
+
+    Args:
+        field (EventTypes)
+
+    Returns:
+        (str): Value of name or rename_to if not None.
+    """
+    if field.rename_to is not None:
+        return field.rename_to
+    return field.name
+
 # a generator that produces messages from the event data
 def create_messages(event):
     """Create messages from the event data.
@@ -198,7 +225,7 @@ def create_messages(event):
     ids_per_msg = event['num_ids_per_msg']
 
     # select the constant fields
-    base_msg = { f : event[f] for f in message_fields }
+    base_msg = { get_message_name(f) : event[f.name] for f in message_fields }
     base_msg['id_group'] = []
 
     # add the block of ids to the base message
