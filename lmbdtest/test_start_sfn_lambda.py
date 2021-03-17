@@ -31,13 +31,13 @@ class TestStartSfnLambda(unittest.TestCase):
     def test_invoke_from_sfn(self):
         """Test the lambda as it would work when run as a step function state."""
         with patch(
-            "lambdafcns.start_sfn_lambda.run_from_sfn", autospec=True
-        ) as fake_run_from_sfn:
+            "lambdafcns.start_sfn_lambda.start_sfn", autospec=True
+        ) as fake_start_sfn:
             event = {"sfn_arn": "fake_arn", "foo": "bar"}
             fake_resp = {"startDate": "now"}
             exp = deepcopy(event)
             exp["sfn_output"] = fake_resp
-            fake_run_from_sfn.return_value = fake_resp
+            fake_start_sfn.return_value = fake_resp
 
             actual = handler(event, None)
             self.assertEqual(exp, actual)
@@ -45,13 +45,13 @@ class TestStartSfnLambda(unittest.TestCase):
     def test_invoke_from_sqs(self):
         """Test the lambda as it would work when triggered via SQS."""
         with patch(
-            "lambdafcns.start_sfn_lambda.run_from_sfn", autospec=True
-        ) as fake_run_from_sfn:
+            "lambdafcns.start_sfn_lambda.start_sfn", autospec=True
+        ) as fake_start_sfn:
             body = {"sfn_arn": "some_fake_arn", "foo": "bar"}
             event = {"Records": [{"body": json.dumps(body)}]}
 
             # No return value when triggered via SQS.
             handler(event, None)
             self.assertEqual(
-                [call(body["sfn_arn"], body)], fake_run_from_sfn.mock_calls
+                [call(body["sfn_arn"], body)], fake_start_sfn.mock_calls
             )

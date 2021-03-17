@@ -14,9 +14,11 @@
 
 import boto3
 import json
+import os
 
 def handler(event, context):
-    sqs = boto3.client('sqs')
+    endpoint = os.getenv('SQS_BACKEND', None)
+    sqs = boto3.client('sqs', endpoint_url=endpoint)
 
     msg_args = {
         'MessageBody': json.dumps(event),

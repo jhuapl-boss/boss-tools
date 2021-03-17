@@ -23,10 +23,8 @@
 
 import botocore
 from bossutils.aws import get_region
-import json
 import random
 from spdb.spatialdb.object_indices import ObjectIndices
-from time import sleep
 
 BASE_DELAY_TIME_SECS = 5
 
@@ -83,11 +81,15 @@ def handler(event, context):
         s3_index_table, id_index_table, id_count_table, cuboid_bucket, 
         get_region())
 
+    # Track which ids successfully updated.
+    done_ids = set()
+
     try:
         for obj_id in event['id_group']:
             obj_ind.write_id_index(
                 id_index_new_chunk_threshold, 
                 event['cuboid_object_key'], obj_id, event['version'])
+            done_ids.add(obj_id)
         write_id_index_status['done'] = True
     except botocore.exceptions.ClientError as ex:
         # Probably had a throttle or a ConditionCheckFailed.
@@ -99,6 +101,8 @@ def handler(event, context):
             raise DynamoClientError(msg) from ex
         event['result'] = str(ex)
         prep_for_retry(write_id_index_status)
+
+    event['id_group'] = [i for i in event['id_group'] if i not in done_ids]
 
     return event
 
