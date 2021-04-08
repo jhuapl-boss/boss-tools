@@ -61,6 +61,12 @@ def activity_entry_point(args):
                 upload_queue (str): Tile upload queue.
                 ingest_queue (str): Tile ingest queue.
                 ingest_type (int): Tile (0) or volumetric ingest (1).
+            resource (dict): Boss resource data.
+            x_size (int): Tile size in x dimension.
+            y_size (int): Tile size in y dimension.
+            KVIO_SETTINGS: spdb settings.
+            STATEIO_CONFIG: spdb settings.
+            OBJECTIO_CONFIG: spdb settings.
 
     Returns:
         (dict): Returns incoming args so they can be passed to the next activity.
@@ -75,7 +81,9 @@ def activity_entry_point(args):
 
     dynamo = boto3.client('dynamodb', region_name=args['region'])
     sqs = boto3.resource('sqs', region_name=args['region'])
-    cs = ChunkScanner(dynamo, sqs, args['tile_index_table'], args['db_host'], args['job'])
+    cs = ChunkScanner(dynamo, sqs, args['tile_index_table'], args['db_host'],
+                      args['job'], args['resource'], args['x_size'], args['y_size'],
+                      args['KVIO_SETTINGS'], args['STATEIO_CONFIG'], args['OBJECTIO_CONFIG'])
     args['quit'] = cs.run()
 
     return args
@@ -88,7 +96,8 @@ class ChunkScanner:
         'upload_queue', 'ingest_queue'
     ])
 
-    def __init__(self, dynamo, sqs, tile_index_table, db_host, job):
+    def __init__(self, dynamo, sqs, tile_index_table, db_host, job, resource,
+                 x_size, y_size, kvio_settings, stateio_config, objectio_config):
         """
         Args:
             dynamo (boto3.Dynamodb): Dynamo client.
@@ -104,12 +113,24 @@ class ChunkScanner:
                 z_chunk_size (int): How many z slices in the chunk.
                 upload_queue (str): Tile upload queue.
                 ingest_queue (str): Tile ingest queue.
+            resource (dict): Boss resource data.
+            x_size (int): Tile size in x dimension.
+            y_size (int): Tile size in y dimension.
+            kvio_settings: spdb settings.
+            stateio_config: spdb settings.
+            objectio_config: spdb settings.
         """
         self.dynamo = dynamo
         self.sqs = sqs
         self.tile_index_table = tile_index_table
         self.db_host = db_host
         self.job = job
+        self.resource = resource
+        self.x_size = x_size
+        self.y_size = y_size
+        self.kvio_settings = kvio_settings
+        self.stateio_config = stateio_config
+        self.objectio_config = objectio_config
 
         self.found_missing_tiles = False
 
@@ -177,17 +198,46 @@ class ChunkScanner:
 
         try:
             upload_queue = self.sqs.Queue(self.job['upload_queue'])
+            ingest_queue = self.sqs.Queue(self.job['ingest_queue'])
 
             query = self.dynamo.get_paginator('query')
             resp_iter = query.paginate(**query_args)
             for resp in resp_iter:
                 for item in resp['Items']:
                     missing_msgs = self.check_tiles(item[CHUNK_KEY]['S'], item[TILE_UPLOADED_MAP_KEY]['M'])
+                    no_missing_tiles = False
                     if self.enqueue_missing_tiles(upload_queue, missing_msgs):
                         self.found_missing_tiles = True
+                        no_missing_tiles = True
                         self.set_uploading_status(db_connection)
+                    if no_missing_tiles:
+                        self.enqueue_chunk(ingest_queue, item[CHUNK_KEY]['S'])
         finally:
             db_connection.close()
+
+    def enqueue_chunk(self, queue, chunk_key):
+        """
+        Put the chunk back in the ingest queue.  All its tiles should be in S3,
+        but the ingest lambda must have failed.
+
+        Args:
+            queue (sqs.Queue): Ingest queue.
+            chunk_key (str): Key identifying which chunk to re-ingest.
+        """
+        raw_msg = {
+            'chunk_key': chunk_key,
+            'ingest_job': self.job,
+            'parameters': {
+                'KVIO_SETTINGS': self.kvio_settings,
+                'STATEIO_CONFIG': self.stateio_config,
+                'OBJECTIO_CONFIG': self.objectio_config,
+                'resource': self.resource,
+            },
+            'x_size': self.tile_size_x,
+            'y_size': self.tile_size_y,
+        }
+        queue.send_message(MessageBody=json.dumps(raw_msg))
+
 
     def set_uploading_status(self, db_connection):
         """

@@ -32,7 +32,6 @@ Expected contents of the SQS message
     'parameters': {
         "upload_queue": XX
         "ingest_queue": XX,
-        "ingest_lambda":XX,
         "KVIO_SETTINGS": XX,
         "STATEIO_CONFIG": XX,
         "OBJECTIO_CONFIG": XX
