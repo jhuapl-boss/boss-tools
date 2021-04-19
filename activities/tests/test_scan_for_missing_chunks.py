@@ -43,7 +43,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         chunk_x = 94
@@ -104,7 +105,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         chunk_x = 94
@@ -154,7 +156,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -194,7 +197,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -236,7 +240,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -282,7 +287,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -320,7 +326,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         user_insert = """
