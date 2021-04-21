@@ -22,9 +22,17 @@ import pymysql
 import pymysql.cursors
 
 class TestChunkScanner(unittest.TestCase):
+    def setUp(self):
+        self.dynamo = None
+        self.sqs = None
+        self.x_size = 1024
+        self.y_size = 1024
+        self.kvio_settings = {}
+        self.stateio_config = {}
+        self.objectio_config = {}
+        self.resource = {}
+
     def test_check_tiles(self):
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -35,7 +43,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         chunk_x = 94
@@ -66,7 +75,9 @@ class TestChunkScanner(unittest.TestCase):
             '4a1c5be8336960d75fb4c4366544a9d3&90&141&985&0&94&40&2140&0'
         ]
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         backend = BossBackend(None)
         chunk_key = backend.encode_chunk_key(16, cs._get_project_info(), job['resolution'],
             chunk_x, chunk_y, chunk_z)
@@ -84,8 +95,6 @@ class TestChunkScanner(unittest.TestCase):
         self.assertCountEqual(exp, actual)
 
     def test_check_tiles_no_missing_tiles(self):
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -96,7 +105,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         chunk_x = 94
@@ -123,7 +133,9 @@ class TestChunkScanner(unittest.TestCase):
             'b8f59755d83f8501e387fb15329ee7ee&90&141&985&0&94&40&2143&0': {'N': '1'},
         }
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         backend = BossBackend(None)
         chunk_key = backend.encode_chunk_key(16, cs._get_project_info(), job['resolution'],
             chunk_x, chunk_y, chunk_z)
@@ -134,8 +146,6 @@ class TestChunkScanner(unittest.TestCase):
             next(actual)
 
     def test_enqueue_missing_tiles_no_errors(self):
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -146,7 +156,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -166,7 +177,9 @@ class TestChunkScanner(unittest.TestCase):
                 for i in range(SQS_BATCH_SIZE, num_msgs)])
         ]
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         self.assertTrue(cs.enqueue_missing_tiles(queue, iter(msgs)))
 
         self.assertEqual(exp_calls, queue.send_messages.call_args_list)
@@ -174,8 +187,6 @@ class TestChunkScanner(unittest.TestCase):
     # Replace sleep so test runs fast.
     @patch('time.sleep', autospec=True)
     def test_enqueue_missing_tiles_with_retry(self, fake_sleep):
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -186,7 +197,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -208,7 +220,9 @@ class TestChunkScanner(unittest.TestCase):
                 for i in range(SQS_BATCH_SIZE, num_msgs)])
         ]
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         self.assertTrue(cs.enqueue_missing_tiles(queue, iter(msgs)))
 
         self.assertEqual(exp_calls, queue.send_messages.call_args_list)
@@ -216,8 +230,6 @@ class TestChunkScanner(unittest.TestCase):
     # Replace sleep so test runs fast.
     @patch('time.sleep', autospec=True)
     def test_enqueue_missing_tiles_with_errors(self, fake_sleep):
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -228,7 +240,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
@@ -253,7 +266,9 @@ class TestChunkScanner(unittest.TestCase):
                 for i in range(SQS_BATCH_SIZE, num_msgs)])
         ]
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         self.assertTrue(cs.enqueue_missing_tiles(queue, iter(msgs)))
 
         self.assertEqual(exp_calls, queue.send_messages.call_args_list)
@@ -262,8 +277,6 @@ class TestChunkScanner(unittest.TestCase):
     @patch('time.sleep', autospec=True)
     def test_enqueue_missing_tiles_no_msgs(self, fake_sleep):
         """Should return False and not enqueue any messages if not given any."""
-        dynamo = None
-        sqs = None
         table = 'foo'
         db_host = 'bar'
         job = {
@@ -274,14 +287,17 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         queue = MagicMock()
 
         msgs = []
 
-        cs = ChunkScanner(dynamo, sqs, table, db_host, job)
+        cs = ChunkScanner(self.dynamo, self.sqs, table, db_host, job,
+                          self.resource, self.x_size, self.y_size,
+                          self.kvio_settings, self.stateio_config, self.objectio_config)
         self.assertFalse(cs.enqueue_missing_tiles(queue, iter(msgs)))
         queue.send_messages.assert_not_called()
 
@@ -310,7 +326,8 @@ class TestChunkScanner(unittest.TestCase):
             'resolution': 0,
             'z_chunk_size': 16,
             'upload_queue': 'foo',
-            'ingest_queue': 'bar'
+            'ingest_queue': 'bar',
+            'ingest_type': TILE_INGEST,
         }
 
         user_insert = """

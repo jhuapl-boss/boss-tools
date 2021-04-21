@@ -1,4 +1,4 @@
-# Copyright 2020 The Johns Hopkins University Applied Physics Laboratory
+# Copyright 2021 The Johns Hopkins University Applied Physics Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ SQS_RETRY_TIMEOUT = 15
 
 # These values are defined in boss.git/django/bossingest/models.py.
 UPLOADING_STATUS = 1
+WAIT_ON_QUEUES = 6
 TILE_INGEST = 0
 
 
@@ -61,6 +62,12 @@ def activity_entry_point(args):
                 upload_queue (str): Tile upload queue.
                 ingest_queue (str): Tile ingest queue.
                 ingest_type (int): Tile (0) or volumetric ingest (1).
+            resource (dict): Boss resource data.
+            x_size (int): Tile size in x dimension.
+            y_size (int): Tile size in y dimension.
+            KVIO_SETTINGS: spdb settings.
+            STATEIO_CONFIG: spdb settings.
+            OBJECTIO_CONFIG: spdb settings.
 
     Returns:
         (dict): Returns incoming args so they can be passed to the next activity.
@@ -75,7 +82,9 @@ def activity_entry_point(args):
 
     dynamo = boto3.client('dynamodb', region_name=args['region'])
     sqs = boto3.resource('sqs', region_name=args['region'])
-    cs = ChunkScanner(dynamo, sqs, args['tile_index_table'], args['db_host'], args['job'])
+    cs = ChunkScanner(dynamo, sqs, args['tile_index_table'], args['db_host'],
+                      args['job'], args['resource'], args['x_size'], args['y_size'],
+                      args['KVIO_SETTINGS'], args['STATEIO_CONFIG'], args['OBJECTIO_CONFIG'])
     args['quit'] = cs.run()
 
     return args
@@ -85,10 +94,11 @@ class ChunkScanner:
     JOB_FIELDS = frozenset([
         'collection', 'experiment', 'channel',
         'task_id', 'resolution', 'z_chunk_size',
-        'upload_queue', 'ingest_queue'
+        'upload_queue', 'ingest_queue', 'ingest_type',
     ])
 
-    def __init__(self, dynamo, sqs, tile_index_table, db_host, job):
+    def __init__(self, dynamo, sqs, tile_index_table, db_host, job, resource,
+                 tile_x_size, tile_y_size, kvio_settings, stateio_config, objectio_config):
         """
         Args:
             dynamo (boto3.Dynamodb): Dynamo client.
@@ -104,14 +114,27 @@ class ChunkScanner:
                 z_chunk_size (int): How many z slices in the chunk.
                 upload_queue (str): Tile upload queue.
                 ingest_queue (str): Tile ingest queue.
+            resource (dict): Boss resource data.
+            tile_x_size (int): Tile size in x dimension.
+            tile_y_size (int): Tile size in y dimension.
+            kvio_settings: spdb settings.
+            stateio_config: spdb settings.
+            objectio_config: spdb settings.
         """
         self.dynamo = dynamo
         self.sqs = sqs
         self.tile_index_table = tile_index_table
         self.db_host = db_host
         self.job = job
+        self.resource = resource
+        self.tile_x_size = tile_x_size
+        self.tile_y_size = tile_y_size
+        self.kvio_settings = kvio_settings
+        self.stateio_config = stateio_config
+        self.objectio_config = objectio_config
 
         self.found_missing_tiles = False
+        self.reenqueued_chunks = False
 
         # Validate job parameter.
         for field in ChunkScanner.JOB_FIELDS:
@@ -133,12 +156,12 @@ class ChunkScanner:
         Tiles missing from chunks are put back in the tile upload queue.
 
         Returns:
-            (bool): True if missing tiles found.
+            (bool): True if missing tiles found or if chunks put back on the ingest queue.
         """
         for i in range(0, MAX_TASK_ID_SUFFIX):
             self.run_scan(i)
 
-        return self.found_missing_tiles
+        return self.found_missing_tiles or self.reenqueued_chunks
 
     def run_scan(self, partition_num):
         """
@@ -154,6 +177,7 @@ class ChunkScanner:
         the complete process.
 
         self.found_missing_tiles set to True if missing tiles found.
+        self.reenqueued_chunks set to True if chunks put back in ingest queue.
 
         Args:
             dynamo (boto3.Dynamodb): Dynamo client.
@@ -177,27 +201,63 @@ class ChunkScanner:
 
         try:
             upload_queue = self.sqs.Queue(self.job['upload_queue'])
+            ingest_queue = self.sqs.Queue(self.job['ingest_queue'])
 
             query = self.dynamo.get_paginator('query')
             resp_iter = query.paginate(**query_args)
             for resp in resp_iter:
                 for item in resp['Items']:
                     missing_msgs = self.check_tiles(item[CHUNK_KEY]['S'], item[TILE_UPLOADED_MAP_KEY]['M'])
+                    no_missing_tiles = True
                     if self.enqueue_missing_tiles(upload_queue, missing_msgs):
                         self.found_missing_tiles = True
-                        self.set_uploading_status(db_connection)
+                        no_missing_tiles = False
+                        self.set_ingest_status(db_connection, UPLOADING_STATUS)
+                    if no_missing_tiles:
+                        # This is a chunk with all its tiles, so put it back
+                        # in the ingest queue.
+                        self.reenqueued_chunks = True
+                        self.enqueue_chunk(ingest_queue, item[CHUNK_KEY]['S'])
+            if not self.found_missing_tiles and self.reenqueued_chunks:
+                self.set_ingest_status(db_connection, WAIT_ON_QUEUES)
         finally:
             db_connection.close()
 
-    def set_uploading_status(self, db_connection):
+    def enqueue_chunk(self, queue, chunk_key):
         """
-        Set the status of the ingest job to UPLOADING.
+        Put the chunk back in the ingest queue.  All its tiles should be in S3,
+        but the ingest lambda must have failed.
+
+        Args:
+            queue (sqs.Queue): Ingest queue.
+            chunk_key (str): Key identifying which chunk to re-ingest.
+        """
+        log.info(f'Re-enqueuing chunk: {chunk_key}')
+        raw_msg = {
+            'chunk_key': chunk_key,
+            'ingest_job': self.job['task_id'],
+            'parameters': {
+                'KVIO_SETTINGS': self.kvio_settings,
+                'STATEIO_CONFIG': self.stateio_config,
+                'OBJECTIO_CONFIG': self.objectio_config,
+                'resource': self.resource,
+            },
+            'x_size': self.tile_x_size,
+            'y_size': self.tile_y_size,
+        }
+        queue.send_message(MessageBody=json.dumps(raw_msg))
+
+
+    def set_ingest_status(self, db_connection, status):
+        """
+        Set the status of the ingest job to the given status.
 
         Args:
             db_connection (pymysql.Connection)
+            status (int): New ingest status.
         """
         sql = 'UPDATE ingest_job SET status = %(status)s WHERE id = %(job_id)s'
-        sql_args = dict(status=str(UPLOADING_STATUS), job_id=str(self.job['task_id']))
+        sql_args = dict(status=str(status), job_id=str(self.job['task_id']))
         try:
             with db_connection.cursor(pymysql.cursors.SSCursor) as cursor:
                 rows = cursor.execute(sql, sql_args)
@@ -245,6 +305,7 @@ class ChunkScanner:
                 'chunk_key': chunk_key,
                 'tile_key': tile_key
             }
+            log.info(f'Re-enqueuing tile: {tile_key} belonging to chunk: {chunk_key}')
 
             yield json.dumps(msg)
 

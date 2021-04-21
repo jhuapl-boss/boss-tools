@@ -30,7 +30,6 @@ def get_db_connection(host):
         (pymysql.Connection) connection to DB
     """
     vault = bossutils.vault.Vault()
-    LOG.debug("get_db_connection(): made connection to Vault")
 
     # ------ get values from Vault -----------
     user = vault.read('secret/endpoint/django/db', 'user')

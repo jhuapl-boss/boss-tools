@@ -32,7 +32,6 @@ from ndingest.util.bossutil import BossUtil
 from bossnames.names import AWSNames
 
 from io import BytesIO
-import json
 from PIL import Image
 import numpy as np
 import math
@@ -70,7 +69,8 @@ def handler(event, context):
             ingest_queue = IngestQueue(proj_info)
             try:
                 msg = [x for x in ingest_queue.receiveMessage()]
-            except StopIteration:
+            # StopIteration may be converted to a RunTimeError.
+            except (StopIteration, RuntimeError):
                 msg = None
 
             if msg:
