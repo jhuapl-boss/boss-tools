@@ -197,17 +197,28 @@ class KeyCloakClient:
 
         return response
 
-    def get_all_users(self, search=None):
-        url = "users"
+    def get_all_users(self, search=None, max_users=1000):
+        """
+        Get user data from Keycloak.
+
+        Args:
+            search (str): Get users meeting the search criteria in user name,
+                first name, last name, or email.
+            max_users (int): Return at max, this number of users.
+
+        Returns:
+            (dict)
+        """
+        url = f"users?max={max_users}"
         if search is not None:
-            url += "?search=" + search
+            url += f"&search={search}"
 
         return self._get(url).json()
 
     def user_exist(self, uid):
         try:
             url = "users/{}".format(uid)
-            resp = self._get(url)
+            self._get(url)
 
             return True
         except KeyCloakError as ex:
