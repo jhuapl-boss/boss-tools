@@ -146,7 +146,7 @@ class IngestCleaner:
             INGEST_LAMBDA = config["aws"]["tile_ingest_lambda"]
             TILE_UPLOADED_LAMBDA = config["aws"]["tile_uploaded_lambda"]
         except Exception as ex:
-            log.error('Failed to get lambda names from boss.config: {ex}')
+            log.error(f'Failed to get lambda names from boss.config: {ex}')
             return
 
         self.remove_sqs_event_source_from_lambda(TileIndexQueue(self.nd_proj).arn, TILE_UPLOADED_LAMBDA)

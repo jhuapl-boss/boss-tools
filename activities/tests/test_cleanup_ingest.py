@@ -16,7 +16,7 @@
 import pymysql
 import pymysql.cursors
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from activities.cleanup_ingest import IngestCleaner, UPLOADING_DB, TILE_INGEST, VOLUMETRIC_INGEST
 from datetime import datetime
 
@@ -39,6 +39,54 @@ class TestIngestCleaner(unittest.TestCase):
         # This ensures the patch is removed when the test is torn down.
         self.addCleanup(patch_wrapper.stop)
         return magic_mock
+
+    def test_delete_lambda_event_source_queues_does_nothing_for_volumetric_ingests(self):
+        status = 'complete'
+        db_host = 'bar'
+        job_id = 300
+        job = {
+            'collection': 90,
+            'experiment': 141,
+            'channel': 985,
+            'task_id': job_id,
+            'resolution': 0,
+            'ingest_type': VOLUMETRIC_INGEST
+        }
+
+        cleaner = IngestCleaner(status, db_host, job)
+        with patch.object(cleaner, 'remove_sqs_event_source_from_lambda', autospec=True) as remove_spy:
+            cleaner.delete_lambda_event_source_queues()
+            self.assertEqual(0, len(remove_spy.call_args_list))
+
+    def test_delete_lambda_event_source_queues(self):
+        status = 'complete'
+        db_host = 'bar'
+        job_id = 300
+        job = {
+            'collection': 90,
+            'experiment': 141,
+            'channel': 985,
+            'task_id': job_id,
+            'resolution': 0,
+            'ingest_type': TILE_INGEST
+        }
+
+        fake_ingest_q = self.make_mock('activities.cleanup_ingest.IngestQueue')
+        fake_ingest_q.arn.return_value = 'ingest_queue_arn'
+        fake_tile_index_q = self.make_mock('activities.cleanup_ingest.TileIndexQueue')
+        fake_tile_index_q.arn.return_value = 'tile_ingest_queue_arn'
+
+        boss_cfg = self.make_mock('activities.cleanup_ingest.BossConfig')
+        boss_cfg.return_value = { 'aws': {
+            'tile_ingest_lambda': 'tileIngestLambda',
+            'tile_uploaded_lambda': 'tileUploadedLambda',
+        } }
+
+        cleaner = IngestCleaner(status, db_host, job)
+        with patch.object(cleaner, 'remove_sqs_event_source_from_lambda', autospec=True) as remove_spy:
+            cleaner.delete_lambda_event_source_queues()
+            # Should be called twice to remove two queues.
+            self.assertEqual(2, len(remove_spy.call_args_list))
 
     def test_delete_queues_non_tile_ingest(self):
         """Should only delete upload queue for non-tile ingests."""
