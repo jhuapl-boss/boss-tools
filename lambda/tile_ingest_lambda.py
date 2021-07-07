@@ -202,6 +202,8 @@ def handler(event, context):
             tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         else:
             try:
+                # DP NOTE: Issues when specifying dtype in the asarray function with Pillow ver 8.3.1. 
+                # Fixed by separating array instantiation and dtype assignment. 
                 tile_img = np.asarray(Image.open(image_bytes))
                 tile_img = tile_img.astype(dtype)
             except TypeError as te:
