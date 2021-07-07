@@ -202,7 +202,8 @@ def handler(event, context):
             tile_img = np.zeros((tile_size_x, tile_size_y), dtype=dtype)
         else:
             try:
-                tile_img = np.asarray(Image.open(image_bytes), dtype=dtype)
+                tile_img = np.asarray(Image.open(image_bytes))
+                tile_img = tile_img.astype(dtype)
             except TypeError as te:
                 print('TileError: Incomplete tile, using black instead (tile_size_in_bytes, tile_key): {}, {}'
                       .format(image_size, tile_key))
