@@ -14,9 +14,12 @@
 
 
 import pymysql.cursors
+import boto3
 from datetime import datetime, timezone
 from boss_db import get_db_connection
 from bossutils import logger
+from bossutils.aws import get_region
+from bossutils.configuration import BossConfig
 from bossutils.ingestcreds import IngestCredentials
 from bossutils.utils import set_excepthook
 from ndingest.ndqueue.uploadqueue import UploadQueue
@@ -120,6 +123,7 @@ class IngestCleaner:
         """
         Start the cleanup process.
         """
+        self.delete_lambda_event_source_queues()
         self.delete_queues()
         self.delete_credentials()
 
@@ -129,19 +133,58 @@ class IngestCleaner:
         finally:
             db_connection.close()
 
+    def delete_lambda_event_source_queues(self):
+        """
+        Remove SQS queues connected to ingest lambdas that are connected as
+        event sources.
+        """
+        if int(self.job['ingest_type']) != TILE_INGEST:
+            return
+
+        try:
+            config = BossConfig()
+            INGEST_LAMBDA = config["aws"]["tile_ingest_lambda"]
+            TILE_UPLOADED_LAMBDA = config["aws"]["tile_uploaded_lambda"]
+        except Exception as ex:
+            log.error(f'Failed to get lambda names from boss.config: {ex}')
+            return
+
+        self.remove_sqs_event_source_from_lambda(TileIndexQueue(self.nd_proj).arn, TILE_UPLOADED_LAMBDA)
+        self.remove_sqs_event_source_from_lambda(IngestQueue(self.nd_proj).arn, INGEST_LAMBDA)
+
+    def remove_sqs_event_source_from_lambda(self, queue_arn, lambda_name):
+        """
+        Removes an SQS event triggger from the given lambda.
+
+        Args:
+            queue_arn (str): Arn of SQS queue that will be the trigger source.
+            lambda_name (str): Lambda function name.
+        """
+        client = boto3.client('lambda', region_name=get_region())
+        try:
+            resp = client.list_event_source_mappings(
+                EventSourceArn=queue_arn,
+                FunctionName=lambda_name)
+        except Exception as ex:
+            log.error(f"Couldn't list event source mappings for {lambda_name}: {ex}")
+            return
+        for evt in resp['EventSourceMappings']:
+            try:
+                client.delete_event_source_mapping(UUID=evt['UUID'])
+            except client.exceptions.ResourceNotFoundException:
+                pass
+            except Exception as ex:
+                log.error(f"Couldn't remove event source mapping {queue_arn} from {lambda_name}: {ex}")
+
     def delete_queues(self):
         """
         Delete all the queues used by the ingest job.
         """
         delete_list = [UploadQueue]
-        #UploadQueue.deleteQueue(self.nd_proj, endpoint_url=None)
         if int(self.job['ingest_type']) == TILE_INGEST:
             delete_list.append(IngestQueue)
             delete_list.append(TileIndexQueue)
             delete_list.append(TileErrorQueue)
-            #IngestQueue.deleteQueue(self.nd_proj, endpoint_url=None)
-            #TileIndexQueue.deleteQueue(self.nd_proj, endpoint_url=None, delete_deadletter_queue=True)
-            #TileErrorQueue.deleteQueue(self.nd_proj, endpoint_url=None)
 
         for queue in delete_list:
             try:
