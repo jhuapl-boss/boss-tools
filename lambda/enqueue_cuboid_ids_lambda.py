@@ -48,14 +48,14 @@ _istype = lambda t: lambda x: type(x) is t
 _or = lambda t1, t2: lambda x: t1(x) or t2(x)
 # array of event fields with allowed types and flag to pass through as message field
 event_types = [EventTypes('ids',lambda x: _isIterable(x) and not _istype(str)(x), False, "iterable"), 
-               EventTypes('num_ids_per_msg',_istype(int), False, "integer"),
+               EventTypes('num_ids_per_msg',_istype(int), True, "integer"),
                EventTypes('attempt', _istype(int), False, "integer"),
                EventTypes('done', _istype(bool), False, "bool"),
                EventTypes('wait_time', _istype(int), False, "integer"),
                EventTypes('sqs_url',_istype(str), True, "string"), 
                EventTypes('cuboid_object_key',_istype(str), True, "string"), 
                EventTypes('config', _istype(dict), True, "dictionary"), 
-               EventTypes('id_index_step_fcn',_istype(str), True, "string", 'sfn_arn'),
+               EventTypes('id_index_step_fcn',_istype(str), True, "string"),
                EventTypes('version',_or(_istype(str), _istype(int)), True, "string or integer")]
 event_fields = [e.name for e in event_types]
 message_fields = [e for e in event_types if e.include_in_msgs]
@@ -108,6 +108,13 @@ def handler(event, context=None):
     if invalidTypes:
         raise TypeError(";".join([f"Expected {e.name} as {e.type_str}, found {type(event[e.name])}" for e in invalidTypes]))
     
+    # Populate orig_wait_time field if not provided.  wait_time will be mutated
+    # on failures, so retain the original value in this new field.  This value
+    # will be included in the SQS message so that downstream step functions
+    # have access to the original value.
+    if 'orig_wait_time' not in event:
+        event['orig_wait_time'] = event['wait_time']
+
     # make sure we can access the queue
     endpoint = os.getenv('SQS_BACKEND', None)
     sqs = boto3.resource("sqs", endpoint_url=endpoint)
@@ -226,13 +233,18 @@ def create_messages(event):
 
     # select the constant fields
     base_msg = { get_message_name(f) : event[f.name] for f in message_fields }
-    base_msg['id_group'] = []
+    base_msg['wait_time'] = event['orig_wait_time']
+    # The lambda connected to the SQS queue expects 'sfn_arn', but we also
+    # need to keep 'id_index_step_fcn' for downstream invocations of this
+    # lambda.
+    base_msg['sfn_arn'] = event['id_index_step_fcn']
+    base_msg['ids'] = []
 
     # add the block of ids to the base message
     for i in ids:
-        base_msg['id_group'].append(i)
-        if len(base_msg['id_group']) == ids_per_msg:
+        base_msg['ids'].append(i)
+        if len(base_msg['ids']) == ids_per_msg:
             yield json.dumps(base_msg)
-            base_msg['id_group'] = []
-    if base_msg['id_group']:
+            base_msg['ids'] = []
+    if base_msg['ids']:
         yield json.dumps(base_msg)        
