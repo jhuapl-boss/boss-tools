@@ -22,6 +22,9 @@
 #   "num_ids_per_msg": int,
 #   "id_chunk_size": int,
 #   "wait_time": int,
+#   "id_cuboid_supervisor_step_fcn": "arn:aws:states:...",
+#   "id_index_step_fcn": "arn:aws:states:...",
+#   "index_ids_sqs_url": "https://queue.amazonaws.com/...",
 # }
 #
 # Outputs:
@@ -36,6 +39,12 @@
 #       "status_delay": int
 #   }
 ######## Below are inputs to the pass to fanout_nonblocking().
+#   "id_cuboid_supervisor_step_fcn": "arn:aws:states:...",
+#   "id_index_step_fcn": "arn:aws:states:...",
+#   "index_ids_sqs_url": "https://queue.amazonaws.com/...",
+#   "num_ids_per_msg": int,
+#   "id_chunk_size": int,
+#   "wait_time": int,
 #   'cuboid_object_key': '...',
 #   'version': '...',
 #   'config': ...
@@ -136,9 +145,19 @@ def build_subargs_from_obj_keys(event):
     count = 0
     args_n = {'cuboid_msgs': []}
     for obj_key in event['obj_keys']:
+        data = {
+            'config': event['config'],
+            'cuboid': obj_key,
+            'sfn_arn': event['id_cuboid_supervisor_step_fcn'],
+            'id_index_step_fcn': event['id_index_step_fcn'],
+            'num_ids_per_msg': event['num_ids_per_msg'],
+            'id_chunk_size': event['id_chunk_size'],
+            'wait_time': event['wait_time'],
+
+        }
         args_n['cuboid_msgs'].append({
             'Id': str(count),
-            'MessageBody': json.dumps(obj_key)
+            'MessageBody': json.dumps(data)
         })
         if count > 0 and (count+1) % SQS_MAX_BATCH == 0:
             fanout_subargs.append(args_n)
