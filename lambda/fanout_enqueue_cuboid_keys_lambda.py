@@ -23,6 +23,7 @@
 #   "id_chunk_size": int,
 #   "wait_time": int,
 #   "id_cuboid_supervisor_step_fcn": "arn:aws:states:...",
+#   "fanout_id_writers_step_fcn": "arn:aws:states:us-east-1:...",
 #   "id_index_step_fcn": "arn:aws:states:...",
 #   "index_ids_sqs_url": "https://queue.amazonaws.com/...",
 # }
@@ -149,9 +150,11 @@ def build_subargs_from_obj_keys(event):
             'config': event['config'],
             'cuboid': obj_key,
             'sfn_arn': event['id_cuboid_supervisor_step_fcn'],
+            'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
             'id_index_step_fcn': event['id_index_step_fcn'],
             'num_ids_per_msg': event['num_ids_per_msg'],
             'id_chunk_size': event['id_chunk_size'],
+            'index_ids_sqs_url': event['index_ids_sqs_url'],
             'wait_time': event['wait_time'],
 
         }

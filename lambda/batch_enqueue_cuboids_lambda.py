@@ -23,11 +23,30 @@
 #   InvalidAttributeName
 
 import boto3
+import json
 
 def handler(event, context):
 
     queue = event['config']['object_store_config']['index_cuboids_keys_queue']
-    msgs = event['cuboid_msgs']
+    data = {
+        'config': event['config'],
+        'sfn_arn': event['id_cuboid_supervisor_step_fcn'],
+        'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
+        'id_index_step_fcn': event['id_index_step_fcn'],
+        'num_ids_per_msg': event['num_ids_per_msg'],
+        'id_chunk_size': event['id_chunk_size'],
+        'index_ids_sqs_url': event['index_ids_sqs_url'],
+        'wait_time': event['wait_time'],
+    }
+
+    msgs = []
+    for ind, key in enumerate(event['obj_keys']):
+        data['cuboid'] = key
+        sqs_msg = {
+            'Id': str(ind),
+            'MessageBody': json.dumps(data),
+        }
+        msgs.append(sqs_msg)
 
     sqs = boto3.client('sqs')
 
