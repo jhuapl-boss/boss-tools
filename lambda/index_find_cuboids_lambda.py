@@ -25,7 +25,8 @@
 #   'status': {
 #       'done': bool,
 #       'lookup_key_n': ...     # (int): append this to the lookup_key when querying.  Should be zero, initially.
-#   }
+#   },
+#   'query_count': int
 # }
 #
 # Output (inputs plus changed/added keys):
@@ -35,6 +36,7 @@
 #   "num_batches": Number of batches of obj_keys for enqueuing to SQS
 #   "first_time": False
 #   "sfn_arn": "..."
+#   "query_count" += 1
 # }
 
 import boto3
@@ -62,7 +64,7 @@ def handler(event, context):
     query_args = {
         'TableName': table,
         'IndexName': LOOKUP_KEY_INDEX,
-        'KeyConditionExpression': '#lookupKey = :lookupKeyVal'.format(LOOKUP_KEY),
+        'KeyConditionExpression': '#lookupKey = :lookupKeyVal',
         'ExpressionAttributeNames': {
             '#lookupKey': LOOKUP_KEY,
             '#objKey': OBJ_KEY,
@@ -109,6 +111,11 @@ def handler(event, context):
 
     # Give start step function lambda the arn of the step function to run.
     event['sfn_arn'] = event['batch_enqueue_cuboids_step_fcn']
+
+    # Up the counter so the step function knows when it should spawn a new
+    # instance of itself to avoid exceeding the max number of state
+    # transitions.
+    event['query_count'] += 1
 
     return event
 
