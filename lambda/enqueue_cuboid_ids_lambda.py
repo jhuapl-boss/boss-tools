@@ -152,7 +152,7 @@ def build_retry_response(batch, msgs, event):
     """
     def getNextId(msg):
         m = json.loads(msg)
-        for cid in m['id_group']:
+        for cid in m['ids']:
             yield cid
     def getId():
         for e in batch:
