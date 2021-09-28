@@ -55,7 +55,16 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         filtered = { k : e[k] for k in e if e[k] }
         filtered['done'] = False
         filtered['wait_time'] = 0
+        filtered['orig_wait_time'] = 5
         return filtered
+
+    def test_message_field_copy(self):
+        """id_index_step_fcn copied to sfn_arn."""
+        e = self.get_fake_event(range(4), 5)
+        msgs = create_messages(e)
+        for m in msgs:
+            msg = json.loads(m)
+            self.assertEquals(msg['sfn_arn'], msg['id_index_step_fcn'])
 
     def test_partial_event(self):
         # empty event
@@ -82,7 +91,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         for n,m in enumerate(msgs):
             msg = json.loads(m)
             # each message should have less than or equal to num_ids_per_msg IDs
-            self.assertLessEqual(len(msg['id_group']), e['num_ids_per_msg'])
+            self.assertLessEqual(len(msg['ids']), e['num_ids_per_msg'])
         # enumerator is 0 based
         self.assertEqual(n+1, 10)
 
@@ -96,7 +105,7 @@ class TestEnqueueCuboidIds(unittest.TestCase):
         print(f"created a batch of {len(batch)} messages")
         failed = [e for i,e in enumerate(batch) if i%2 == 1]
         print(f"failed {len(failed)} messages in the batch")
-        unsentFromBatch = len([i for m in failed for i in json.loads(m['MessageBody'])['id_group']])
+        unsentFromBatch = len([i for m in failed for i in json.loads(m['MessageBody'])['ids']])
         print(f"There are {unsentFromBatch} Ids that have failed to send")
         numUnsentIds = totalIds - (len(batch) * idsPerMessage) + unsentFromBatch
         print(f"There are a total of {numUnsentIds} unsent Ids")

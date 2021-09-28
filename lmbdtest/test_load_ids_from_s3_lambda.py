@@ -56,8 +56,8 @@ class TestGetChunkIndicesLambda(unittest.TestCase):
         self.assertEqual(500, slice1.stop)
 
 
-class TestLoadIdsFromS3Lambda(unittest.TestCase):
-    def test_without_dynamo(self):
+class TestLoadIdsFromS3LambdaWithoutDynamo(unittest.TestCase):
+    def test_4_chunks(self):
         event = {
             "num_ids_per_worker": 20,
             "id_chunk_size": 5,
@@ -90,7 +90,7 @@ class TestLoadIdsFromS3Lambda(unittest.TestCase):
 
             self.assertDictEqual(exp, actual)
 
-    def test_without_dynamo_no_ids(self):
+    def test_no_ids(self):
         event = {
             "num_ids_per_worker": 20,
             "id_chunk_size": 5,
@@ -112,4 +112,67 @@ class TestLoadIdsFromS3Lambda(unittest.TestCase):
         ) as fake_read:
             fake_read.return_value = {}
             actual = handler(event, None)
+            self.assertDictEqual(exp, actual)
+
+    def test_1_chunk(self):
+
+        event = {
+            "num_ids_per_worker": 20,
+            "id_chunk_size": 5,
+            "cuboid_object_key": "fake_cuboid_key",
+            "config": {
+                "object_store_config": {
+                    "s3_index_table": "s3_test_table",
+                }
+            },
+            "version": 0,
+            "worker_id": 1,
+        }
+
+        exp = dict(event)
+        exp["id_chunks"] = [
+            [20, 21, 22],
+        ]
+
+        with patch(
+            "lambdafcns.load_ids_from_s3_lambda.read_dynamo", autospec=True
+        ) as fake_read:
+            fake_read.return_value = {
+                "Item": {IDSET_ATTR: {"NS": [i for i in range(23)]}},
+            }
+
+            actual = handler(event, None)
+
+            self.assertDictEqual(exp, actual)
+
+    def test_2_chunks(self):
+
+        event = {
+            "num_ids_per_worker": 20,
+            "id_chunk_size": 5,
+            "cuboid_object_key": "fake_cuboid_key",
+            "config": {
+                "object_store_config": {
+                    "s3_index_table": "s3_test_table",
+                }
+            },
+            "version": 0,
+            "worker_id": 1,
+        }
+
+        exp = dict(event)
+        exp["id_chunks"] = [
+            [20, 21, 22, 23, 24],
+            [25],
+        ]
+
+        with patch(
+            "lambdafcns.load_ids_from_s3_lambda.read_dynamo", autospec=True
+        ) as fake_read:
+            fake_read.return_value = {
+                "Item": {IDSET_ATTR: {"NS": [i for i in range(26)]}},
+            }
+
+            actual = handler(event, None)
+
             self.assertDictEqual(exp, actual)

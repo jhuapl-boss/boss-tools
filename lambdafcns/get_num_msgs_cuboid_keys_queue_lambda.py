@@ -1,1 +1,0 @@
-../lambda/get_num_msgs_cuboid_keys_queue_lambda.py

@@ -58,6 +58,8 @@ def handler(event, context):
     # event['ids'] = ids[start:start+num_ids_per_worker]
     num_chunks = math.ceil(num_ids_per_worker / id_chunk_size)
     total_ids = len(ids)
+    available_ids = max(total_ids - start, 0)
+    num_chunks = min(num_chunks, math.ceil(available_ids / id_chunk_size))
     event["id_chunks"] = [
         ids[get_chunk_indices(start, id_chunk_size, total_ids, i)]
         for i in range(num_chunks)

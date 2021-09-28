@@ -18,21 +18,27 @@
 from lambdafcns.write_id_index_lambda import handler, get_class_name
 
 import botocore
-import json
-#from spdb.spatialdb.object_indices import ObjectIndices
 import unittest
 from unittest.mock import patch
 
 class TestWriteIdIndexLambda(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            'object_store_config': {
+                'id_index_table': 'id-index-ddb',
+                's3_index_table': 's3-index-ddb',
+                'id_count_table': 'id-count-ddb',
+                'cuboid_bucket': 'cuboid-bucket',
+                'id_index_new_chunk_threshold': 100,
+            },
+        }
+
     def test_write_all_success(self):
         event = {
-            'id_index_table': 'idIndex',
-            's3_index_table': 's3Index',
-            'id_count_table': 'idCount',
-            'cuboid_bucket': 'cuboidBucket',
+            'config': self.config,
             'id_index_new_chunk_threshold': 100,
             'cuboid_object_key': 'blah',
-            'id_group': ['1', '2', '3'],
+            'ids': ['1', '2', '3'],
             'version': 0,
             'write_id_index_status': {
                 'done': False,
@@ -51,20 +57,17 @@ class TestWriteIdIndexLambda(unittest.TestCase):
                 # Function under test.
                 actual = handler(event, context)
 
-        # When all ids successfully updated with the cuboid key, id_group
+        # When all ids successfully updated with the cuboid key, ids
         # should be empty.
-        self.assertEqual(0, len(actual['id_group']))
+        self.assertEqual(0, len(actual['ids']))
         self.assertTrue(actual['write_id_index_status']['done'])
 
     def test_write_has_a_failure(self):
         event = {
-            'id_index_table': 'idIndex',
-            's3_index_table': 's3Index',
-            'id_count_table': 'idCount',
-            'cuboid_bucket': 'cuboidBucket',
+            'config': self.config,
             'id_index_new_chunk_threshold': 100,
             'cuboid_object_key': 'blah',
-            'id_group': ['1', '2', '3', '4', '5'],
+            'ids': ['1', '2', '3', '4', '5'],
             'version': 0,
             'write_id_index_status': {
                 'done': False,
@@ -91,18 +94,15 @@ class TestWriteIdIndexLambda(unittest.TestCase):
                 actual = handler(event, context)
 
         # Test set up to fail for id 3 above.
-        self.assertEqual(['3', '4', '5'], actual['id_group'])
+        self.assertEqual(['3', '4', '5'], actual['ids'])
         self.assertFalse(actual['write_id_index_status']['done'])
 
     def test_handler_ClientError(self):
         event = {
-            'id_index_table': 'idIndex',
-            's3_index_table': 's3Index',
-            'id_count_table': 'idCount',
-            'cuboid_bucket': 'cuboidBucket',
+            'config': self.config,
             'id_index_new_chunk_threshold': 100,
             'cuboid_object_key': 'blah',
-            'id_group': ['1', '2', '3'],
+            'ids': ['1', '2', '3'],
             'version': 0,
             'write_id_index_status': {
                 'done': False,
@@ -138,13 +138,10 @@ class TestWriteIdIndexLambda(unittest.TestCase):
         Test that error is raised when retries_left == 0.
         """
         event = {
-            'id_index_table': 'idIndex',
-            's3_index_table': 's3Index',
-            'id_count_table': 'idCount',
-            'cuboid_bucket': 'cuboidBucket',
+            'config': self.config,
             'id_index_new_chunk_threshold': 100,
             'cuboid_object_key': 'blah',
-            'id_group': ['1', '2', '3'],
+            'ids': ['1', '2', '3'],
             'version': 0,
             'write_id_index_status': {
                 'done': False,

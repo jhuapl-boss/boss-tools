@@ -6,13 +6,10 @@
 #
 # It expects to get from events dictionary
 # {
-#   'id_index_table': ...,
-#   's3_index_table': ...,
-#   'id_count_table': ...,
-#   'cuboid_bucket': ...,
-#   'id_index_new_chunk_threshold': ...,
+#   spdb config object
+#   'config': {... },
 #   'cuboid_object_key': '...',
-#   'id_group': '...',
+#   'ids': '...',
 #   'version': '...',
 #   'write_id_index_status': {
 #       'done': False,
@@ -68,14 +65,15 @@ class DynamoClientError(Exception):
 
 
 def handler(event, context):
-    id_index_table = event['id_index_table']
-    s3_index_table = event['s3_index_table']
-    id_count_table = event['id_count_table']
-    cuboid_bucket = event['cuboid_bucket']
+    spdb_obj_store_cfg = event['config']['object_store_config']
+    id_index_table = spdb_obj_store_cfg['id_index_table']
+    s3_index_table = spdb_obj_store_cfg['s3_index_table']
+    id_count_table = spdb_obj_store_cfg['id_count_table']
+    cuboid_bucket = spdb_obj_store_cfg['cuboid_bucket']
 
     write_id_index_status = event['write_id_index_status']
 
-    id_index_new_chunk_threshold = (event['id_index_new_chunk_threshold'])
+    id_index_new_chunk_threshold = (spdb_obj_store_cfg['id_index_new_chunk_threshold'])
 
     obj_ind = ObjectIndices(
         s3_index_table, id_index_table, id_count_table, cuboid_bucket, 
@@ -85,7 +83,7 @@ def handler(event, context):
     done_ids = set()
 
     try:
-        for obj_id in event['id_group']:
+        for obj_id in event['ids']:
             obj_ind.write_id_index(
                 id_index_new_chunk_threshold, 
                 event['cuboid_object_key'], obj_id, event['version'])
@@ -102,7 +100,7 @@ def handler(event, context):
         event['result'] = str(ex)
         prep_for_retry(write_id_index_status)
 
-    event['id_group'] = [i for i in event['id_group'] if i not in done_ids]
+    event['ids'] = [i for i in event['ids'] if i not in done_ids]
 
     return event
 
