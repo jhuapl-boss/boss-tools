@@ -22,9 +22,9 @@ commands:
         type: string
     steps:
       - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest
-      - run: git clone https://github.com/jhuapl-boss/ndingest.git /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest
-      - run: cp /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest/settings/settings.ini.test /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest/settings/settings.ini
-
+      - run: git clone https://github.com/jhuapl-boss/ndingest.git 
+      - run: cd ndingest && pip install -e .
+      - run: rm -rf ./ndingest
   install_spdb:
     description: "Clone spdb and install"
     parameters:
