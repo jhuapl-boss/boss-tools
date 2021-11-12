@@ -21,10 +21,9 @@ commands:
       pyversion:
         type: string
     steps:
-      - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/ndingest
       - run: git clone https://github.com/jhuapl-boss/ndingest.git 
       - run: pip install -e ndingest/.
-      - run: rm -rf ./ndingest
+      - run: cp ndingest/ndingest/settings/settings.ini.test ndingest/ndingest/settings/settings.ini
   install_spdb:
     description: "Clone spdb and install"
     parameters:
@@ -86,6 +85,23 @@ commands:
       - run: python3 -m unittest discover lmbdtest
 
 jobs:
+  test_py3_8:
+    docker:
+      - image: circleci/python:3.8
+    environment:
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+    steps:
+      - install:
+          pyversion: python3.8
+      - setup
+      - test_activities
+      - test_bossutils
+      - test_cachemgr
+      #- test_lambdafcns
+
   test_py3_7:
     docker:
       - image: circleci/python:3.7
@@ -123,5 +139,6 @@ jobs:
 workflows:
   test:
     jobs:
+      - test_py3_8
       - test_py3_7
         #- test_py3_5
