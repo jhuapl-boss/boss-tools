@@ -24,6 +24,7 @@ commands:
       - run: git clone https://github.com/jhuapl-boss/ndingest.git 
       - run: pip install -e ndingest/.
       - run: cp ndingest/ndingest/settings/settings.ini.test ndingest/ndingest/settings/settings.ini
+
   install_spdb:
     description: "Clone spdb and install"
     parameters:
@@ -35,6 +36,14 @@ commands:
       - run: cd spdb && pip install --user -r requirements-test.txt
       - run: rm -rf /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages/spdb
       - run: mv spdb/spdb /home/circleci/.local/lib/<< parameters.pyversion >>/site-packages
+
+  install_bossutils:
+    description: "The bossutils folder of the project is pip installable"
+    parameters:
+      pyversion:
+        type: string
+    steps:
+      - run: cd bossutils && pip install .
 
   install:
     description: "Install Python dependencies"
@@ -50,6 +59,8 @@ commands:
       - install_ndingest:
           pyversion: << parameters.pyversion >>
       - install_spdb:
+          pyversion: << parameters.pyversion >>
+      - install_bossutils:
           pyversion: << parameters.pyversion >>
       - python/save-cache
 
@@ -119,26 +130,8 @@ jobs:
       - test_cachemgr
       #- test_lambdafcns
 
-  test_py3_5:
-    docker:
-      - image: circleci/python:3.5
-    environment:
-      AWS_ACCESS_KEY_ID: testing
-      AWS_SECRET_ACCESS_KEY: testing
-      AWS_SECURITY_TOKEN: testing
-      AWS_SESSION_TOKEN: testing
-    steps:
-      - install:
-          pyversion: python3.5
-      - setup
-      - test_activities
-      - test_bossutils
-      - test_cachemgr
-      #- test_lambdafcns
-
 workflows:
   test:
     jobs:
       - test_py3_8
       - test_py3_7
-        #- test_py3_5
