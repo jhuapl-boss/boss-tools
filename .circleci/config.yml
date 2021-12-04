@@ -133,5 +133,6 @@ jobs:
 workflows:
   test:
     jobs:
+      - test_py3_9
       - test_py3_8
       - test_py3_7
