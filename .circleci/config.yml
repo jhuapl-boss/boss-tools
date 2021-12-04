@@ -44,6 +44,9 @@ commands:
         type: string
     steps:
       - run: cd bossutils && pip install .
+      # Hide the folder so it's not used by the tests instead of the one
+      # installed to site-packages.
+      - run: mv bossutils bossutils_hidden
 
   install:
     description: "Install Python dependencies"
@@ -81,7 +84,7 @@ commands:
   test_bossutils:
     description: "Test the bossutils code"
     steps:
-      - run: python3 -m unittest discover bossutils
+      - run: python3 -m unittest discover bossutils_hidden
     
   test_cachemgr:
     description: "Test the cache manager code"
@@ -96,6 +99,23 @@ commands:
       - run: python3 -m unittest discover lmbdtest
 
 jobs:
+  test_py3_9:
+    docker:
+      - image: circleci/python:3.9
+    environment:
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_SECURITY_TOKEN: testing
+      AWS_SESSION_TOKEN: testing
+    steps:
+      - install:
+          pyversion: python3.9
+      - setup
+      - test_activities
+      - test_bossutils
+      - test_cachemgr
+      #- test_lambdafcns
+
   test_py3_8:
     docker:
       - image: circleci/python:3.8
