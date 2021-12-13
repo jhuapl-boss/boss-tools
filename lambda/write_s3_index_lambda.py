@@ -24,7 +24,7 @@
 # }
 
 from math import ceil
-from bossutils.aws import get_region
+import os
 from spdb.spatialdb.object_indices import ObjectIndices
 
 NUM_IDS_PER_WORKER = 100
@@ -47,8 +47,9 @@ def handler(event, context):
     id_count_table = event['config']['object_store_config']['id_count_table']
     cuboid_bucket = event['config']['object_store_config']['cuboid_bucket']
 
+    region = os.environ['AWS_REGION']
     obj_ind = ObjectIndices(
-        s3_index_table, id_index_table, id_count_table, cuboid_bucket, get_region())
+        s3_index_table, id_index_table, id_count_table, cuboid_bucket, region)
     ids_list = obj_ind.write_s3_index(
         event['cuboid']['object-key']['S'], event['cuboid']['version-node']['N'])
 
