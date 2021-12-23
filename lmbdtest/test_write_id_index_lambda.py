@@ -50,10 +50,7 @@ class TestWriteIdIndexLambda(unittest.TestCase):
         context = None
 
         with patch('lambdafcns.write_id_index_lambda.ObjectIndices'):
-            with patch(
-                'lambdafcns.write_id_index_lambda.get_region', 
-                return_value='us-east-1'
-            ):
+            with patch.dict('os.environ', {'AWS_REGION': 'us-east-1'}):
                 # Function under test.
                 actual = handler(event, context)
 
@@ -86,10 +83,7 @@ class TestWriteIdIndexLambda(unittest.TestCase):
             ex.strerror = 'blah'
             # Make the write fail when updating id 3.
             fake_obj_ind.return_value.write_id_index.side_effect = [None, None, ex]
-            with patch(
-                'lambdafcns.write_id_index_lambda.get_region', 
-                return_value='us-east-1'
-            ):
+            with patch.dict('os.environ', {'AWS_REGION': 'us-east-1'}):
                 # Function under test.
                 actual = handler(event, context)
 
@@ -120,10 +114,7 @@ class TestWriteIdIndexLambda(unittest.TestCase):
             ex.message = 'blah'
             ex.strerror = 'blah'
             fake_obj_ind.return_value.write_id_index.side_effect = ex
-            with patch(
-                'lambdafcns.write_id_index_lambda.get_region', 
-                return_value='us-east-1'
-            ):
+            with patch.dict('os.environ', {'AWS_REGION': 'us-east-1'}):
                 # Function under test.
                 actual = handler(event, context)
 
@@ -159,10 +150,7 @@ class TestWriteIdIndexLambda(unittest.TestCase):
             ex.message = 'blah'
             ex.strerror = 'blah'
             fake_obj_ind.return_value.write_id_index.side_effect = ex
-            with patch(
-                'lambdafcns.write_id_index_lambda.get_region', 
-                return_value='us-east-1'
-            ):
+            with patch.dict('os.environ', {'AWS_REGION': 'us-east-1'}):
                 with self.assertRaises(botocore.exceptions.ClientError):
                     # Function under test.
                     handler(event, context)

@@ -19,7 +19,7 @@
 # }
 
 import botocore
-from bossutils.aws import get_region
+import os
 import random
 from spdb.spatialdb.object_indices import ObjectIndices
 
@@ -75,9 +75,9 @@ def handler(event, context):
 
     id_index_new_chunk_threshold = (spdb_obj_store_cfg['id_index_new_chunk_threshold'])
 
+    region = os.environ['AWS_REGION']
     obj_ind = ObjectIndices(
-        s3_index_table, id_index_table, id_count_table, cuboid_bucket, 
-        get_region())
+        s3_index_table, id_index_table, id_count_table, cuboid_bucket, region)
 
     # Track which ids successfully updated.
     done_ids = set()
