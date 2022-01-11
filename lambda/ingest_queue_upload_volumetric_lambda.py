@@ -41,11 +41,11 @@ def handler(args, context):
             'x_tile_size': 0,
 
             'y_start': 0,
-            'y_stop': 0
+            'y_stop': 0,
             'y_tile_size': 0,
 
             'z_start': 0,
-            'z_stop': 0
+            'z_stop': 0,
             'z_tile_size': 0,
 
             'z_chunk_size': 64,  # or other possible number
