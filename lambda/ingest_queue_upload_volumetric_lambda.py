@@ -4,6 +4,7 @@ import json
 import time
 import hashlib
 import pprint
+import math
 #from spdb.c_lib.ndlib import XYZMorton
 
 
@@ -179,66 +180,146 @@ def create_messages(args):
 
     tile_size = lambda v: args[v + "_tile_size"]
 
-    chunks_to_skip = args['items_to_skip']
-    count_in_offset = 0
-    for t in range_('t'):
-        for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
-            for y in range_('y'):
-                for x in range_('x'):
+    # CF  New algorithm follows
 
-                    if chunks_to_skip > 0:
-                        chunks_to_skip -= 1
-                        continue
+    #  Goal is to PRE-COMPUTE the new starting values for T Z Y X , given # of tiles to skip
+    #  Having the starting values will be more efficient than iterating for every TZYX
 
-                    if count_in_offset == 0:
-                        print("Finished skipping chunks")
+    # Tns:  T's new start position
+    # Zns:  Z's new start position
+    # Yns:  Y's new start position
+    # Xns:  X's new start position
 
-                    chunk_x = int(x / tile_size('x'))
-                    chunk_y = int(y / tile_size('y'))
-                    chunk_z = int(z / args['z_chunk_size'])
-                    chunk_key = hashed_key(1,  # num of items
-                                           args['project_info'][0],
-                                           args['project_info'][1],
-                                           args['project_info'][2],
-                                           args['resolution'],
-                                           chunk_x,
-                                           chunk_y,
-                                           chunk_z,
-                                           t)
+    #########################
+    # 
+    #  First, Let's create some Helper lambda functions 
+    #
 
-                    count_in_offset += 1
-                    if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
-                        return  # end the generator
+    # range helper function for X and Y dimensions
+    new_range = lambda v, vns, First : range(vns, args[v + '_stop'] , args[v + '_tile_size']) if First else range(args[v + '_start'], args[v + '_stop'] , args[v + '_tile_size'])
+    # range helper function for Z dimension
+    new_range_z = lambda zns, First : range(zns, args['z_stop'] , args['z_chunk_size']) if First else range(args['z_start'], args['z_stop'] , args['z_chunk_size'])
+    # range helper function for tiles
+    new_range_tile = lambda t2s,z,First,nt : range(z + t2s, z + nt) if First else range(z, z + nt)
 
-                    cuboids = []
+    # generic helper lambda func factoring tile_size (use ceiling)
+    factor_ = lambda v: math.ceil((args[v + '_stop'] - args[v + '_start']) / args[v + '_tile_size'])
 
-                    # Currently, only allow ingest for time sample 0.
-                    t = 0
-                    lookup_key = lookup_key_from_chunk_key(chunk_key)
-                    res = resolution_from_chunk_key(chunk_key)
+    # new start helper func (for tile_size cases)
+    ns = lambda v,n: args[v + '_start'] + args[v + '_tile_size'] * n
+    # new start helper func for special case Z (which uses chunk_size)
+    ns_z = lambda v,n: args[v + '_start'] + args[v + '_chunk_size'] * n
 
-                    for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
-                        for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
-                            for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
-                                #morton = XYZMorton(
-                                    #[(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
-                                morton = '999999'
-                                object_key = generate_object_key(lookup_key, res, t, morton)
-                                new_cuboid = {
-                                    "x": chunk_offset_x,
-                                    "y": chunk_offset_y,
-                                    "z": chunk_offset_z,
-                                    "key": object_key
-                                }
-                                cuboids.append(new_cuboid)
+    ##########################
+    #
+    # Now Let's start the actual calculations to compute the new ( Tns Znz Yns Xns ) values 
+    #
+    # first, factor in  (x, y, z dimensions)
+    Xf = factor_('x')
+    Yf = factor_('y')
+    Zf = args['z_stop'] - args['z_start']
 
-                    msg = {
-                        'chunk_key': chunk_key,
-                        'cuboids': cuboids,
-                    }
+    # counter to keep track of # tiles to skip, used decrementally throughout the rest of the calcs below
+    items_to_skip = args['items_to_skip']
 
-                    #yield json.dumps(msg)clear
-                    return msg
+    ############### T
+    # T pos, factoring in X, Y, Z
+    Tk = int(items_to_skip/(Xf*Yf*Zf))
+    #compute T's new start
+    Tns = ns('t',Tk)
+    #decr tiles to skip
+    items_to_skip -= Tk*Xf*Yf*Zf
+
+    ############### Z
+    # Z pos, factoring in X, Y
+    Zk = int(items_to_skip/(args['z_chunk_size']*Xf*Yf))
+    # compute Z's new start
+    Zns = ns_z('z',Zk)
+    # decr tiles to skip
+    items_to_skip -= Zk*args['z_chunk_size']*Xf*Yf
+
+    #set the number of tiles (to be used for X and Y calculations)
+    num_tiles = min(args['z_chunk_size'], args['z_stop'] - Zns)
+
+    ############### Y
+    # Y pos, factoring in X
+    Yk = int(items_to_skip/(num_tiles*Xf))
+    # compute Y's new start pos
+    Yns = ns('y',Yk)
+    # decr tiles to skip
+    items_to_skip -= Yk*num_tiles*Xf
+
+    ############### X
+    # X pos, factoring in num tiles
+    Xk = int(items_to_skip/num_tiles)
+    # compute X's new start pos
+    Xns = ns('x',Xk)
+    # decr tiles to skip
+    items_to_skip -= Xk*num_tiles
+
+    
+    
+    #chunks_to_skip = args['items_to_skip']
+    #count_in_offset = 0
+
+    # for t in range_('t'):
+    #     for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
+    #         for y in range_('y'):
+    #             for x in range_('x'):
+
+    #                 if chunks_to_skip > 0:
+    #                     chunks_to_skip -= 1
+    #                     continue
+
+    #                 if count_in_offset == 0:
+    #                     print("Finished skipping chunks")
+
+    #                 chunk_x = int(x / tile_size('x'))
+    #                 chunk_y = int(y / tile_size('y'))
+    #                 chunk_z = int(z / args['z_chunk_size'])
+    #                 chunk_key = hashed_key(1,  # num of items
+    #                                        args['project_info'][0],
+    #                                        args['project_info'][1],
+    #                                        args['project_info'][2],
+    #                                        args['resolution'],
+    #                                        chunk_x,
+    #                                        chunk_y,
+    #                                        chunk_z,
+    #                                        t)
+
+    #                 count_in_offset += 1
+    #                 if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
+    #                     return  # end the generator
+
+    #                 cuboids = []
+
+    #                 # Currently, only allow ingest for time sample 0.
+    #                 t = 0
+    #                 lookup_key = lookup_key_from_chunk_key(chunk_key)
+    #                 res = resolution_from_chunk_key(chunk_key)
+
+    #                 for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
+    #                     for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
+    #                         for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
+    #                             #morton = XYZMorton(
+    #                                 #[(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
+    #                             morton = '999999'
+    #                             object_key = generate_object_key(lookup_key, res, t, morton)
+    #                             new_cuboid = {
+    #                                 "x": chunk_offset_x,
+    #                                 "y": chunk_offset_y,
+    #                                 "z": chunk_offset_z,
+    #                                 "key": object_key
+    #                             }
+    #                             cuboids.append(new_cuboid)
+
+    #                 msg = {
+    #                     'chunk_key': chunk_key,
+    #                     'cuboids': cuboids,
+    #                 }
+
+    #                 #yield json.dumps(msg)
+    #                 return msg
 
 if __name__ == "__main__":
     args = {
