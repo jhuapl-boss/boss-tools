@@ -42,15 +42,16 @@ def handler(args, context):
             'x_tile_size': 0,
 
             'y_start': 0,
-            'y_stop': 0
+            'y_stop': 0,
             'y_tile_size': 0,
 
             'z_start': 0,
-            'z_stop': 0
+            'z_stop': 0,
             'z_tile_size': 0,
 
-            'z_chunk_size': 64, or other possible number
-            'MAX_NUM_ITEMS_PER_LAMBDA': 20000
+            'z_chunk_size': 64,  # or other possible number
+            'MAX_NUM_ITEMS_PER_LAMBDA': 20000,
+            'items_to_skip': 0    # number of chunks to skip
         }
 
     Returns:
@@ -156,7 +157,7 @@ def create_messages(args):
     """Create all of the tile messages to be enqueued.  Currently not support t extent.
 
     Args:
-        args (dict): Same arguments as populate_upload_queue()
+        args (dict): Same arguments as handler()
 
     Returns:
         list: List of strings containing Json data

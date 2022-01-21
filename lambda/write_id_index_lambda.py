@@ -6,13 +6,10 @@
 #
 # It expects to get from events dictionary
 # {
-#   'id_index_table': ...,
-#   's3_index_table': ...,
-#   'id_count_table': ...,
-#   'cuboid_bucket': ...,
-#   'id_index_new_chunk_threshold': ...,
+#   spdb config object
+#   'config': {... },
 #   'cuboid_object_key': '...',
-#   'id_group': '...',
+#   'ids': '...',
 #   'version': '...',
 #   'write_id_index_status': {
 #       'done': False,
@@ -22,11 +19,9 @@
 # }
 
 import botocore
-from bossutils.aws import get_region
-import json
+import os
 import random
 from spdb.spatialdb.object_indices import ObjectIndices
-from time import sleep
 
 BASE_DELAY_TIME_SECS = 5
 
@@ -70,24 +65,29 @@ class DynamoClientError(Exception):
 
 
 def handler(event, context):
-    id_index_table = event['id_index_table']
-    s3_index_table = event['s3_index_table']
-    id_count_table = event['id_count_table']
-    cuboid_bucket = event['cuboid_bucket']
+    spdb_obj_store_cfg = event['config']['object_store_config']
+    id_index_table = spdb_obj_store_cfg['id_index_table']
+    s3_index_table = spdb_obj_store_cfg['s3_index_table']
+    id_count_table = spdb_obj_store_cfg['id_count_table']
+    cuboid_bucket = spdb_obj_store_cfg['cuboid_bucket']
 
     write_id_index_status = event['write_id_index_status']
 
-    id_index_new_chunk_threshold = (event['id_index_new_chunk_threshold'])
+    id_index_new_chunk_threshold = (spdb_obj_store_cfg['id_index_new_chunk_threshold'])
 
+    region = os.environ['AWS_REGION']
     obj_ind = ObjectIndices(
-        s3_index_table, id_index_table, id_count_table, cuboid_bucket, 
-        get_region())
+        s3_index_table, id_index_table, id_count_table, cuboid_bucket, region)
+
+    # Track which ids successfully updated.
+    done_ids = set()
 
     try:
-        for obj_id in event['id_group']:
+        for obj_id in event['ids']:
             obj_ind.write_id_index(
                 id_index_new_chunk_threshold, 
                 event['cuboid_object_key'], obj_id, event['version'])
+            done_ids.add(obj_id)
         write_id_index_status['done'] = True
     except botocore.exceptions.ClientError as ex:
         # Probably had a throttle or a ConditionCheckFailed.
@@ -99,6 +99,8 @@ def handler(event, context):
             raise DynamoClientError(msg) from ex
         event['result'] = str(ex)
         prep_for_retry(write_id_index_status)
+
+    event['ids'] = [i for i in event['ids'] if i not in done_ids]
 
     return event
 

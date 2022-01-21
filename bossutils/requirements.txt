@@ -1,0 +1,4 @@
+boto3
+botocore
+hvac>=0.8.1
+requests
