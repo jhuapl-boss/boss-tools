@@ -274,6 +274,7 @@ def create_messages(args):
 
                     if chunks_to_skip > 0:
                         chunks_to_skip -= 1
+                        continue
                     
                     if count_in_offset == 0:
                             print("**** Finished skipping chunks ****\n")
