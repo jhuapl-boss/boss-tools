@@ -282,33 +282,19 @@ def create_messages(args):
                     if count_in_offset == 0:
                             print("**** Finished skipping chunks ****\n")
 
-    #chunks_to_skip = args['items_to_skip']
-    #count_in_offset = 0
-
-    # for t in range_('t'):
-    #     for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
-    #         for y in range_('y'):
-    #             for x in range_('x'):
-
-    #                 if chunks_to_skip > 0:
-    #                     chunks_to_skip -= 1
-    #                     continue
-
-    #                 if count_in_offset == 0:
-    #                     print("Finished skipping chunks")
-
-    #                 chunk_x = int(x / tile_size('x'))
-    #                 chunk_y = int(y / tile_size('y'))
-    #                 chunk_z = int(z / args['z_chunk_size'])
-    #                 chunk_key = hashed_key(1,  # num of items
-    #                                        args['project_info'][0],
-    #                                        args['project_info'][1],
-    #                                        args['project_info'][2],
-    #                                        args['resolution'],
-    #                                        chunk_x,
-    #                                        chunk_y,
-    #                                        chunk_z,
-    #                                        t)
+    
+                    chunk_x = int(x / tile_size('x'))
+                    chunk_y = int(y / tile_size('y'))
+                    chunk_z = int(z / args['z_chunk_size'])
+                    chunk_key = hashed_key(1,  # num of items
+                                           args['project_info'][0],
+                                           args['project_info'][1],
+                                           args['project_info'][2],
+                                           args['resolution'],
+                                           chunk_x,
+                                           chunk_y,
+                                           chunk_z,
+                                           t)
 
     #                 count_in_offset += 1
     #                 if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
