@@ -1,11 +1,11 @@
 from turtle import title
-#import boto3
+import boto3
 import json
 import time
 import hashlib
 import pprint
 import math
-#from spdb.c_lib.ndlib import XYZMorton
+from spdb.c_lib.ndlib import XYZMorton
 
 
 class FailedToSendMessages(Exception):
@@ -310,9 +310,8 @@ def create_messages(args):
                     for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
                         for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
                             for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
-                                #morton = XYZMorton
-                                morton = 90000
-                                    
+                                morton = XYZMorton(
+                                    [(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
                                 object_key = generate_object_key(lookup_key, res, t, morton)
                                 new_cuboid = {
                                     "x": chunk_offset_x,
@@ -326,36 +325,5 @@ def create_messages(args):
                         'cuboids': cuboids,
                     }
 
-    #                 #yield json.dumps(msg)
-                    return msg
+                    yield json.dumps(msg)
 
-if __name__ == "__main__":
-    args = {
-            'job_id': '',
-            'upload_queue': 'ARN',
-            'ingest_queue': 'ARN',
-
-            'resolution': 0,
-            'project_info': ['dyer', 'null', 'null'],
-
-            't_start': 230,
-            't_stop': 350,
-            't_tile_size': 15,
-
-            'x_start': 230,
-            'x_stop': 350,
-            'x_tile_size': 15,
-
-            'y_start':230,
-            'y_stop': 350,
-            'y_tile_size': 15,
-
-            'z_start': 230,
-            'z_stop': 1500,
-            'z_tile_size': 15,
-
-            'z_chunk_size': 64, #or other possible number
-            'MAX_NUM_ITEMS_PER_LAMBDA': 20000,
-            'items_to_skip': 0  
-        }
-    print(create_messages(args))
