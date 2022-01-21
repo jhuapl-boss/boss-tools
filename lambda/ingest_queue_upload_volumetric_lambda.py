@@ -229,7 +229,7 @@ def create_messages(args):
     Tns = ns('t',Tk)
     #decr tiles to skip
     items_to_skip -= Tk*Xf*Yf*Zf
-
+    
     ############### Z
     # Z pos, factoring in X, Y
     Zk = int(items_to_skip/(args['z_chunk_size']*Xf*Yf))
@@ -257,8 +257,31 @@ def create_messages(args):
     # decr tiles to skip
     items_to_skip -= Xk*num_tiles
 
-    
-    
+    #######################################
+    # 
+    #  Now that we've computed the new start values (Tns, Zns, Yns, Xns) and the items_to_skip,
+    # ... let's begin our "efficient" LOOPING! 
+    #
+
+    #first, initialize vars 
+    num = 0 
+    bFirst = True
+    count_in_offset = 0 
+    chunks_to_skip = args['items_to_skip']
+
+    for t in new_range('t', Tns, bFirst):
+        for z in new_range_z(Zns, bFirst):
+             #Factor in Z chunk size
+            num_of_tiles = min(args['z_chunk_size'], args['z_stop'] - z)
+            for y in new_range('y', Yns, bFirst):
+                for x in new_range('x', Xns, bFirst):
+
+                    if chunks_to_skip > 0:
+                        chunks_to_skip -= 1
+                    
+                    if count_in_offset == 0:
+                            print("**** Finished skipping chunks ****\n")
+
     #chunks_to_skip = args['items_to_skip']
     #count_in_offset = 0
 
@@ -330,20 +353,20 @@ if __name__ == "__main__":
             'resolution': 0,
             'project_info': ['dyer', 'null', 'null'],
 
-            't_start': 0,
-            't_stop': 10,
+            't_start': 230,
+            't_stop': 350,
             't_tile_size': 15,
 
-            'x_start': 0,
-            'x_stop': 10,
+            'x_start': 230,
+            'x_stop': 350,
             'x_tile_size': 15,
 
-            'y_start': 0,
-            'y_stop': 10,
+            'y_start':230,
+            'y_stop': 350,
             'y_tile_size': 15,
 
-            'z_start': 0,
-            'z_stop': 10,
+            'z_start': 230,
+            'z_stop': 1500,
             'z_tile_size': 15,
 
             'z_chunk_size': 64, #or other possible number
