@@ -1,4 +1,3 @@
-from turtle import title
 import boto3
 import json
 import time
@@ -152,9 +151,6 @@ def generate_object_key(lookup_key, resolution, time_sample, morton_id):
     hash_str = hashlib.md5(base_key.encode()).hexdigest()
 
     return "{}&{}".format(hash_str, base_key)
-
-def test():
-    print("Test")
 
 def create_messages(args):
     """Create all of the tile messages to be enqueued.  Currently not support t extent.
