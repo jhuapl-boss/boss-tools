@@ -296,39 +296,38 @@ def create_messages(args):
                                            chunk_z,
                                            t)
 
-    #                 count_in_offset += 1
-    #                 if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
-    #                     return  # end the generator
+                    count_in_offset += 1
+                    if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
+                        return  # end the generator
 
-    #                 cuboids = []
+                    cuboids = []
 
-    #                 # Currently, only allow ingest for time sample 0.
-    #                 t = 0
-    #                 lookup_key = lookup_key_from_chunk_key(chunk_key)
-    #                 res = resolution_from_chunk_key(chunk_key)
+                    # Currently, only allow ingest for time sample 0.
+                    t = 0
+                    lookup_key = lookup_key_from_chunk_key(chunk_key)
+                    res = resolution_from_chunk_key(chunk_key)
 
-    #                 for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
-    #                     for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
-    #                         for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
-    #                             #morton = XYZMorton(
-    #                                 #[(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
-    #                             morton = '999999'
-    #                             object_key = generate_object_key(lookup_key, res, t, morton)
-    #                             new_cuboid = {
-    #                                 "x": chunk_offset_x,
-    #                                 "y": chunk_offset_y,
-    #                                 "z": chunk_offset_z,
-    #                                 "key": object_key
-    #                             }
-    #                             cuboids.append(new_cuboid)
-
-    #                 msg = {
-    #                     'chunk_key': chunk_key,
-    #                     'cuboids': cuboids,
-    #                 }
+                    for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
+                        for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
+                            for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
+                                #morton = XYZMorton
+                                morton = 90000
+                                    
+                                object_key = generate_object_key(lookup_key, res, t, morton)
+                                new_cuboid = {
+                                    "x": chunk_offset_x,
+                                    "y": chunk_offset_y,
+                                    "z": chunk_offset_z,
+                                    "key": object_key
+                                }
+                                cuboids.append(new_cuboid)
+                    msg = {
+                        'chunk_key': chunk_key,
+                        'cuboids': cuboids,
+                    }
 
     #                 #yield json.dumps(msg)
-    #                 return msg
+                    return msg
 
 if __name__ == "__main__":
     args = {
