@@ -20,35 +20,40 @@ CUBOID_Z = 16
 
 def handler(args, context):
     """Populate the ingest upload SQS Queue with tile information
+
     Note: This activity will clear the upload queue of any existing
           messages
+
     Args:
         args: {
             'job_id': '',
             'upload_queue': ARN,
             'ingest_queue': ARN,
+
             'resolution': 0,
             'project_info': [col_id, exp_id, ch_id],
+
             't_start': 0,
             't_stop': 0,
             't_tile_size': 0,
+
             'x_start': 0,
             'x_stop': 0,
             'x_tile_size': 0,
+
             'y_start': 0,
             'y_stop': 0,
             'y_tile_size': 0,
+
             'z_start': 0,
             'z_stop': 0,
             'z_tile_size': 0,
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
             'z_chunk_size': 64,  # or other possible number
             'MAX_NUM_ITEMS_PER_LAMBDA': 20000,
             'items_to_skip': 0    # number of chunks to skip
         }
+
     Returns:
         int: Number of messages put into the queue
     """
@@ -102,9 +107,12 @@ def handler(args, context):
 def lookup_key_from_chunk_key(chunk_key):
     """
     breaks out the lookup_key from the chunk_key.
+
     Args:
         chunk_key (str): volumetric chunk key = hash&num_items&col_id&exp_id&ch_idres&x&y&z"
+
     Returns (str): lookup_key col_id&exp_id&ch_id
+
     """
     parts = chunk_key.split('&')
     lookup_parts = parts[2:5]
@@ -114,9 +122,12 @@ def lookup_key_from_chunk_key(chunk_key):
 def resolution_from_chunk_key(chunk_key):
     """
     breaks out the resolution from the chunk_key.
+
     Args:
         chunk_key (str): volumetric chunk key = hash&num_items&col_id&exp_id&ch_idres&x&y&z"
+
     Returns (str): resolution
+
     """
     parts = chunk_key.split('&')
     return parts[5]
@@ -125,12 +136,15 @@ def resolution_from_chunk_key(chunk_key):
 def generate_object_key(lookup_key, resolution, time_sample, morton_id):
     """
     Generates an object key assumes iso=False.  Based on spdb.spatialdb.object.AWSObject.generate_object_key()
+
     Args:
         lookup_key (str): lookup key collection_id&experiment_id&channel_id
         resolution (int or str): resolution level of the object
         time_sample (int or str): time sample number
         morton_id (int or str): morton_id
+
     Returns:
+
     """
     base_key = '{}&{}&{}&{}'.format(lookup_key, resolution, time_sample, morton_id)
 
@@ -141,8 +155,10 @@ def generate_object_key(lookup_key, resolution, time_sample, morton_id):
 
 def create_messages(args):
     """Create all of the tile messages to be enqueued.  Currently not support t extent.
+
     Args:
         args (dict): Same arguments as handler()
+
     Returns:
         list: List of strings containing Json data
     """
@@ -290,12 +306,11 @@ def create_messages(args):
                     res = resolution_from_chunk_key(chunk_key)
 
                     for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
-                        print(chunk_offset_z)
                         for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
                             for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
+                                morton = '999999'
                                 #morton = XYZMorton(
                                     #[(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
-                                morton = '999999'
                                 object_key = generate_object_key(lookup_key, res, t, morton)
                                 new_cuboid = {
                                     "x": chunk_offset_x,
@@ -308,41 +323,6 @@ def create_messages(args):
                         'chunk_key': chunk_key,
                         'cuboids': cuboids,
                     }
-                    print(msg)
-                    #yield json.dumps(msg)
-                    return msg
-if __name__ == "__main__":
-    for t_stop in [1, 3]:
-            for z_stop in [20, 33]:
-                for y_stop in [2560, 2048, 2052]:
-                    for x_stop in [2048, 2560, 1028]:
-                        args = {
-                            "upload_sfn": "IngestUpload",
-                            "x_start": 0,
-                            "x_stop": x_stop,
-                            "y_start": 0,
-                            "y_stop": y_stop,
-                            "z_start": 0,
-                            "z_stop": z_stop,
-                            "t_start": 0,
-                            "t_stop": t_stop,
-                            "project_info": [
-                              "3",
-                              "3",
-                              "3"
-                            ],
-                            "ingest_queue": "https://queue.amazonaws.com/...",
-                            "job_id": 11,
-                            "upload_queue": "https://queue.amazonaws.com/...",
-                            "x_tile_size": 2560,
-                            "y_tile_size": 2048,
-                            "t_tile_size": 1,
-                            "z_tile_size": 1,
-                            "resolution": 0,
-                            "items_to_skip": 0,
-                            'MAX_NUM_ITEMS_PER_LAMBDA': 500000,
-                            'z_chunk_size': 64
-                        }
 
-                        create_messages(args)
+                    yield json.dumps(msg)
 
