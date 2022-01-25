@@ -83,6 +83,38 @@ class TestIngestQueueUploadLambda(unittest.TestCase):
                         # "Chunk --- tiles".
                         msg_set = set()
                         exp_msgs = create_expected_messages(args)
+                        for msg_json in exp_msgs:
+                            ct_key = generate_chunk_cuboids_key(msg_json)
+                            print(ct_key)
+                            # if ct_key not in msg_set:
+                            #     msg_set.add(ct_key)
+                            # else:
+                            #     print("Here")
+                                #self.fail("Set already contains key: ".format(ct_key))
+
+
+
+def generate_chunk_cuboids_key(msg_json):
+        """
+        Generate a key to track messages for testing.
+        Args:
+            msg_json (str): JSON message encoded as string intended for the upload queue.
+        Returns:
+            (str): Unique key identifying message.
+        """
+        msg = json.loads(msg_json)
+        parts = msg["chunk_key"].split("&", 6)
+        chunk = parts[-1].replace("&", "  ")
+        print(chunk)
+        #parts = msg["cuboids"][]["key"].split("&", 5) 
+        parts = msg["cuboids"]
+        cuboidLength = len(parts)
+        for i in range(cuboidLength):
+            print(parts[i])
+        
+        #tile = parts[-1].replace("&", "  ")
+        #print("{} --- {}".format(chunk, tile))
+        #return "{} --- {}".format(chunk, tile)
 
 def create_expected_messages(args):
         CUBOID_X = 512
@@ -161,8 +193,8 @@ def create_expected_messages(args):
                             'chunk_key': chunk_key,
                             'cuboids': cuboids,
                         }
-                        print(msg)
-                        #yield json.dumps(msg)
+                        #print(msg)
+                        yield json.dumps(msg)
 
 if __name__ == '__main__':
     unittest.main()
