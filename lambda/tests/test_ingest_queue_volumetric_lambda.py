@@ -105,12 +105,13 @@ def generate_chunk_cuboids_key(msg_json):
         msg = json.loads(msg_json)
         parts = msg["chunk_key"].split("&", 6)
         chunk = parts[-1].replace("&", "  ")
-        print(chunk)
-        #parts = msg["cuboids"][]["key"].split("&", 5) 
-        parts = msg["cuboids"]
-        cuboidLength = len(parts)
-        for i in range(cuboidLength):
-            print(parts[i])
+        print(msg)
+        # print(chunk)
+        # #parts = msg["cuboids"][]["key"].split("&", 5) 
+        # parts = msg["cuboids"]
+        # cuboidLength = len(parts)
+        # for i in range(cuboidLength):
+        #     print(parts[i]["key"])
         
         #tile = parts[-1].replace("&", "  ")
         #print("{} --- {}".format(chunk, tile))
