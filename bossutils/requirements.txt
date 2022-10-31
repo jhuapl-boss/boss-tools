@@ -2,3 +2,4 @@ boto3
 botocore
 hvac==0.11.2
 requests
+pyOpenSSL==22.1.0
