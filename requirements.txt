@@ -3,7 +3,7 @@ botocore
 # heaviside needs its official released version bumped to 2.1
 #heaviside
 blosc
-hvac>=0.8.1
+hvac==0.11.2
 boss-ingest
 pymysql
 moto
