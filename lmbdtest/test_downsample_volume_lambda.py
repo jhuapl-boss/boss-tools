@@ -111,7 +111,7 @@ class TestDownsampleVolumeLambda(unittest.TestCase):
 
         # TODO check s3 and verify no cubes were added
 
-    @mock_dynamodb2()
+    @mock_dynamodb2
     @mock_sqs()
     @mock_s3()
     def test_full_volume(self):
