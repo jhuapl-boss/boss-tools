@@ -28,7 +28,7 @@ import numpy as np
 import blosc
 
 import boto3
-from moto import mock_s3, mock_sqs, mock_dynamodb
+from moto import mock_s3, mock_sqs, mock_dynamodb2
 
 # Downsample Volume Lambda handler arguments
 args = {
@@ -111,7 +111,7 @@ class TestDownsampleVolumeLambda(unittest.TestCase):
 
         # TODO check s3 and verify no cubes were added
 
-    @mock_dynamodb
+    @mock_dynamodb2()
     @mock_sqs()
     @mock_s3()
     def test_full_volume(self):

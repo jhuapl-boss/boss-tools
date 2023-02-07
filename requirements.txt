@@ -8,5 +8,5 @@ blosc
 hvac>=0.11.2, <1.0.0
 boss-ingest
 pymysql
-moto
+moto==1.3.16
 pyOpenSSL==22.1.0

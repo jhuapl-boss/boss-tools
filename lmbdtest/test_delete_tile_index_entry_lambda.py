@@ -29,7 +29,7 @@ class TestDeleteTileIndexEntryLambda(unittest.TestCase):
         self.table_name = 'test.index.boss'
         self.region_name = 'us-east-1'
         table_params = self.get_tile_schema()
-        self.mock_dynamo = moto.mock_dynamodb()
+        self.mock_dynamo = moto.mock_dynamodb2()
         self.mock_dynamo.start()
 
         self.dynamo = boto3.client('dynamodb', region_name=self.region_name)
