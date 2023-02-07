@@ -57,7 +57,7 @@ ACCOUNT_ID = '123456789012'
 REGION = 'us-east-1'
 SESSION = boto3.session.Session(region_name = REGION)
 #SQS_URL = 'https://sqs.{}.amazonaws.com/{}/'.format(REGION, ACCOUNT_ID)
-SQS_URL = 'https://queue.amazonaws.com/{}/'.format(ACCOUNT_ID)
+SQS_URL = 'https://sqs.us-east-1.amazonaws.com/{}/'.format(ACCOUNT_ID)
 DOWNSAMPLE_QUEUE_URL = SQS_URL + 'downsample_queue'
 RECEIPT_HANDLE = '987654321'
 
