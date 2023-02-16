@@ -147,6 +147,57 @@ class S3DynamoDBTable(object):
 
 #### Main lambda logic ####
 
+def _conv(a, kernel):
+    """
+    Perform a kernel convolution.
+    Code based upon Gaussian blurring code at
+    https://stackoverflow.com/a/47298639/979255
+    Arguments:
+        a (np.array): 3D numpy array
+        kernel (np.array): A 3x3 array to apply
+             as the conv kernel
+    Returns:
+        np.array with the convolution applied
+    """
+    kernel = kernel / np.sum(kernel)
+    arraylist = []
+    for y in range(3):
+        temparray = np.copy(a)
+        temparray = np.roll(temparray, y - 1, axis=0)
+        for x in range(3):
+            temparray_X = np.copy(temparray)
+            temparray_X = np.roll(temparray_X, x - 1, axis=1)*kernel[y,x]
+            arraylist.append(temparray_X)
+    arraylist = np.array(arraylist)
+    arraylist_sum = np.sum(arraylist, axis=0)
+    return arraylist_sum
+
+def _downsample_xy_bilinear(a, dtype=None):
+    """
+    Downsample a 3D ZYX array using bilinear interpolation.
+    Arguments:
+         a (np.array): The numpy array to downsample.
+         dtype (str: None): The datatype to export. If none
+             is set, will use the dtype of a.
+    Returns:
+        np.array: The downsampled numpy array, with z-depth
+            the same as a and XY shape half that of a in
+            each dimension (the size of a[:, ::2,::2]).
+    """
+    assert int(a.shape[2] / 2) == a.shape[2] / 2, \
+        "Array shape[2] must be divisible by 2, but got " + str(a.shape[2])
+    assert int(a.shape[1] / 2) == a.shape[1] / 2, \
+        "Array shape[1] must be divisible by 2, but got " + str(a.shape[1])
+    out = np.zeros((a.shape[0], int(a.shape[1]/2), int(a.shape[2]/2)))
+    kernel = [
+        [1, 2, 1],
+        [2, 4, 2],
+        [1, 2, 1]
+    ]
+    for z in range(a.shape[0]):
+        out[z] = _conv([a[z]], kernel)[0, ::2,::2]
+    return out.astype(dtype or a.dtype)
+
 def downsample_volume(args, target, step, dim, use_iso_key):
     """Downsample a volume into a single cube
 
@@ -292,17 +343,7 @@ def downsample_cube(volume, cube, is_annotation):
         else:
             raise Exception("Unsupported type for image downsampling '{}'".format(volume.dtype))
 
-        for z in range(cube.dim.z):
-            # DP NOTE: For isotropic downsample this skips Z slices, instead of trying to merge them
-            slice = volume[z * volume.cubes.z, :, :]
-            image = Image.frombuffer(image_type,
-                                     (volume.shape.x, volume.shape.y),
-                                     slice.flatten(),
-                                     'raw',
-                                     image_type,
-                                     0, 1)
-
-            cube[z, :, :] = Buffer.asarray(image.resize((cube.shape.x, cube.shape.y), Image.BILINEAR))
+        cube[:,:,:] = _downsample_xy_bilinear(volume)
 
 def handler(args, context):
     def convert(args_, key):
@@ -323,4 +364,3 @@ def handler(args, context):
                           args['dim'],
                           args['use_iso_flag'])
         msg.delete()
-
