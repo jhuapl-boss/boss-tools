@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # lambdafcns contains symbolic links to lambda functions in boss-tools/lambda.
-# Since lambda is a reserved word, this allows importing from that folder 
+# Since lambda is a reserved word, this allows importing from that folder
 # without updating scripts responsible for deploying the lambda code.
 
 """
@@ -26,15 +26,13 @@ environment variables for the AWS keys should be set to a bogus value such as
 https://github.com/spulec/moto#how-do-i-avoid-tests-from-mutating-my-real-infrastructure
 """
 
-import os
 import sys
-import importlib
 import json
 import types
 import unittest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timedelta
-from bossutils.multidimensional import ceildiv
+from bossutils.multidimensional import ceildiv, XYZ
 from ._test_case_with_patch_object import TestCaseWithPatchObject
 
 import boto3
@@ -59,7 +57,7 @@ ACCOUNT_ID = '123456789012'
 REGION = 'us-east-1'
 SESSION = boto3.session.Session(region_name = REGION)
 #SQS_URL = 'https://sqs.{}.amazonaws.com/{}/'.format(REGION, ACCOUNT_ID)
-SQS_URL = 'https://queue.amazonaws.com/{}/'.format(ACCOUNT_ID)
+SQS_URL = 'https://sqs.us-east-1.amazonaws.com/{}/'.format(ACCOUNT_ID)
 DOWNSAMPLE_QUEUE_URL = SQS_URL + 'downsample_queue'
 RECEIPT_HANDLE = '987654321'
 
@@ -118,7 +116,7 @@ def make_check_queue(**kwargs):
 
     return check_queue
 
-# Mockup import for resolution_hierarchy and bossutils.multidimensional
+# Mockup import for resolution_hierarchy
 sys.modules['bossutils'] = MagicMock()
 sys.modules['bossutils'].aws.get_session.return_value = SESSION
 sys.modules['numpy'] = MagicMock()
@@ -127,14 +125,6 @@ sys.modules['spdb.c_lib'].ndlib.XYZMorton = XYZMorton
 sys.modules['spdb.c_lib.ndtype'] = MagicMock()
 sys.modules['spdb.c_lib.ndtype'].CUBOIDSIZE = CUBOIDSIZE()
 
-# Import the current verions of bossutils.multidimensional so that all of the
-# 3D math works correctly
-cur_dir = os.path.dirname(os.path.realpath(__file__))
-bossutils_dir = os.path.normpath(os.path.join(cur_dir, '..', '..', 'bossutils'))
-sys.path.insert(0, bossutils_dir)
-md = importlib.import_module('multidimensional')
-sys.modules['bossutils.multidimensional'] = md
-sys.path.pop(0)
 
 ################## END CUSTOM MOCKING ##################
 ########################################################
@@ -156,7 +146,7 @@ Always create / delete the queue or create it when creating the downsample_id an
 class TestDownsampleChannel(TestCaseWithPatchObject):
     @classmethod
     def setUpClass(cls):
-        # Import the code to be tested 
+        # Import the code to be tested
         import resolution_hierarchy as rh
         rh.POOL_SIZE = 2
         rh.MAX_LAMBDA_TIME = rh.timedelta()
@@ -181,7 +171,7 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         Returns:
             (dict)
         """
-        cube_size = md.XYZ(*CUBOIDSIZE()[0])
+        cube_size = XYZ(*CUBOIDSIZE()[0])
         frame_stop = cube_size * scale
         args = {
             # Only including keys that the Activity uses, the others are passed
@@ -223,16 +213,16 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         self.assertEqual(self.mock_create_queue.mock_calls, expected)
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(0,0,0),
-                        md.XYZ(2,2,2),
-                        md.XYZ(2,2,2))
+                        XYZ(0,0,0),
+                        XYZ(2,2,2),
+                        XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
         args = {
             'bucket_size': self.rh.BUCKET_SIZE,
             'args': self.get_args(type='isotropic')['msg'], # Need the original arguments
-            'step': md.XYZ(2,2,2),
-            'dim': md.XYZ(512, 512, 16),
+            'step': XYZ(2,2,2),
+            'dim': XYZ(512, 512, 16),
             'use_iso_flag': False,
             'dlq_arn': SQS_URL + 'downsample-dlq-1234',
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
@@ -266,16 +256,16 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         self.assertEqual(self.mock_create_queue.mock_calls, expected)
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(0,0,0),
-                        md.XYZ(2,2,2),
-                        md.XYZ(2,2,1))
+                        XYZ(0,0,0),
+                        XYZ(2,2,2),
+                        XYZ(2,2,1))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
         args = {
             'bucket_size': self.rh.BUCKET_SIZE,
             'args': self.get_args(type='anisotropic')['msg'], # Need the original arguments
-            'step': md.XYZ(2,2,1),
-            'dim': md.XYZ(512, 512, 16),
+            'step': XYZ(2,2,1),
+            'dim': XYZ(512, 512, 16),
             'use_iso_flag': False,
             'dlq_arn': SQS_URL + 'downsample-dlq-1234',
             'cubes_arn': SQS_URL + 'downsample-cubes-1234'
@@ -322,13 +312,13 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(0,0,0),
-                        md.XYZ(2,2,2),
-                        md.XYZ(2,2,1))
+                        XYZ(0,0,0),
+                        XYZ(2,2,2),
+                        XYZ(2,2,1))
         expected1 = call(SQS_URL + 'downsample-cubes-1234',
-                         md.XYZ(0,0,0),
-                         md.XYZ(2,2,2),
-                         md.XYZ(2,2,2))
+                         XYZ(0,0,0),
+                         XYZ(2,2,2),
+                         XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected, expected1])
 
         self.assertEqual(args2['msg']['x_stop'], 512)
@@ -345,9 +335,9 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(0,0,0),
-                        md.XYZ(3,3,3), # Scaled up from 2.5 to 3 cubes that will be downsampled
-                        md.XYZ(2,2,2))
+                        XYZ(0,0,0),
+                        XYZ(3,3,3), # Scaled up from 2.5 to 3 cubes that will be downsampled
+                        XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
         self.assertEqual(args2['msg']['x_stop'], 640) # 640 = 512 * 2.5 / 2 (scaled up volume and then downsampled)
@@ -370,9 +360,9 @@ class TestDownsampleChannel(TestCaseWithPatchObject):
         args2 = self.rh.downsample_channel(args1) # warning, will mutate args1 === args2
 
         expected = call(SQS_URL + 'downsample-cubes-1234',
-                        md.XYZ(8,8,76),
-                        md.XYZ(12,12,79),
-                        md.XYZ(2,2,2))
+                        XYZ(8,8,76),
+                        XYZ(12,12,79),
+                        XYZ(2,2,2))
         self.assertEqual(self.mock_populate_cubes.mock_calls, [expected])
 
         self.assertEqual(args2['msg']['x_start'], 2496)
@@ -473,9 +463,9 @@ class TestCubes(unittest.TestCase):
         rh.Pool = MultiprocessingPool
         cls.rh = rh
 
-        cls.start = md.XYZ(0,0,0)
-        cls.stop = md.XYZ(2,2,2)
-        cls.step = md.XYZ(1,1,1)
+        cls.start = XYZ(0,0,0)
+        cls.stop = XYZ(2,2,2)
+        cls.step = XYZ(1,1,1)
 
     def test_num_cubes(self):
         num = self.rh.num_cubes(self.start, self.stop, self.step)
@@ -487,14 +477,14 @@ class TestCubes(unittest.TestCase):
         self.assertEqual(type(gen), types.GeneratorType)
 
         cubes = list(gen)
-        expected = [md.XYZ(0,0,0),
-                    md.XYZ(0,0,1),
-                    md.XYZ(0,1,0),
-                    md.XYZ(0,1,1),
-                    md.XYZ(1,0,0),
-                    md.XYZ(1,0,1),
-                    md.XYZ(1,1,0),
-                    md.XYZ(1,1,1)]
+        expected = [XYZ(0,0,0),
+                    XYZ(0,0,1),
+                    XYZ(0,1,0),
+                    XYZ(0,1,1),
+                    XYZ(1,0,0),
+                    XYZ(1,0,1),
+                    XYZ(1,1,0),
+                    XYZ(1,1,1)]
 
         self.assertEqual(len(cubes), 8)
         self.assertEqual(cubes, expected)
@@ -502,7 +492,7 @@ class TestCubes(unittest.TestCase):
 class TestEnqueue(TestCaseWithPatchObject):
     @classmethod
     def setUpClass(cls):
-        # Import the code to be tested 
+        # Import the code to be tested
         import resolution_hierarchy as rh
         rh.POOL_SIZE = 2
         rh.MAX_LAMBDA_TIME = rh.timedelta()
@@ -512,11 +502,11 @@ class TestEnqueue(TestCaseWithPatchObject):
 
         cls.name = 'downsample-1234'
         cls.arn = SQS_URL + cls.name
-        cls.start = md.XYZ(0,0,0)
-        cls.stop = md.XYZ(2,2,2)
-        cls.step = md.XYZ(1,1,1)
-        cls.chunk = [md.XYZ(0,0,0),
-                     md.XYZ(1,1,1)]
+        cls.start = XYZ(0,0,0)
+        cls.stop = XYZ(2,2,2)
+        cls.step = XYZ(1,1,1)
+        cls.chunk = [XYZ(0,0,0),
+                     XYZ(1,1,1)]
 
     def test_populate(self):
         mock_enqueue_cubes = self.patch_object(self.rh, 'enqueue_cubes')
@@ -524,14 +514,14 @@ class TestEnqueue(TestCaseWithPatchObject):
 
         self.assertEqual(count, 8)
 
-        expected = [call(self.arn, [md.XYZ(0,0,0),
-                                    md.XYZ(0,0,1),
-                                    md.XYZ(0,1,0),
-                                    md.XYZ(0,1,1)]),
-                    call(self.arn, [md.XYZ(1,0,0),
-                                    md.XYZ(1,0,1),
-                                    md.XYZ(1,1,0),
-                                    md.XYZ(1,1,1)])]
+        expected = [call(self.arn, [XYZ(0,0,0),
+                                    XYZ(0,0,1),
+                                    XYZ(0,1,0),
+                                    XYZ(0,1,1)]),
+                    call(self.arn, [XYZ(1,0,0),
+                                    XYZ(1,0,1),
+                                    XYZ(1,1,0),
+                                    XYZ(1,1,1)])]
         self.assertEqual(mock_enqueue_cubes.mock_calls, expected)
 
     @patch.object(SESSION, 'resource')
@@ -730,7 +720,7 @@ class TestInvoke(TestCaseWithPatchObject):
 
 class TestQueue(TestCaseWithPatchObject):
     """
-    This class does not use SESSION defined at the top of this file because 
+    This class does not use SESSION defined at the top of this file because
     that session was created before moto mocks are put in place.
     """
 
@@ -748,7 +738,7 @@ class TestQueue(TestCaseWithPatchObject):
         Returns:
             (Session): Mocked boto3 Session.
         """
-        # Import the code to be tested 
+        # Import the code to be tested
         import resolution_hierarchy as rh
         rh.POOL_SIZE = 2
         rh.MAX_LAMBDA_TIME = rh.timedelta()
@@ -833,7 +823,7 @@ class TestQueue(TestCaseWithPatchObject):
 class TestThrottle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Import the code to be tested 
+        # Import the code to be tested
         import resolution_hierarchy as rh
         rh.POOL_SIZE = 2
         rh.MAX_LAMBDA_TIME = rh.timedelta()

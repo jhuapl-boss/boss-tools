@@ -7,36 +7,27 @@
 #              'state_config': {...},
 #              'object_store_config': {...}},
 #   'id_index_step_fcn': '...',
-#   'cuboid_object_key': '...',
-#   'version': '...',
-#   'fanout_id_writers_step_fcn': '...',
-#   'max_write_id_index_lambdas': int
+#   'cuboid': {
+#       'object-key': {'S': str},
+#       'version-node': {'N': str}, 
+#   },
+#}
 #
 # Output (additions/modifications):
 # {
-#   'config': {'kv_config': {...}
-#              'state_config': {...},
-#              'object_store_config': {...}},
-#   'id_index_step_fcn': '...',
-#   'fanout_id_writers_step_fcn': '...',        # arn
-#   'cuboid_object_key': '...',
-#   'version': '...'
-#   'num_ids': int,                     # Number of unique ids in cuboid.
-#   'max_write_id_index_lambdas': int,
-#   'finished': False
+#   'worker_ids': Array[int] - input to step function map state for spawning cuboid supervisors
+#   'num_ids_per_worker': int
 # }
 #
 # Step function should abort on these errors:
 #   NoSuchKey
 # }
 
-import boto3
-import botocore
-import json
-
-from bossutils.aws import get_region
-from spdb.spatialdb import SpdbError, ErrorCodes
+from math import ceil
+import os
 from spdb.spatialdb.object_indices import ObjectIndices
+
+NUM_IDS_PER_WORKER = 100
 
 def handler(event, context):
     """
@@ -56,19 +47,15 @@ def handler(event, context):
     id_count_table = event['config']['object_store_config']['id_count_table']
     cuboid_bucket = event['config']['object_store_config']['cuboid_bucket']
 
+    region = os.environ['AWS_REGION']
     obj_ind = ObjectIndices(
-        s3_index_table, id_index_table, id_count_table, cuboid_bucket, get_region())
+        s3_index_table, id_index_table, id_count_table, cuboid_bucket, region)
     ids_list = obj_ind.write_s3_index(
-        event['cuboid_object_key'], event['version'])
+        event['cuboid']['object-key']['S'], event['cuboid']['version-node']['N'])
 
-    return { 
-        'config': event['config'],
-        'id_index_step_fcn': event['id_index_step_fcn'],
-        'fanout_id_writers_step_fcn': event['fanout_id_writers_step_fcn'],
-        'cuboid_object_key': event['cuboid_object_key'],
-        'version': event['version'],
-        'max_write_id_index_lambdas': event['max_write_id_index_lambdas'],
-        'num_ids': len(ids_list),
-        'finished': False
-    }
+    num_ids = len(ids_list)
+    num_workers = ceil(num_ids/NUM_IDS_PER_WORKER)
+    event['worker_ids'] = [w_id for w_id in range(num_workers)]
+    event['num_ids_per_worker'] = NUM_IDS_PER_WORKER
 
+    return event

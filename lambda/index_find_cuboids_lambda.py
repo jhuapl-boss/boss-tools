@@ -25,19 +25,23 @@
 #   'status': {
 #       'done': bool,
 #       'lookup_key_n': ...     # (int): append this to the lookup_key when querying.  Should be zero, initially.
-#   }
+#   },
+#   'query_count': int
 # }
 #
 # Output (inputs plus changed/added keys):
 # {
 #   "finished": bool
 #   "obj_keys": [...]
+#   "num_batches": Number of batches of obj_keys for enqueuing to SQS
 #   "first_time": False
 #   "sfn_arn": "..."
+#   "query_count" += 1
 # }
 
 import boto3
 import json
+import math
 from spdb.spatialdb.object import LOOKUP_KEY_MAX_N
 
 # Attribute names in S3 index table.
@@ -47,6 +51,8 @@ VERSION_NODE = 'version-node'
 
 # Name of global secondary index in S3 index table.
 LOOKUP_KEY_INDEX = 'lookup-key-index'
+
+SQS_MAX_BATCH = 10
 
 def handler(event, context):
     table = event['config']['object_store_config']['s3_index_table']
@@ -58,7 +64,7 @@ def handler(event, context):
     query_args = {
         'TableName': table,
         'IndexName': LOOKUP_KEY_INDEX,
-        'KeyConditionExpression': '#lookupKey = :lookupKeyVal'.format(LOOKUP_KEY),
+        'KeyConditionExpression': '#lookupKey = :lookupKeyVal',
         'ExpressionAttributeNames': {
             '#lookupKey': LOOKUP_KEY,
             '#objKey': OBJ_KEY,
@@ -79,9 +85,17 @@ def handler(event, context):
     event['finished'] = 'Items' not in resp
 
     if 'Items' in resp:
-        event['obj_keys'] = resp['Items']
+        keys = resp['Items']
+        num_keys = len(keys)
+        num_batches = math.ceil(num_keys / SQS_MAX_BATCH)
+        event['obj_keys'] = [
+            keys[get_batch_indices(SQS_MAX_BATCH, num_keys, i)]
+                                   for i in range(num_batches)
+        ]
     else:
         event['obj_keys'] = []
+
+    event['num_batches'] = len(event['obj_keys'])
 
     # This key indicates that there are still cuboids left to retrieve.
     if 'LastEvaluatedKey' in resp:
@@ -96,7 +110,29 @@ def handler(event, context):
 
 
     # Give start step function lambda the arn of the step function to run.
-    event['sfn_arn'] = event['fanout_enqueue_cuboids_step_fcn']
+    event['sfn_arn'] = event['batch_enqueue_cuboids_step_fcn']
+
+    # Up the counter so the step function knows when it should spawn a new
+    # instance of itself to avoid exceeding the max number of state
+    # transitions.
+    event['query_count'] += 1
 
     return event
 
+
+def get_batch_indices(batch_size, total_num_keys, ind):
+    """
+    Get slice indices for the nth batch.
+
+    Args:
+        batch_size (int): How many ids go into each chunk.
+        total_num_keys (int): Total number of ids in cuboid.
+        ind (int): Which batch to generated indices for.
+
+    Returns:
+        (Slice)
+    """
+    begin = batch_size * ind
+    end = min(begin + batch_size, total_num_keys)
+
+    return slice(begin, end)

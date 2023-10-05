@@ -37,6 +37,7 @@ event: {
 
 from bossnames.bucket_object_tags import TAG_DELETE_KEY, TAG_DELETE_VALUE
 from bossnames.names import AWSNames
+import botocore
 import boto3
 import json
 import logging
@@ -48,6 +49,13 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logging.getLogger('boto3').setLevel(logging.ERROR)
 logging.getLogger('botocore').setLevel(logging.ERROR)
+
+class CuboidNotPresent(Exception):
+    """
+    Raised if cuboid to copy is missing from the bucket.  This happens when
+    the lambda is invoked more than once for the same cuboid and the first
+    lambda deletes the cuboid.
+    """
 
 def handler(event, context):
     """
@@ -90,12 +98,21 @@ def run(event, context):
     target_bucket = names.cuboid_bucket.s3
     region = event['region']
 
-    metadata = get_object_metadata(bucket, key, region)
+    try:
+        metadata = get_object_metadata(bucket, key, region)
+    except CuboidNotPresent:
+        logger.info('Cuboid not in bucket (probably deleted by another instance of this lambda)')
+        return
+
     logger.info('Metadata: {}'.format(metadata))
     ingest_job = metadata['ingest_job']
 
     logger.info('Copying {}'.format(key))
-    s3_copy(target_bucket, source, region)
+    try:
+        s3_copy(target_bucket, source, region)
+    except CuboidNotPresent:
+        logger.info('Cuboid not in bucket (probably deleted by another instance of this lambda)')
+        return
 
     logger.info('Updating S3 index table')
     s3_index = names.s3_index.ddb
@@ -112,6 +129,9 @@ def s3_copy(target_bucket, source, region):
         target_bucket (str): Name of S3 bucket.
         source (dict): Identify source cuboid, keys: 'Bucket', 'Key'.
         region (str): AWS region.
+
+    Raises:
+        (CuboidNotPresent): when cuboid isn't in the bucket.
     """
 
     # Append version (always 0 particularly since we're copying to a new
@@ -119,15 +139,20 @@ def s3_copy(target_bucket, source, region):
     versioned_key = '{}&0'.format(source['Key'])
 
     s3 = boto3.client('s3', region_name=region)
-    s3.copy_object(
-        Bucket=target_bucket,
-        CopySource=source,
-        Key=versioned_key
-    )
+    try:
+        s3.copy_object(
+            Bucket=target_bucket,
+            CopySource=source,
+            Key=versioned_key
+        )
+    except s3.exceptions.NoSuchKey:
+        raise CuboidNotPresent()
 
 def s3_mark_for_deletion(bucket, key, region):
     """
-    Delete the S3 object.
+    Mark the S3 object for deletion.  When the S3 life cycle policy runs, the
+    object will actually be deleted.  Currently, that's once a day at midnight,
+    UTC time.
 
     Args:
         bucket (str): S3 bucket name.
@@ -152,10 +177,19 @@ def get_object_metadata(bucket, key, region):
 
     Returns:
         (dict): Expect key: ingest_job
+
+    Raises:
+        (CuboidNotPresent): when cuboid isn't in the bucket.
     """
     s3 = boto3.resource('s3', region_name=region)
     obj = s3.Object(bucket, key)
-    return json.loads(obj.metadata['metadata'])
+    try:
+        metadata_str = obj.metadata['metadata']
+    except botocore.exceptions.ClientError as ex:
+        if ex.response['Error']['Code'] == '404':
+            raise CuboidNotPresent()
+        raise
+    return json.loads(metadata_str)
     
 def get_object_store_cfg(bucket, s3_index):
     """

@@ -1,5 +1,6 @@
 import boto3
 import json
+import math
 import time
 import hashlib
 import pprint
@@ -9,6 +10,7 @@ from spdb.c_lib.ndlib import XYZMorton
 class FailedToSendMessages(Exception):
     pass
 
+
 SQS_BATCH_SIZE = 10
 SQS_RETRY_TIMEOUT = 15
 
@@ -16,6 +18,7 @@ SQS_RETRY_TIMEOUT = 15
 CUBOID_X = 512
 CUBOID_Y = 512
 CUBOID_Z = 16
+
 
 def handler(args, context):
     """Populate the ingest upload SQS Queue with tile information
@@ -41,15 +44,16 @@ def handler(args, context):
             'x_tile_size': 0,
 
             'y_start': 0,
-            'y_stop': 0
+            'y_stop': 0,
             'y_tile_size': 0,
 
             'z_start': 0,
-            'z_stop': 0
+            'z_stop': 0,
             'z_tile_size': 0,
 
-            'z_chunk_size': 64, or other possible number
-            'MAX_NUM_ITEMS_PER_LAMBDA': 20000
+            'z_chunk_size': 64,  # or other possible number
+            'MAX_NUM_ITEMS_PER_LAMBDA': 20000,
+            'items_to_skip': 0    # number of chunks to skip
         }
 
     Returns:
@@ -94,7 +98,7 @@ def handler(args, context):
                 retry -= 1
                 if retry == 0:
                     print("Exhausted retry count, stopping")
-                    raise FailedToSendMessages(batch) # SFN will relaunch the activity
+                    raise FailedToSendMessages(batch)  # SFN will relaunch the activity
                 continue
             else:
                 break
@@ -152,25 +156,82 @@ def generate_object_key(lookup_key, resolution, time_sample, morton_id):
     return "{}&{}".format(hash_str, base_key)
 
 
-def create_messages(args):
-    """Create all of the tile messages to be enqueued.  Currently not support t extent.
-
-    Args:
-        args (dict): Same arguments as populate_upload_queue()
-
-    Returns:
-        list: List of strings containing Json data
+class LoopHelper:
+    """
+    Helper class that manages the triple nested loops that generate upload
+    messages for the 3D space.  It adjusts the iteration ranges for the x and
+    y axes for skipping the first n messages.  Messages are skipped because
+    multiple instances of this lambda generate messages in parallel.
     """
 
-    tile_size = lambda v: args[v + "_tile_size"]
-    # range_ does not work with z. Need to use z_chunk_size instead with volumetric ingest
-    range_ = lambda v: range(args[v + '_start'], args[v + '_stop'], tile_size(v))
+    def __init__(self, args: dict):
+        """
+        Constructor.
+
+        Args:
+            args (dict): Same as args taken by handler().
+        """
+        self.args = args
+
+        num_x_chunks = math.ceil((args["x_stop"] - args["x_start"]) / args["x_tile_size"])
+        num_y_chunks = math.ceil((args["y_stop"] - args["y_start"]) / args["y_tile_size"])
+
+        self.first_x_start = args["x_start"]
+        self.first_y_start = args["y_start"]
+        self.first_z_start = args["z_start"]
+
+        msgs_to_skip = args['items_to_skip']
+        if msgs_to_skip <= 0:
+            return
+
+        num_whole_xy_chunks_to_skip = int(msgs_to_skip / (num_y_chunks * num_x_chunks))
+        self.first_z_start = args["z_start"] + num_whole_xy_chunks_to_skip * args["z_chunk_size"]
+
+        msgs_to_skip -= num_whole_xy_chunks_to_skip * num_y_chunks * num_x_chunks
+        if msgs_to_skip <= 0:
+            return
+
+        num_y_chunks_to_skip = int(msgs_to_skip / num_x_chunks)
+        self.first_y_start = args["y_start"] + num_y_chunks_to_skip * args["y_tile_size"]
+
+        msgs_to_skip -= num_y_chunks_to_skip * num_x_chunks
+        if msgs_to_skip <= 0:
+            return
+
+        self.first_x_start = args["x_start"] + msgs_to_skip * args["x_tile_size"]
+
+    def range_x(self, first: bool):
+        if first:
+            return range(self.first_x_start, self.args["x_stop"], self.args["x_tile_size"])
+        return range(self.args["x_start"], self.args["x_stop"], self.args["x_tile_size"])
+
+    def range_y(self, first: bool):
+        if first:
+            return range(self.first_y_start, self.args["y_stop"], self.args["y_tile_size"])
+        return range(self.args["y_start"], self.args["y_stop"], self.args["y_tile_size"])
+
+    def range_z(self):
+        return range(self.first_z_start, self.args['z_stop'], self.args['z_chunk_size'])
+
+
+def create_messages(args):
+    """Create all of the tile messages to be enqueued.  Currently does not
+    support t extent.
+
+    Args:
+        args (dict): Same arguments as handler()
+
+    Returns:
+        generator: Generator of strings containing Json data
+    """
+
+    tile_size = lambda v: args[v + "_tile_size"]  # noqa: E731
 
     # DP NOTE: generic version of
     # BossBackend.encode_chunk_key and BiossBackend.encode.tile_key
     # from ingest-client/ingestclient/core/backend.py
     def hashed_key(*args):
-        base = '&'.join(map(str,args))
+        base = '&'.join(map(str, args))
 
         md5 = hashlib.md5()
         md5.update(base.encode())
@@ -178,61 +239,61 @@ def create_messages(args):
 
         return '&'.join([digest, base])
 
-    chunks_to_skip = args['items_to_skip']
-    count_in_offset = 0
-    for t in range_('t'):
-        for z in range(args['z_start'], args['z_stop'], args['z_chunk_size']):
-            for y in range_('y'):
-                for x in range_('x'):
+    try:
+        loop_helper = LoopHelper(args)
+    except ZeroDivisionError:
+        print("Aborting, got divide by zero so no messages to generate")
+        return
 
-                    if chunks_to_skip > 0:
-                        chunks_to_skip -= 1
-                        continue
+    # Currently, only allow ingest for time sample 0.
+    t = 0
+    msgs_emitted = 0
+    x_first = True
+    y_first = True
+    for z in loop_helper.range_z():
+        for y in loop_helper.range_y(y_first):
+            y_first = False
+            for x in loop_helper.range_x(x_first):
+                x_first = False
+                chunk_x = int(x / tile_size('x'))
+                chunk_y = int(y / tile_size('y'))
+                chunk_z = int(z / args['z_chunk_size'])
+                chunk_key = hashed_key(1,  # num of items
+                                       args['project_info'][0],
+                                       args['project_info'][1],
+                                       args['project_info'][2],
+                                       args['resolution'],
+                                       chunk_x,
+                                       chunk_y,
+                                       chunk_z,
+                                       t)
 
-                    if count_in_offset == 0:
-                        print("Finished skipping chunks")
+                cuboids = []
 
-                    chunk_x = int(x / tile_size('x'))
-                    chunk_y = int(y / tile_size('y'))
-                    chunk_z = int(z / args['z_chunk_size'])
-                    chunk_key = hashed_key(1,  # num of items
-                                           args['project_info'][0],
-                                           args['project_info'][1],
-                                           args['project_info'][2],
-                                           args['resolution'],
-                                           chunk_x,
-                                           chunk_y,
-                                           chunk_z,
-                                           t)
+                lookup_key = lookup_key_from_chunk_key(chunk_key)
+                res = resolution_from_chunk_key(chunk_key)
 
-                    count_in_offset += 1
-                    if count_in_offset > args['MAX_NUM_ITEMS_PER_LAMBDA']:
-                        return  # end the generator
+                for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
+                    for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
+                        for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
+                            morton = XYZMorton(
+                                [(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
+                            object_key = generate_object_key(lookup_key, res, t, morton)
+                            new_cuboid = {
+                                "x": chunk_offset_x,
+                                "y": chunk_offset_y,
+                                "z": chunk_offset_z,
+                                "key": object_key
+                            }
+                            cuboids.append(new_cuboid)
 
-                    cuboids = []
+                msg = {
+                    'chunk_key': chunk_key,
+                    'cuboids': cuboids,
+                }
 
-                    # Currently, only allow ingest for time sample 0.
-                    t = 0
-                    lookup_key = lookup_key_from_chunk_key(chunk_key)
-                    res = resolution_from_chunk_key(chunk_key)
+                yield json.dumps(msg)
 
-                    for chunk_offset_z in range(0, args["z_chunk_size"], CUBOID_Z):
-                        for chunk_offset_y in range(0, tile_size('y'), CUBOID_Y):
-                            for chunk_offset_x in range(0, tile_size('x'), CUBOID_X):
-                                morton = XYZMorton(
-                                    [(x+chunk_offset_x)/CUBOID_X, (y+chunk_offset_y)/CUBOID_Y, (z+chunk_offset_z)/CUBOID_Z])
-                                object_key = generate_object_key(lookup_key, res, t, morton)
-                                new_cuboid = {
-                                    "x": chunk_offset_x,
-                                    "y": chunk_offset_y,
-                                    "z": chunk_offset_z,
-                                    "key": object_key
-                                }
-                                cuboids.append(new_cuboid)
-
-                    msg = {
-                        'chunk_key': chunk_key,
-                        'cuboids': cuboids,
-                    }
-
-                    yield json.dumps(msg)
+                msgs_emitted += 1
+                if msgs_emitted >= args['MAX_NUM_ITEMS_PER_LAMBDA']:
+                    return  # end the generator
