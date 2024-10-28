@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # This lambda is for s3_flush for the cache
 #
 # It expects to get from events dictionary

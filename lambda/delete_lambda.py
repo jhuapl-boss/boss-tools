@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # This lambda calls the query-deletes-sfn.
 # in the process it will lookup the ARNs for query-deletes-sfn and delete-sfn-name and add them to the
 # data returned.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # Page in cuboid from S3 to the cache.
 #
 # Expects these keys from the events dictionary:

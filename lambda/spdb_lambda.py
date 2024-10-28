@@ -1,6 +1,6 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # This lambda tests that it can read from user-data, and access the cache_state_db
-# then import spdb and access the compiled c_lib
+# then import cspdb and access the compiled _lib
 #
 # {
 #   "lambda-name": "test",
